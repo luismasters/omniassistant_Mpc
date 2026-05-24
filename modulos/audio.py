@@ -6,16 +6,23 @@ import numpy as np
 import sounddevice as sd
 import scipy.io.wavfile as wav
 import pyttsx3
-import whisper
+from faster_whisper import WhisperModel # <-- ¡Guion bajo corregido!
 
-# Importamos las variables de configuración global
+# Importamos la configuración limpia y desacoplada
+from config import WHISPER_MODEL_SIZE, WHISPER_DEVICE, WHISPER_COMPUTE_TYPE
 from config import TECLA_HABLAR, FS_AUDIO
 
 engine_voceando = None
 hablando_actualmente = False
 
-print("Cargando modelo Whisper 'Medium' en GPU (CUDA)... Esperá un momento.")
-model = whisper.load_model("medium", device="cuda")
+print(f"🧠 [AUDIO REAL] Cargando Whisper '{WHISPER_MODEL_SIZE}' en {WHISPER_DEVICE.upper()} ({WHISPER_COMPUTE_TYPE})... Esperá un momento.")
+
+# Inicializamos el modelo optimizado con las variables del entorno
+model = WhisperModel(
+    WHISPER_MODEL_SIZE, 
+    device=WHISPER_DEVICE, 
+    compute_type=WHISPER_COMPUTE_TYPE
+)
 print("✅ Modelo de voz cargado.")
 
 def limpiar_texto_para_voz(texto):
@@ -95,20 +102,24 @@ def capturar_voz_micro():
             
     print("--- ✅ PROCESANDO VOZ ---")
     
-    # --- ACÁ ESTÁ EL PARCHE ---
     # Verificamos si realmente se grabó algo antes de intentar procesarlo
     if not audio_data:
         print("⚠️ [AUDIO] Grabación demasiado corta o vacía. Ignorando...")
         return ""
-    # --------------------------
 
     archivo_temporal = 'output.wav'
     grabacion = np.concatenate(audio_data, axis=0)
     wav.write(archivo_temporal, FS_AUDIO, grabacion)
     
-    # Le pasamos el archivo a Whisper
-    result = model.transcribe(archivo_temporal, language="es")
-    texto = result['text'].strip()
+    # --- NUEVA TRANSCRIPCIÓN CON FASTER-WHISPER ---
+    segmentos, info = model.transcribe(archivo_temporal, beam_size=5, language="es")
+    
+    texto_completo = ""
+    for segmento in segmentos:
+        texto_completo += segmento.text
+        
+    texto = texto_completo.strip()
+    # ----------------------------------------------
     
     # Limpiamos la basura temporal
     if os.path.exists(archivo_temporal):

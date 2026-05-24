@@ -32,7 +32,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False):
             "⚠️ REGLA DE COMANDOS (Escribí uno por línea al final):\n"
             "- Para páginas web, usá: navegar: sitio_web @ monitor (Ej: navegar: gmail.com @ 1)\n" # <-- LE DEVOLVEMOS ESTA REGLA
             "- Para mover ventanas, agregá @ y SOLO el número al final. Ej: abrir: brave @ 2\n"
-            "- Para apps o carpetas del sistema, usá: abrir: nombre_corto @ monitor (Ej: abrir: descargas @ 1)\n"
+            "- Para apps, juegos o carpetas, usá el nombre exacto: abrir: nombre_corto @ monitor (Ej: abrir: street fighter 6 @ 1)\n"
             "- Para cerrar, usá: cerrar: programa\n"
             "- Para crear carpetas o archivos vacíos, usá: crear_carpeta: ruta o crear_archivo: ruta.ext\n"
             "- Para eliminar archivos o carpetas, usá: eliminar: ruta\n"
