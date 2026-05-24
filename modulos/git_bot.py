@@ -48,15 +48,17 @@ def sincronizar_proyecto_git(ruta_proyecto, mensaje_commit="Subida automática v
         else:
             return f"Error conectando con la API de GitHub: {res.text}"
             
+        # (Acá termina el bloque de requests.post a la API...)
+            
         ejecutar_comando(f"git remote add origin {url_clon}", ruta_proyecto)
-        ejecutar_comando("git branch -M main", ruta_proyecto)
 
-    # 3. Guardar cambios y subir (Commit Automático)
+    # 3. Guardar cambios (Commit Automático) - ESTO VA PRIMERO AHORA
     print("⚙️ [GIT REAL] Preparando commit y subiendo a la nube...")
     ejecutar_comando("git add .", ruta_proyecto)
     ejecutar_comando(f'git commit -m "{mensaje_commit}"', ruta_proyecto)
     
-    # Forzamos el push a la rama main
+    # 4. Renombrar la rama y subir (Git necesita que el commit ya exista para esto)
+    ejecutar_comando("git branch -M main", ruta_proyecto)
     exito, stdout, err = ejecutar_comando("git push -u origin main", ruta_proyecto)
     
     if exito or "Everything up-to-date" in err or "Everything up-to-date" in stdout:

@@ -37,7 +37,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False):
             "- Para crear carpetas o archivos vacíos, usá: crear_carpeta: ruta o crear_archivo: ruta.ext\n"
             "- Para eliminar archivos o carpetas, usá: eliminar: ruta\n"
             "- Para LEER y analizar código o texto, usá: leer: nombre_archivo.ext (Ej: leer: comprobante.pdf)\n"
-            "- Para subir, guardar o sincronizar proyectos en GitHub, usá: github: ruta_carpeta (Ej: github: escritorio/OmniAssistant)\n"
+            "- Para subir, guardar o sincronizar proyectos en GitHub, usá SOLO el nombre de la carpeta: github: nombre_carpeta (Ej: github: OmniAssistant)\n"
             "⚠️ REGLA ANTIMENTIRAS (LECTURA): Si el usuario te pregunta por un detalle específico de un documento (fechas, montos, nombres) que ya leíste, NO confíes en tu memoria ni adivines. Estás obligada a volver a usar el comando 'leer: nombre_archivo.ext' para buscar el dato exacto fresco en el texto original.\n\n"
         )
 
