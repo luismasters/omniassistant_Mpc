@@ -7,6 +7,7 @@ import win32gui
 import win32con
 from screeninfo import get_monitors
 import win32process
+from thefuzz import process
 
 # =====================================================================
 # GESTIÓN MULTIMONITOR Y VENTANAS
@@ -48,34 +49,60 @@ def forzar_ventana_a_monitor(nombre_parcial_ventana, numero_monitor):
 # =====================================================================
 # BÚSQUEDA Y EJECUCIÓN DE PROGRAMAS Y CARPETAS
 # =====================================================================
-def buscar_programa_windows(nombre_programa):
-    print(f"🔍 [PYTHON REAL] Escaneando Windows buscando el programa: '{nombre_programa}'")
-    carpetas_busqueda = [
-        os.path.expandvars(r"%ProgramData%\Microsoft\Windows\Start Menu\Programs"),
-        os.path.expandvars(r"%AppData%\Microsoft\Windows\Start Menu\Programs"),
-        os.path.expanduser(r"~\Desktop"),
-        os.path.expanduser(r"~\OneDrive\Escritorio"),
+def radar_inteligente(nombre_buscado):
+    """
+    Escanea las carpetas principales buscando el programa que más se parezca
+    al nombre solicitado, tolerando errores o nombres incompletos.
+    """
+    usuario = os.path.expanduser("~")
+    
+    # ¡Acá incluí tu carpeta de juegos E: para que no la pierda de vista!
+    rutas_a_escanear = [
+        r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs",
+        os.path.join(usuario, r"AppData\Roaming\Microsoft\Windows\Start Menu\Programs"),
+        os.path.join(usuario, "Desktop"),
+        os.path.join(usuario, r"OneDrive\Escritorio"),
         r"E:\Mis_Juegos_Yiri" 
     ]
-    nombre_limpio = nombre_programa.lower().replace(".exe", "").replace(" ", "").strip()
-    
-    for carpeta in carpetas_busqueda:
-        if not os.path.exists(carpeta): continue
-        for raiz, directorios, archivos in os.walk(carpeta):
-            for archivo in archivos:
-                archivo_limpio = archivo.lower().replace(" ", "")
-                prohibidos = ["support", "soporte", "uninstall", "desinstalar", "help", "ayuda"]
-                if any(p in archivo_limpio for p in prohibidos):
-                    continue 
-                if (archivo_limpio.endswith(".lnk") or archivo_limpio.endswith(".exe") or archivo_limpio.endswith(".url")) and nombre_limpio in archivo_limpio:
-                    ruta_encontrada = os.path.join(raiz, archivo)
-                    print(f"✅ [PYTHON REAL] Programa encontrado en: {ruta_encontrada}")
-                    return ruta_encontrada
-    return None
+
+    archivos_encontrados = {} 
+
+    for ruta in rutas_a_escanear:
+        if os.path.exists(ruta):
+            for raiz, _, archivos in os.walk(ruta):
+                for archivo in archivos:
+                    archivo_baja = archivo.lower()
+                    # Filtramos los desinstaladores y ayudas
+                    prohibidos = ["support", "soporte", "uninstall", "desinstalar", "help", "ayuda"]
+                    if any(p in archivo_baja for p in prohibidos):
+                        continue
+                        
+                    if archivo_baja.endswith(('.lnk', '.exe', '.url')):
+                        nombre_limpio = os.path.splitext(archivo)[0]
+                        ruta_completa = os.path.join(raiz, archivo)
+                        archivos_encontrados[nombre_limpio] = ruta_completa
+
+    if not archivos_encontrados:
+        return None
+
+    nombres_posibles = list(archivos_encontrados.keys())
+    mejor_coincidencia, puntaje = process.extractOne(nombre_buscado, nombres_posibles)
+
+    print(f"🔍 [RADAR INTELIGENTE] Buscando: '{nombre_buscado}'")
+    print(f"📊 Mejor coincidencia: '{mejor_coincidencia}' (Similitud: {puntaje}%)")
+
+    # Tolerancia del 70% (un poquito más elástica por si le errás mucho al hablar)
+    if puntaje >= 70:
+        ruta_final = archivos_encontrados[mejor_coincidencia]
+        print(f"✅ [ÉXITO] Ruta encontrada: {ruta_final}")
+        return ruta_final
+    else:
+        print("❌ [FALLO] No se encontró nada lo suficientemente parecido.")
+        return None
+
 
 def buscar_carpeta_windows(nombre_carpeta):
     print(f"📂 [PYTHON REAL] Radar de carpetas activado buscando: '{nombre_carpeta}'")
-    # Zonas seguras y rápidas de escaneo
     zonas_busqueda = [
         os.path.expanduser(r"~\Desktop"),
         os.path.expanduser(r"~\Documents"),
@@ -87,7 +114,6 @@ def buscar_carpeta_windows(nombre_carpeta):
     for zona in zonas_busqueda:
         if not os.path.exists(zona): continue
         for raiz, directorios, archivos in os.walk(zona):
-            # Filtro ninja: ignoramos carpetas pesadas para no colgar la PC
             directorios[:] = [d for d in directorios if d not in ['.git', 'node_modules', 'venv', '__pycache__', 'AppData']]
             
             for dir_name in directorios:
@@ -144,7 +170,6 @@ def ejecutar_comando_sistema(comando_clave):
         objetivo = comando_clave.replace("navegar:", "").strip()
     elif "abrir:" in comando_clave:
         objetivo = comando_clave.replace("abrir:", "").strip()
-        # Escudo: Si nombra una web popular, empieza con http o termina en .com, ES NAVEGACIÓN
         if objetivo in ["youtube", "netflix", "amazon", "facebook", "twitch", "google", "github", "gmail"] or objetivo.startswith("http") or ".com" in objetivo:
             es_navegacion = True
     elif "cerrar:" in comando_clave:
@@ -208,8 +233,8 @@ def ejecutar_comando_sistema(comando_clave):
                 if num_monitor: threading.Thread(target=forzar_ventana_a_monitor, args=(objetivo, num_monitor), daemon=True).start()
                 return f"Trayendo ventana activa al Monitor."
 
-            # --- 4. Radar de Programas y Juegos ---
-            ruta_acceso = buscar_programa_windows(objetivo)
+            # --- 4. Radar Inteligente de Programas y Juegos ---
+            ruta_acceso = radar_inteligente(objetivo)
             if ruta_acceso:
                 os.startfile(ruta_acceso)
                 msg = f"Programa '{objetivo}' abierto."
