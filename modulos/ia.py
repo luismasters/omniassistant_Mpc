@@ -2,35 +2,122 @@ import datetime
 import winsound
 import google.generativeai as genai
 
+# Importaciones de configuración
 from config import GEMINI_API_KEY
-from modulos.archivos import crear_carpeta, crear_archivo, eliminar_elemento, leer_contenido_archivo
-from modulos.sistema import obtener_estado_pc, hardware_detectado, ejecutar_comando_sistema, obtener_ventanas_activas
+
+# Importaciones de módulos del sistema
+from modulos.archivos import crear_carpeta, crear_archivo, eliminar_elemento, leer_contenido_archivo, obtener_ruta_real
+from modulos.sistema import obtener_estado_pc, hardware_detectado, ejecutar_comando_sistema, obtener_ventanas_activas, buscar_carpeta_windows
 from modulos.busqueda import buscar_en_internet
 from modulos.audio import hablar_no_bloqueante
 from modulos.vision import capturar_pantalla
-from modulos.archivos import crear_carpeta, crear_archivo, eliminar_elemento, leer_contenido_archivo, obtener_ruta_real
 from modulos.git_bot import sincronizar_proyecto_git
-from modulos.sistema import obtener_estado_pc, hardware_detectado, ejecutar_comando_sistema, obtener_ventanas_activas, buscar_carpeta_windows
+from modulos.memoria import buscar_contexto, guardar_recuerdo # <-- EL CEREBRO RAG
+
 genai.configure(api_key=GEMINI_API_KEY)
+
 CONTEXTO_CHAT = []
+PENDIENTE_DE_GUARDADO = "" # <--- NUESTRA VARIABLE SEMÁFORO
 
 def enviar_a_gemini(texto_usuario, modo_voz=False):
-    global CONTEXTO_CHAT
+    global CONTEXTO_CHAT, PENDIENTE_DE_GUARDADO
+    
+    texto_usuario_lower = texto_usuario.lower().strip()
+
+    # =================================================================
+    # 1. EL SEMÁFORO DE CONFIRMACIÓN (Evaluador IA)
+    # =================================================================
+    if PENDIENTE_DE_GUARDADO:
+        print("🧠 [SEMÁFORO IA] Evaluando tu respuesta con Gemini...")
+        
+        # Le pedimos a Gemini que actúe como un juez de intenciones
+        evaluador = genai.GenerativeModel("gemini-flash-lite-latest")
+        prompt_juez = f"El usuario debe confirmar si aprueba guardar un dato. Su respuesta fue: '{texto_usuario}'. ¿El usuario está afirmando/aprobando o está negando/rechazando? Responde ÚNICAMENTE con la palabra CONFIRMADO o la palabra CANCELADO."
+        
+        try:
+            decision_ia = evaluador.generate_content(prompt_juez).text.strip().upper()
+        except Exception as e:
+            print(f"⚠️ Error en evaluador: {e}")
+            decision_ia = "CANCELADO" # Ante cualquier error, abortamos por seguridad
+            
+        if "CONFIRMADO" in decision_ia:
+            print("🧠 [MEMORIA] Inyectando en la bóveda ChromaDB...")
+            guardar_recuerdo(texto_a_guardar=PENDIENTE_DE_GUARDADO, etiqueta_tema="Manual")
+            msg = "¡Listo! El recuerdo ya está sellado en tu bóveda permanente."
+        else:
+            msg = "Entendido, descarto esa información. No se guardó nada."
+        
+        # Limpiamos la variable y le respondemos al usuario
+        PENDIENTE_DE_GUARDADO = ""
+        print(f"\n🤖 Cortana:\n---\n{msg}\n---")
+        if modo_voz: hablar_no_bloqueante(msg)
+        return # Cortamos la ejecución acá para no gastar más tokens
+
+    # =================================================================
+    # 2. EXTRACTOR INTELIGENTE (Fase de captura blindada)
+    # =================================================================
+    comandos_guardado = [
+        "memoriza esto", "memorizá esto", "memorices", "memorizar", "memoriza", "memorizá",
+        "guardar recuerdo", "recordá esto", "recuerda esto", "recordar", "recuerda", 
+        "acordate de", "acordate que", "guarda esto"
+    ]
+    
+    comando_detectado = None
+    comandos_guardado.sort(key=len, reverse=True) # Ordenamos de más largo a más corto
+    
+    for cmd in comandos_guardado:
+        if cmd in texto_usuario_lower:
+            comando_detectado = cmd
+            break
+            
+    if comando_detectado:
+        print("🧠 [EXTRACTOR IA] Limpiando y estructurando el dato para la bóveda...")
+        extractor = genai.GenerativeModel("gemini-flash-lite-latest")
+        prompt_extractor = f"El usuario quiere que memorices algo. Su frase fue: '{texto_usuario}'. Extrae ÚNICAMENTE la información relevante (ej: la lista de juegos, la clave, el dato específico) de forma clara y directa. Responde SOLO con el dato a guardar, sin agregar saludos, confirmaciones ni explicaciones adicionales."
+        
+        try:
+            dato_limpio = extractor.generate_content(prompt_extractor).text.strip()
+            if dato_limpio:
+                PENDIENTE_DE_GUARDADO = dato_limpio # Retenemos el dato limpio en el aire
+                msg = f"Detecté que querés memorizar esto: '{dato_limpio}'. ¿Me confirmás si lo guardo de forma permanente en tu bóveda?"
+                print(f"\n🤖 Cortana:\n---\n{msg}\n---")
+                if modo_voz: hablar_no_bloqueante(msg)
+                return # Abortamos la llamada al asistente general y esperamos tu respuesta
+        except Exception as e:
+            print(f"⚠️ Error al extraer dato: {e}")
+            # Si falla la extracción, no guardamos basura y dejamos que siga el flujo normal
+
+    # Si no estamos guardando nada, sigue el flujo normal...
     print("\n🧠 PENSANDO (Gemini)...")
     try:
         estado_en_vivo = obtener_estado_pc()
         fecha_hoy = datetime.datetime.now().strftime("%A, %d de %B de %Y") 
         ventanas_abiertas = obtener_ventanas_activas()
 
+        # =================================================================
+        # 3. EL RADAR INVISIBLE (Extracción automática)
+        # =================================================================
+        recuerdos = buscar_contexto(texto_usuario)
+        texto_memoria = ""
+        if recuerdos:
+            # recuerdos[0] contiene el texto puro que encontró ChromaDB
+            texto_memoria = f"[MEMORIA AUTOMÁTICA RECUPERADA]:\nEl usuario tiene este recuerdo en su bóveda que podría relacionarse con su petición actual:\n'{recuerdos[0]}'\n\n"
+
         contexto_sistema = (
             "tu nombre es: Cortana, un asistente de IA integrado a la PC de Luis (Técnico en Programación). Hablále como un colega, de forma súper natural y directa.\n"
             "⚠️ REGLA DE PERSONALIDAD: Sé breve (corto y al pie). NUNCA menciones la fecha actual, ni el uso de CPU/GPU, ni expliques tus procesos internos, a menos que Luis te lo pregunte específicamente. Actuá normal y relajado.\n\n"
             f"[CONTEXTO OCULTO PARA TUS CÁLCULOS] Fecha actual: {fecha_hoy} | Estado PC: {estado_en_vivo} | Hardware: {hardware_detectado['gpu']} / {hardware_detectado['cpu']}\n"
             f"[VENTANAS ABIERTAS AHORA MISMO]: {ventanas_abiertas}\n\n"
+            f"{texto_memoria}" # <--- ACÁ INYECTAMOS TU BÓVEDA VECTORIAL
+            "⚠️ REGLA DE MEMORIA Y VERDAD:\n"
+            "1. PRIORIDAD DE MEMORIA: Si recibes datos en [MEMORIA AUTOMÁTICA RECUPERADA], úsalos como fuente ÚNICA Y EXCLUSIVA para responder sobre datos personales (listas, claves, preferencias).\n"
+            "2. PROHIBICIÓN DE ALUCINAR: NUNCA inventes ni infieras datos personales. Si la información no está explícitamente en la memoria, admite honestamente: 'No tengo ese dato guardado'.\n"
+            "3. NATURALIDAD: Jamás digas 'según mis registros', 'en mi base de datos' o 'recuperé un recuerdo'. Habla como si recordaras las cosas naturalmente.\n"
+            "4. CONOCIMIENTO GENERAL: Para temas técnicos (programación, dudas del mundo), usa tu conocimiento general libremente.\n\n"
             "⚠️ REGLA DE VISIÓN: Si el usuario te pide que mires su pantalla o te pregunta por lo que está viendo, analiza la imagen que se adjunta de forma automática. No digas que 'viste una captura', actúa como si miraras su monitor directamente.\n\n"
             "⚠️ REGLA ESTRICTA DE RUTAS: NUNCA escribas rutas absolutas que empiecen con 'C:\\' ni inventes nombres de usuario. Si Luis te pide abrir una carpeta del sistema, usá su nombre corto ('descargas', 'escritorio', 'documentos'). Si te pide leer un archivo, usá solo el nombre del archivo (Ej: 'comprobante.pdf'), ya que el radar de Python se encarga de buscarlo en las carpetas automáticamente.\n\n"
             "⚠️ REGLA DE COMANDOS (Escribí uno por línea al final):\n"
-            "- Para páginas web, usá: navegar: sitio_web @ monitor (Ej: navegar: gmail.com @ 1)\n" # <-- LE DEVOLVEMOS ESTA REGLA
+            "- Para páginas web, usá: navegar: sitio_web @ monitor (Ej: navegar: gmail.com @ 1)\n" 
             "- Para mover ventanas, agregá @ y SOLO el número al final. Ej: abrir: brave @ 2\n"
             "- Para apps, juegos o carpetas, usá el nombre exacto: abrir: nombre_corto @ monitor (Ej: abrir: street fighter 6 @ 1)\n"
             "- Para cerrar, usá: cerrar: programa\n"
@@ -48,7 +135,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False):
 
         mensajes_para_gemini = list(CONTEXTO_CHAT)
         partes_usuario = [texto_usuario]
-        texto_usuario_lower = texto_usuario.lower()
         
         verbos_vision = ["captura", "capturá", "capturar"]
         objetivos_vision = ["pantalla", "monitor", "1", "2", "uno", "dos", "la 1", "el 1", "la 2", "el 2"]
@@ -126,7 +212,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False):
             elif "github:" in linea_limpia:
                 ruta_corta = linea_limpia[linea_limpia.find("github:") + 7:].strip()
                 
-                # Le sacamos la responsabilidad a Cortana y usamos el radar de Python
                 ruta_real = buscar_carpeta_windows(ruta_corta) 
                 
                 if ruta_real:
@@ -183,7 +268,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False):
                 print("🧠 [GEMINI REAL] Analizando el documento/código...")
                 contexto_lectura = (
                     f"Acabo de leer el archivo '{comando_leer_detectado}'. Este es su contenido real:\n\n"
-                    f"```\n{datos_archivo}\n```\n\n"
+                    f"--- INICIO DEL DOCUMENTO ---\n{datos_archivo}\n--- FIN DEL DOCUMENTO ---\n\n"
                     "Por favor, respondé a mi pregunta original revisando esta información. Si es código, marcá los errores. Si es un PDF o documento, resumilo o respondé mi duda."
                 )
                 mensajes_secundarios = list(CONTEXTO_CHAT)
