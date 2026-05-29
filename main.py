@@ -29,12 +29,17 @@ def actualizar_estado_ui(nuevo_texto, color="#00E5FF"):
         except:
             pass
 
-def agregar_mensaje_ui(remitente, texto, color="#FFFFFF"):
+# --- CAMBIO APLICADO: Soporte para Streaming de texto ---
+def agregar_mensaje_ui(remitente, texto, color="#FFFFFF", nueva_linea=True):
     if historial_chat and root:
         def actualizar():
             historial_chat.config(state=tk.NORMAL)
-            historial_chat.insert(tk.END, f"{remitente}: ", ("bold", color))
-            historial_chat.insert(tk.END, f"{texto}\n\n", (color,))
+            if remitente:
+                historial_chat.insert(tk.END, f"{remitente}: ", ("bold", color))
+            if texto:
+                historial_chat.insert(tk.END, texto, (color,))
+            if nueva_linea:
+                historial_chat.insert(tk.END, "\n\n")
             historial_chat.see(tk.END)
             historial_chat.config(state=tk.DISABLED)
         root.after(0, actualizar)
@@ -42,7 +47,7 @@ def agregar_mensaje_ui(remitente, texto, color="#FFFFFF"):
 def toggle_chat(event=None):
     global chat_expandido
     if not chat_expandido:
-        root.geometry("450x550") # Un poco más alto para asegurar espacio
+        root.geometry("450x550") 
         frame_chat.pack(fill="both", expand=True)
         chat_expandido = True
     else:
@@ -60,7 +65,6 @@ def procesar_envio_texto(event=None):
         entrada_chat.delete("1.0", tk.END)
         actualizar_estado_ui("🧠 Pensando...", "#FF00FF")
         
-        # Le pasamos agregar_mensaje_ui como puente (callback) a la IA
         threading.Thread(target=enviar_a_gemini, args=(texto, False, agregar_mensaje_ui), daemon=True).start()
         root.after(2000, lambda: actualizar_estado_ui("🔵 Cortana | En línea", "#00E5FF"))
     return "break" 
@@ -120,7 +124,6 @@ def motor_microfono():
                         os._exit(0)
                         
                     actualizar_estado_ui("🧠 Pensando...", "#FF00FF")
-                    # Le pasamos el callback al motor de voz también
                     enviar_a_gemini(texto_voz, modo_voz=True, ui_callback=agregar_mensaje_ui)
                     actualizar_estado_ui("🔵 Cortana | En línea", "#00E5FF")
                 else:
@@ -155,7 +158,6 @@ if __name__ == "__main__":
 
     frame_chat = tk.Frame(root, bg="#1e1e1e")
     
-    # IMPORTANTE: Ahora empaquetamos el input de texto PRIMERO abajo
     frame_input = tk.Frame(frame_chat, bg="#2d2d2d", padx=5, pady=5)
     frame_input.pack(fill="x", side=tk.BOTTOM)
     
@@ -166,7 +168,6 @@ if __name__ == "__main__":
     entrada_chat.pack(side=tk.LEFT, fill="x", expand=True)
     entrada_chat.bind("<Return>", procesar_envio_texto)
 
-    # LUEGO empaquetamos el historial arriba para que ocupe el resto del espacio libre
     historial_chat = scrolledtext.ScrolledText(
         frame_chat, bg="#121212", fg="#E0E0E0", font=("Segoe UI", 10),
         state=tk.DISABLED, wrap=tk.WORD, bd=0, padx=10, pady=10

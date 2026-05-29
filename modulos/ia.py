@@ -2,10 +2,7 @@ import datetime
 import winsound
 import google.generativeai as genai
 
-# Importaciones de configuración
 from config import GEMINI_API_KEY
-
-# Importaciones de módulos del sistema
 from modulos.archivos import crear_carpeta, crear_archivo, eliminar_elemento, leer_contenido_archivo, obtener_ruta_real
 from modulos.sistema import obtener_estado_pc, hardware_detectado, ejecutar_comando_sistema, obtener_ventanas_activas, buscar_carpeta_windows
 from modulos.busqueda import buscar_en_internet
@@ -24,9 +21,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
     
     texto_usuario_lower = texto_usuario.lower().strip()
 
-    # =================================================================
-    # 1. SEMÁFORO IA
-    # =================================================================
     if PENDIENTE_DE_GUARDADO:
         print("🧠 [SEMÁFORO IA] Evaluando tu respuesta con Gemini...")
         evaluador = genai.GenerativeModel("gemini-flash-lite-latest")
@@ -49,9 +43,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         if modo_voz: hablar_no_bloqueante(msg)
         return 
 
-    # =================================================================
-    # 2. EXTRACTOR INTELIGENTE
-    # =================================================================
     comandos_guardado = [
         "memoriza esto", "memorizá esto", "memorices", "memorizar", "memoriza", "memorizá",
         "guardar recuerdo", "recordá esto", "recuerda esto", "recordar", "recuerda", 
@@ -86,9 +77,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         recuerdos = buscar_contexto(texto_usuario)
         texto_memoria = f"[MEMORIA AUTOMÁTICA RECUPERADA]:\nEl usuario tiene este recuerdo en su bóveda:\n'{recuerdos[0]}'\n\n" if recuerdos else ""
 
-        # =================================================================
-        # REGLAS DEL SISTEMA BLINDADAS (AQUÍ ESTÁ LA MAGIA DEL DESEMPATE)
-        # =================================================================
         contexto_sistema = (
             "tu nombre es: Cortana, un asistente de IA integrado a la PC de Luis. Hablále como un colega, de forma súper natural y directa.\n"
             "⚠️ REGLA DE PERSONALIDAD: Sé breve. NUNCA menciones la fecha actual, ni expliques tus procesos internos.\n\n"
@@ -129,13 +117,16 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         
         respuesta_ia = ""
         print(f"\n🤖 Cortana dice:\n---")
+        
+        # --- CAMBIO APLICADO: Streaming en UI (Llamada 1) ---
+        if ui_callback: ui_callback("🤖 Cortana", "", "#00E5FF", nueva_linea=False)
         for chunk in response:
             if chunk.text:
                 print(chunk.text, end='', flush=True) 
                 respuesta_ia += chunk.text
+                if ui_callback: ui_callback("", chunk.text, "#00E5FF", nueva_linea=False)
         print("\n---")
-        
-        if ui_callback: ui_callback("🤖 Cortana", respuesta_ia, "#00E5FF")
+        if ui_callback: ui_callback("", "", "#00E5FF", nueva_linea=True)
         
         lineas = respuesta_ia.split('\n')
         reportes_acciones = []
@@ -184,9 +175,19 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 contexto_busqueda = f"Resultados de internet:\n{datos_encontrados}\n\nRespondé usando esta info."
                 mensajes_secundarios = list(CONTEXTO_CHAT) + [{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [respuesta_ia]}, {'role': 'user', 'parts': [contexto_busqueda]}]
                 segunda_respuesta = modelo_gemini.generate_content(mensajes_secundarios, stream=True)
-                respuesta_final = "".join([chunk.text for chunk in segunda_respuesta if chunk.text])
+                respuesta_final = ""
+                print(f"\n🤖 Cortana (Con datos de la Web):\n---")
                 
-                if ui_callback: ui_callback("🤖 Cortana (Web)", respuesta_final, "#00E5FF")
+                # --- CAMBIO APLICADO: Streaming en UI (Llamada Web) ---
+                if ui_callback: ui_callback("🤖 Cortana (Web)", "", "#00E5FF", nueva_linea=False)
+                for chunk in segunda_respuesta:
+                    if chunk.text:
+                        print(chunk.text, end='', flush=True) 
+                        respuesta_final += chunk.text
+                        if ui_callback: ui_callback("", chunk.text, "#00E5FF", nueva_linea=False)
+                print("\n---")
+                if ui_callback: ui_callback("", "", "#00E5FF", nueva_linea=True)
+                
                 if modo_voz: hablar_no_bloqueante(respuesta_final)
                 CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [respuesta_final]}])
 
@@ -200,9 +201,19 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 contexto_lectura = f"Contenido del archivo '{comando_leer_detectado}':\n{datos_archivo}\n\nRespondé usando esta info."
                 mensajes_secundarios = list(CONTEXTO_CHAT) + [{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [respuesta_ia]}, {'role': 'user', 'parts': [contexto_lectura]}]
                 segunda_respuesta = modelo_gemini.generate_content(mensajes_secundarios, stream=True)
-                respuesta_final = "".join([chunk.text for chunk in segunda_respuesta if chunk.text])
+                respuesta_final = ""
+                print(f"\n🤖 Cortana (Análisis de Documento):\n---")
                 
-                if ui_callback: ui_callback("🤖 Cortana (Doc)", respuesta_final, "#00E5FF")
+                # --- CAMBIO APLICADO: Streaming en UI (Llamada Doc) ---
+                if ui_callback: ui_callback("🤖 Cortana (Doc)", "", "#00E5FF", nueva_linea=False)
+                for chunk in segunda_respuesta:
+                    if chunk.text:
+                        print(chunk.text, end='', flush=True) 
+                        respuesta_final += chunk.text
+                        if ui_callback: ui_callback("", chunk.text, "#00E5FF", nueva_linea=False)
+                print("\n---")
+                if ui_callback: ui_callback("", "", "#00E5FF", nueva_linea=True)
+                
                 if modo_voz: hablar_no_bloqueante(respuesta_final)
                 CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [respuesta_final]}])
         else:
