@@ -301,7 +301,7 @@ def ejecutar_comando_sistema(comando_clave):
         return f"Error de ejecución: {e}"
 
 # =====================================================================
-# HARDWARE Y TELEMETRÍA
+# HARDWARE Y TELEMETRÍA (CORREGIDO)
 # =====================================================================
 def escanear_hardware_completo():
     try:
@@ -319,19 +319,27 @@ hardware_detectado = escanear_hardware_completo()
 def obtener_estado_pc_valores():
     cpu_uso = psutil.cpu_percent()
     memoria = psutil.virtual_memory()
-    gpu_uso, gpu_temp = 0, 0
+    gpu_temp = 0
+    gpu_vram_usada_gb = 0
     try:
-        res = subprocess.check_output("nvidia-smi --query-gpu=utilization.gpu,temperature.gpu --format=csv,noheader,nounits", shell=True, text=True).strip()
+        # CORRECCIÓN: Dejamos de pedir el % mentiroso de utilization, pedimos temp y Memoria de Video en MB
+        res = subprocess.check_output("nvidia-smi --query-gpu=temperature.gpu,memory.used --format=csv,noheader,nounits", shell=True, text=True).strip()
         if res:
             partes = res.split(',')
-            gpu_uso, gpu_temp = int(partes[0].strip()), int(partes[1].strip())
+            gpu_temp = int(partes[0].strip())
+            gpu_vram_usada_mb = int(partes[1].strip())
+            gpu_vram_usada_gb = round(gpu_vram_usada_mb / 1024, 1) # Lo pasamos a GB para que sea legible
     except: pass
-    return cpu_uso, memoria.percent, gpu_uso, gpu_temp
+    
+    # Devolvemos el VRAM en lugar del GPU usage % falso
+    return cpu_uso, memoria.percent, gpu_vram_usada_gb, gpu_temp 
 
 def obtener_estado_pc():
-    cpu, ram, g_uso, g_temp = obtener_estado_pc_valores()
+    cpu, ram_percent, gpu_vram, g_temp = obtener_estado_pc_valores()
     ram_gb = round(psutil.virtual_memory().used / (1024 ** 3), 1)
-    return f"CPU: {cpu}% | RAM: {ram}% ({ram_gb}GB) | GPU Uso: {g_uso}%, Temp: {g_temp}°C"
+    
+    # Ahora Cortana recibe la info real y precisa
+    return f"CPU: {cpu}% | RAM: {ram_percent}% ({ram_gb}GB) | GPU Temp: {g_temp}°C, VRAM: {gpu_vram}GB"
 
 def obtener_ventanas_activas():
     ventanas = buscar_todas_las_ventanas()
