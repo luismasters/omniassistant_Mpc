@@ -50,34 +50,35 @@ def forzar_ventana_a_monitor(nombre_parcial_ventana, numero_monitor):
 # BÚSQUEDA Y EJECUCIÓN DE PROGRAMAS Y CARPETAS
 # =====================================================================
 def radar_inteligente(nombre_buscado):
-    """
-    Escanea las carpetas principales buscando el programa que más se parezca
-    al nombre solicitado, tolerando errores o nombres incompletos.
-    """
     usuario = os.path.expanduser("~")
     
-    # ¡Acá incluí tu carpeta de juegos E: para que no la pierda de vista!
     rutas_a_escanear = [
+        os.path.expanduser(r"~\Desktop"),
+        os.path.expanduser(r"~\Downloads"),
+        os.path.expanduser(r"~\Documents"),
+        os.path.expanduser(r"~\OneDrive\Escritorio"),
+        os.path.expanduser(r"~\OneDrive\Descargas"),
+        os.path.expanduser(r"~\OneDrive\Documentos"),
         r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs",
         os.path.join(usuario, r"AppData\Roaming\Microsoft\Windows\Start Menu\Programs"),
-        os.path.join(usuario, "Desktop"),
-        os.path.join(usuario, r"OneDrive\Escritorio"),
         r"E:\Mis_Juegos_Yiri" 
     ]
 
     archivos_encontrados = {} 
+    carpetas_ignoradas = ["venv", ".git", "node_modules", "__pycache__", "obj", "bin"]
 
     for ruta in rutas_a_escanear:
         if os.path.exists(ruta):
-            for raiz, _, archivos in os.walk(ruta):
+            for raiz, directorios, archivos in os.walk(ruta):
+                directorios[:] = [d for d in directorios if d.lower() not in carpetas_ignoradas]
+                
                 for archivo in archivos:
                     archivo_baja = archivo.lower()
-                    # Filtramos los desinstaladores y ayudas
                     prohibidos = ["support", "soporte", "uninstall", "desinstalar", "help", "ayuda"]
                     if any(p in archivo_baja for p in prohibidos):
                         continue
                         
-                    if archivo_baja.endswith(('.lnk', '.exe', '.url')):
+                    if archivo_baja.endswith(('.lnk', '.exe', '.url', '.pdf', '.txt', '.docx', '.xlsx')):
                         nombre_limpio = os.path.splitext(archivo)[0]
                         ruta_completa = os.path.join(raiz, archivo)
                         archivos_encontrados[nombre_limpio] = ruta_completa
@@ -85,13 +86,13 @@ def radar_inteligente(nombre_buscado):
     if not archivos_encontrados:
         return None
 
+    nombre_buscado_limpio = os.path.splitext(nombre_buscado)[0]
     nombres_posibles = list(archivos_encontrados.keys())
-    mejor_coincidencia, puntaje = process.extractOne(nombre_buscado, nombres_posibles)
+    mejor_coincidencia, puntaje = process.extractOne(nombre_buscado_limpio, nombres_posibles)
 
-    print(f"🔍 [RADAR INTELIGENTE] Buscando: '{nombre_buscado}'")
+    print(f"🔍 [RADAR INTELIGENTE] Buscando: '{nombre_buscado_limpio}'")
     print(f"📊 Mejor coincidencia: '{mejor_coincidencia}' (Similitud: {puntaje}%)")
 
-    # Tolerancia del 70% (un poquito más elástica por si le errás mucho al hablar)
     if puntaje >= 70:
         ruta_final = archivos_encontrados[mejor_coincidencia]
         print(f"✅ [ÉXITO] Ruta encontrada: {ruta_final}")
@@ -100,14 +101,16 @@ def radar_inteligente(nombre_buscado):
         print("❌ [FALLO] No se encontró nada lo suficientemente parecido.")
         return None
 
-
 def buscar_carpeta_windows(nombre_carpeta):
     print(f"📂 [PYTHON REAL] Radar de carpetas activado buscando: '{nombre_carpeta}'")
+    usuario = os.path.expanduser("~")
     zonas_busqueda = [
         os.path.expanduser(r"~\Desktop"),
         os.path.expanduser(r"~\Documents"),
         os.path.expanduser(r"~\Downloads"),
-        os.path.expanduser(r"~\OneDrive\Escritorio")
+        os.path.expanduser(r"~\OneDrive\Escritorio"),
+        os.path.expanduser(r"~\OneDrive\Descargas"),
+        os.path.expanduser(r"~\OneDrive\Documentos")
     ]
     nombre_limpio = nombre_carpeta.lower().strip()
     
@@ -203,7 +206,7 @@ def ejecutar_comando_sistema(comando_clave):
         elif "abrir:" in comando_clave:
             if objetivo == "navegador": objetivo = "brave"
             
-            # --- 1. Atajos directos a tus carpetas del sistema ---
+            # 1. Atajos de Windows primero (para no buscar "descargas" por toda la PC)
             atajos_carpetas = {
                 "documentos": os.path.expanduser(r"~\Documents"),
                 "mis documentos": os.path.expanduser(r"~\Documents"),
@@ -216,44 +219,44 @@ def ejecutar_comando_sistema(comando_clave):
                 os.startfile(atajos_carpetas[objetivo])
                 return f"Carpeta '{objetivo}' abierta al instante."
 
-            # --- 2. Radar de Carpetas (Búsqueda dinámica) ---
-            ruta_carpeta = buscar_carpeta_windows(objetivo)
-            if ruta_carpeta:
-                os.startfile(ruta_carpeta)
-                return f"Carpeta '{objetivo}' encontrada y abierta."
-
-            # --- 3. Apertura de URL / Navegadores ---
+            # 2. Abrir URLs si las hay
             if url: 
                 destino = url if url.startswith("http") else f"https://{url}"
                 subprocess.Popen(f"start {objetivo} {destino}", shell=True)
                 if num_monitor: threading.Thread(target=forzar_ventana_a_monitor, args=(objetivo, num_monitor), daemon=True).start()
                 return f"Navegador {objetivo} abierto."
                 
+            # 3. Traer ventana al frente si ya está abierta
             if ventana_visible_existe(objetivo) and objetivo in ["brave", "chrome", "edge", "code", "visual studio code", "vscode", "vs code"]:
                 if num_monitor: threading.Thread(target=forzar_ventana_a_monitor, args=(objetivo, num_monitor), daemon=True).start()
                 return f"Trayendo ventana activa al Monitor."
 
-            # --- 4. Radar Inteligente de Programas y Juegos ---
+            # --- LA SOLUCIÓN: INVERSIÓN DE PRIORIDAD ---
+            # 4. AHORA SÍ: Primero buscamos si es un JUEGO o PROGRAMA real.
             ruta_acceso = radar_inteligente(objetivo)
             if ruta_acceso:
                 os.startfile(ruta_acceso)
                 msg = f"Programa '{objetivo}' abierto."
-            else:
-                try:
-                    if ":" in objetivo or "\\" in objetivo:
-                        os.startfile(objetivo)
-                    else:
-                        subprocess.Popen(f'"{objetivo}"', shell=True)
-                    msg = f"Programa '{objetivo}' ejecutado."
-                except Exception:
-                    return f"No se encontró ni la carpeta ni el programa '{objetivo}'."
-            
-            es_juego_steam = ruta_acceso and ruta_acceso.endswith(".url")
-            
-            if num_monitor and not es_juego_steam: 
-                threading.Thread(target=forzar_ventana_a_monitor, args=(objetivo, num_monitor), daemon=True).start()
-            
-            return msg
+                es_juego_steam = ruta_acceso and ruta_acceso.endswith(".url")
+                if num_monitor and not es_juego_steam: 
+                    threading.Thread(target=forzar_ventana_a_monitor, args=(objetivo, num_monitor), daemon=True).start()
+                return msg
+
+            # 5. COMO ÚLTIMO RECURSO: Buscamos si es una carpeta perdida en Documentos/Desktop
+            ruta_carpeta = buscar_carpeta_windows(objetivo)
+            if ruta_carpeta:
+                os.startfile(ruta_carpeta)
+                return f"Carpeta '{objetivo}' encontrada y abierta."
+
+            # 6. Fallback final por comandos de sistema puros (ej: "cmd", "notepad")
+            try:
+                if ":" in objetivo or "\\" in objetivo:
+                    os.startfile(objetivo)
+                else:
+                    subprocess.Popen(f'"{objetivo}"', shell=True)
+                return f"Programa '{objetivo}' ejecutado."
+            except Exception:
+                return f"No se encontró ni la carpeta ni el programa '{objetivo}'."
 
         elif "cerrar:" in comando_clave:
             if objetivo == "navegador": objetivo = "brave" 
@@ -301,7 +304,7 @@ def ejecutar_comando_sistema(comando_clave):
         return f"Error de ejecución: {e}"
 
 # =====================================================================
-# HARDWARE Y TELEMETRÍA (CORREGIDO)
+# HARDWARE Y TELEMETRÍA
 # =====================================================================
 def escanear_hardware_completo():
     try:
@@ -322,23 +325,20 @@ def obtener_estado_pc_valores():
     gpu_temp = 0
     gpu_vram_usada_gb = 0
     try:
-        # CORRECCIÓN: Dejamos de pedir el % mentiroso de utilization, pedimos temp y Memoria de Video en MB
         res = subprocess.check_output("nvidia-smi --query-gpu=temperature.gpu,memory.used --format=csv,noheader,nounits", shell=True, text=True).strip()
         if res:
             partes = res.split(',')
             gpu_temp = int(partes[0].strip())
             gpu_vram_usada_mb = int(partes[1].strip())
-            gpu_vram_usada_gb = round(gpu_vram_usada_mb / 1024, 1) # Lo pasamos a GB para que sea legible
+            gpu_vram_usada_gb = round(gpu_vram_usada_mb / 1024, 1) 
     except: pass
     
-    # Devolvemos el VRAM en lugar del GPU usage % falso
     return cpu_uso, memoria.percent, gpu_vram_usada_gb, gpu_temp 
 
 def obtener_estado_pc():
     cpu, ram_percent, gpu_vram, g_temp = obtener_estado_pc_valores()
     ram_gb = round(psutil.virtual_memory().used / (1024 ** 3), 1)
     
-    # Ahora Cortana recibe la info real y precisa
     return f"CPU: {cpu}% | RAM: {ram_percent}% ({ram_gb}GB) | GPU Temp: {g_temp}°C, VRAM: {gpu_vram}GB"
 
 def obtener_ventanas_activas():
