@@ -1,0 +1,19 @@
+🚀 Próximos Pasos (Roadmap)
+[ ] Gestor de Bóveda (gestor_boveda.py): Panel de administración en consola para listar, auditar y eliminar proyectos o documentos indexados en la base de datos permanente mediante su Metadata.
+
+[ ] Modo Proyecto (Live Workspace): Anclaje del asistente a una carpeta específica para leer el código fuente en tiempo real desde el disco, eliminando la necesidad de adjuntar archivos tras cada modificación.
+
+[ ] Aislamiento de Chats (Sesiones): Encapsulamiento de conversaciones en ventanas únicas para evitar que los contextos y reglas de distintos proyectos se mezclen en un solo historial.
+
+🛠️ Tecnologías Utilizadas
+Lenguaje: Python 3.x
+
+IA & LLM: Google Gemini API (gemini-flash-lite)
+
+Base de Datos Vectorial: ChromaDB
+
+Voz: OpenAI Whisper (STT) / Edge TTS
+
+SO & Automatización: psutil, win32gui, screeninfo, thefuzz (Similitud de strings)
+
+GUI: Tkinter
