@@ -5,7 +5,7 @@ import google.generativeai as genai
 
 from config import GEMINI_API_KEY
 from modulos.archivos import crear_carpeta, crear_archivo, eliminar_elemento, leer_contenido_archivo, obtener_ruta_real
-from modulos.sistema import obtener_estado_pc, hardware_detectado, ejecutar_comando_sistema, obtener_ventanas_activas, buscar_carpeta_windows
+from modulos.sistema import obtener_estado_pc, hardware_detectado, ejecutar_comando_sistema, obtener_ventanas_activas, buscar_archivo_o_carpeta, explorar_directorio
 from modulos.busqueda import buscar_en_internet
 from modulos.audio import hablar_no_bloqueante
 from modulos.vision import capturar_pantalla
@@ -14,18 +14,46 @@ from modulos.memoria import buscar_contexto, guardar_recuerdo
 
 genai.configure(api_key=GEMINI_API_KEY)
 
+# =====================================================================
+# VARIABLES GLOBALES
+# =====================================================================
 CONTEXTO_CHAT = []
 PENDIENTE_DE_GUARDADO = ""
 ARCHIVO_PENDIENTE_INYECCION = None
 DOCUMENTO_VOLATIL = ""
+PENDIENTE_DE_BORRADO = "" 
 
 def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
-    global CONTEXTO_CHAT, PENDIENTE_DE_GUARDADO, ARCHIVO_PENDIENTE_INYECCION, DOCUMENTO_VOLATIL
+    global CONTEXTO_CHAT, PENDIENTE_DE_GUARDADO, ARCHIVO_PENDIENTE_INYECCION, DOCUMENTO_VOLATIL, PENDIENTE_DE_BORRADO
     
     texto_usuario_lower = texto_usuario.lower().strip()
 
     # =================================================================
-    # 0. SEMÁFORO RAG (Soporte Multi-Archivo)
+    # 0. SEMÁFORO DE BORRADO 
+    # =================================================================
+    if PENDIENTE_DE_BORRADO:
+        print("🧠 [SEMÁFORO DE BORRADO] Evaluando confirmación...")
+        evaluador = genai.GenerativeModel("gemini-flash-lite-latest")
+        prompt_juez = f"El usuario debe confirmar si aprueba borrar de forma permanente la ruta '{PENDIENTE_DE_BORRADO}'. Su respuesta fue: '{texto_usuario}'. ¿Aprueba (sí, borrar) o rechaza (no, cancelar)? Responde ÚNICAMENTE con CONFIRMADO o CANCELADO."
+        
+        try: decision_borrado = evaluador.generate_content(prompt_juez).text.strip().upper()
+        except: decision_borrado = "CANCELADO"
+        
+        if "CONFIRMADO" in decision_borrado:
+            resultado = eliminar_elemento(PENDIENTE_DE_BORRADO)
+            msg = f"Protocolo autorizado. {resultado}"
+        else:
+            msg = "Protocolo abortado. Los archivos están a salvo."
+            
+        PENDIENTE_DE_BORRADO = ""
+        print(f"\n🤖 Cortana:\n---\n{msg}\n---")
+        if ui_callback: ui_callback("🤖 Cortana", msg, "#FF4500" if "abortado" in msg else "#00E5FF")
+        if modo_voz: hablar_no_bloqueante(msg)
+        CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg]}])
+        return
+
+    # =================================================================
+    # 1. SEMÁFORO RAG (Soporte Multi-Archivo)
     # =================================================================
     if ARCHIVO_PENDIENTE_INYECCION:
         print("🧠 [SEMÁFORO RAG] Evaluando decisión de guardado masivo...")
@@ -59,7 +87,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         return 
 
     # =================================================================
-    # 1. SEMÁFORO IA (Textos manuales)
+    # 2. SEMÁFORO IA (Textos manuales)
     # =================================================================
     if PENDIENTE_DE_GUARDADO:
         print("🧠 [SEMÁFORO IA] Evaluando confirmación manual...")
@@ -81,7 +109,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         return 
 
     # =================================================================
-    # 2. MACRO-EXTRACTOR INTELIGENTE
+    # 3. MACRO-EXTRACTOR INTELIGENTE
     # =================================================================
     comandos_guardado = ["memoriza esto", "memorizá esto", "memorizar", "guardar recuerdo", "recordá esto", "acordate de", "guarda el historial", "memoriza lo que hablamos"]
     comando_detectado = next((cmd for cmd in comandos_guardado if cmd in texto_usuario_lower), None)
@@ -111,29 +139,22 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
 
         recuerdos = buscar_contexto(texto_usuario)
         texto_memoria = f"[MEMORIA AUTOMÁTICA RECUPERADA]:\nEl usuario tiene este recuerdo en su bóveda:\n'{recuerdos[0]}'\n\n" if recuerdos else ""
-        
         texto_doc_volatil = f"[DOCUMENTOS EN MEMORIA VOLÁTIL]:\n{DOCUMENTO_VOLATIL}\n\n" if DOCUMENTO_VOLATIL else ""
 
         contexto_sistema = (
-            "tu nombre es: Cortana, un asistente de IA integrado a la PC de Luis. Hablále como un colega, de forma súper natural y directa.\n"
-            "⚠️ REGLA DE PERSONALIDAD: Sé breve. NUNCA menciones la fecha actual, ni expliques tus procesos internos.\n\n"
+            "tu nombre es: Cortana, un asistente de IA integrado a la PC de Luis. Hablále de forma súper natural y directa.\n"
+            "⚠️ REGLA DE PERSONALIDAD: Sé breve. NUNCA expliques tus procesos internos.\n\n"
             f"[CONTEXTO OCULTO] Fecha: {fecha_hoy} | PC: {estado_en_vivo} | HW: {hardware_detectado['gpu']} / {hardware_detectado['cpu']}\n"
             f"[VENTANAS ABIERTAS]: {ventanas_abiertas}\n\n"
             f"{texto_memoria}" 
             f"{texto_doc_volatil}"
-            "⚠️ REGLA DE MEMORIA Y VERDAD:\n"
-            "1. PRIORIDAD: Si recibes datos en [MEMORIA AUTOMÁTICA RECUPERADA] o en [DOCUMENTOS EN MEMORIA VOLÁTIL], úsalos como fuente principal.\n"
-            "2. NO ALUCINAR: NUNCA inventes datos personales. Si no lo sabes, di 'No tengo ese dato guardado'.\n\n"
-            "⚠️ REGLA DE VISIÓN: Analiza la imagen que se adjunta automáticamente.\n\n"
-            "⚠️ REGLA DE COMANDOS (Escribí uno por línea al final):\n"
-            "- Para investigar información en INTERNET, usá: buscar: tu consulta\n" 
-            "- Si te pide 'buscar' o 'encontrar' un PROGRAMA/JUEGO en su PC, asume abrirlo localmente y usá: abrir: nombre_corto\n"
-            "- Para páginas web, usá: navegar: sitio_web @ monitor\n" 
-            "- Para mover ventanas: abrir: brave @ 2\n"
-            "- Para apps o juegos: abrir: nombre_corto @ monitor\n"
-            "- Para cerrar: cerrar: programa\n"
-            "- Para LEER archivos en PC: leer: nombre_archivo.ext\n"
-            "- Para SUBIR CAMBIOS O SINCRONIZAR GITHUB, usá SOLO el nombre de la carpeta: github: nombre_carpeta\n"
+            "⚠️ REGLA DE COMANDOS (Escribí uno por línea al final de tu respuesta):\n"
+            "- Para ABRIR algo: abrir: nombre (Ej: abrir: steam). Para enviarlo a otro monitor, agregá @ y el número (Ej: abrir: steam @ 2).\n"
+            "- SI NO ESTÁS SEGURO del nombre o te piden listar qué hay en una carpeta, JUGÁ DE JUEZ: explorar: atajo (Ej: explorar: escritorio, explorar: descargas). NUNCA inventes rutas absolutas como C:\\Users\\Luis\\...\n"
+            "- Para ELIMINAR archivos o carpetas: eliminar: ruta_absoluta (Si no sabés la ruta exacta, usá explorar: primero)\n"
+            "- Para investigar en INTERNET: buscar: tu consulta\n" 
+            "- Para SUBIR CAMBIOS A GITHUB: github: nombre_carpeta\n"
+            "- Para LEER archivos locales: leer: nombre_archivo.ext\n"
         )
 
         modelo_gemini = genai.GenerativeModel("gemini-flash-lite-latest", system_instruction=contexto_sistema)
@@ -170,6 +191,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         reportes_acciones = []
         comando_busqueda_detectado = None
         comando_leer_detectado = None
+        comando_explorar_detectado = None
         
         for linea in lineas:
             linea_limpia = linea.lower().replace("[", "").replace("]", "").replace("*", "").strip()
@@ -178,31 +200,101 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 comando_busqueda_detectado = linea_limpia[linea_limpia.find("buscar:") + 7:].strip()
             elif "leer:" in linea_limpia:
                 comando_leer_detectado = linea_limpia[linea_limpia.find("leer:") + 5:].strip()
+            elif "explorar:" in linea_limpia:
+                comando_explorar_detectado = linea_limpia[linea_limpia.find("explorar:") + 9:].strip()
             elif "crear_carpeta:" in linea_limpia:
                 ruta = linea_limpia[linea_limpia.find("crear_carpeta:") + 14:].strip()
                 reportes_acciones.append(f"crear_carpeta: {ruta} -> {crear_carpeta(ruta)}")
             elif "crear_archivo:" in linea_limpia:
                 ruta = linea_limpia[linea_limpia.find("crear_archivo:") + 14:].strip()
                 reportes_acciones.append(f"crear_archivo: {ruta} -> {crear_archivo(ruta)}")
+            
+            elif "eliminar:" in linea_limpia:
+                ruta_corta = linea_limpia[linea_limpia.find("eliminar:") + 9:].strip()
+                ruta_real = ruta_corta
+                if not os.path.exists(ruta_real):
+                    ruta_buscada = buscar_archivo_o_carpeta(ruta_corta)
+                    if ruta_buscada: ruta_real = ruta_buscada
+                    
+                PENDIENTE_DE_BORRADO = ruta_real
+                msg_alerta = f"⚠️ ALERTA DE SEGURIDAD: Me pedís que elimine definitivamente:\n'{ruta_real}'\n\n¿Estás completamente seguro? Respondé SÍ para proceder o NO para cancelar."
+                print(f"\n🤖 Cortana:\n---\n{msg_alerta}\n---")
+                if ui_callback: ui_callback("🤖 Cortana", msg_alerta, "#FF4500")
+                if modo_voz: hablar_no_bloqueante("Alerta de seguridad. Estás a punto de borrar un elemento de forma permanente. ¿Confirmás?")
+                CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg_alerta]}])
+                return 
+                
+            elif "github:" in linea_limpia:
+                ruta_corta = linea_limpia[linea_limpia.find("github:") + 7:].strip()
+                ruta_real = buscar_archivo_o_carpeta(ruta_corta) 
+                reportes_acciones.append(sincronizar_proyecto_git(ruta_real) if ruta_real else f"Fallo Git: No encontré '{ruta_corta}'")
             elif any(cmd in linea_limpia for cmd in ["abrir:", "cerrar:", "navegar:", "mover:"]):
                 linea_limpia = linea_limpia.replace("mover:", "abrir:")
                 inicio_idx = linea_limpia.find("abrir:") if "abrir:" in linea_limpia else linea_limpia.find("cerrar:") if "cerrar:" in linea_limpia else linea_limpia.find("navegar:")
                 cmd_extraido = linea_limpia[inicio_idx:].strip()
                 reportes_acciones.append(f"Comando [{cmd_extraido}]: {ejecutar_comando_sistema(cmd_extraido)}")
-            elif "eliminar:" in linea_limpia:
-                ruta = linea_limpia[linea_limpia.find("eliminar:") + 9:].strip()
-                reportes_acciones.append(f"eliminar: {ruta} -> {eliminar_elemento(ruta)}")
-            elif "github:" in linea_limpia:
-                ruta_corta = linea_limpia[linea_limpia.find("github:") + 7:].strip()
-                ruta_real = buscar_carpeta_windows(ruta_corta) 
-                reportes_acciones.append(sincronizar_proyecto_git(ruta_real) if ruta_real else f"Fallo Git: No encontré la carpeta '{ruta_corta}'")
 
         if reportes_acciones:
             texto_reporte = "\n".join([f"*(Acción ejecutada: {r})*" for r in reportes_acciones])
             print(texto_reporte)
             if ui_callback: ui_callback("⚙️ Sistema", texto_reporte, "#80868B")
 
-        if comando_busqueda_detectado:
+        # =================================================================
+        # FLUJO DE JUEZ: EXPLORAR DIRECTORIO
+        # =================================================================
+        if comando_explorar_detectado:
+            if ui_callback: ui_callback("⚙️ Sistema", f"👀 Explorando directorio: {comando_explorar_detectado}", "#80868B")
+            datos_exploracion = explorar_directorio(comando_explorar_detectado)
+            
+            contexto_exploracion = (
+                f"{datos_exploracion}\n\n"
+                "INSTRUCCIONES DE JUEZ:\n"
+                "1. Si lográs identificar el archivo/carpeta que el usuario quería, respondé ÚNICAMENTE con el comando (ej: abrir: archivo.pdf o eliminar: archivo.txt).\n"
+                "2. Si NO lo encontrás, o si el usuario te preguntó específicamente '¿qué hay en esta carpeta?', respondé de forma natural contándole qué archivos o carpetas principales viste en la lista. No inventes."
+            )
+            
+            mensajes_secundarios = list(CONTEXTO_CHAT) + [{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [respuesta_ia]}, {'role': 'user', 'parts': [contexto_exploracion]}]
+            
+            segunda_respuesta = modelo_gemini.generate_content(mensajes_secundarios, stream=True)
+            respuesta_final = ""
+            
+            if ui_callback: ui_callback("🤖 Cortana (Juez)", "", "#A8C7FA", nueva_linea=False)
+            for chunk in segunda_respuesta:
+                if chunk.text:
+                    print(chunk.text, end='', flush=True) 
+                    respuesta_final += chunk.text
+                    if ui_callback: ui_callback("", chunk.text, "#E8EAED", nueva_linea=False)
+            print("\n---")
+            if ui_callback: ui_callback("", "", "#E8EAED", nueva_linea=True)
+            
+            for lf in respuesta_final.split('\n'):
+                lf_limpia = lf.lower().replace("[", "").replace("]", "").replace("*", "").strip()
+                if "abrir:" in lf_limpia:
+                    cmd_abrir = lf_limpia[lf_limpia.find("abrir:"):].strip()
+                    res = ejecutar_comando_sistema(cmd_abrir)
+                    print(f"*(Acción ejecutada tras explorar: {res})*")
+                    if ui_callback: ui_callback("⚙️ Sistema", f"*(Acción ejecutada: {res})*", "#80868B")
+                
+                elif "eliminar:" in lf_limpia:
+                    ruta = lf_limpia[lf_limpia.find("eliminar:") + 9:].strip()
+                    ruta_real = ruta
+                    if not os.path.exists(ruta_real):
+                        ruta_buscada = buscar_archivo_o_carpeta(ruta)
+                        if ruta_buscada: ruta_real = ruta_buscada
+                        
+                    PENDIENTE_DE_BORRADO = ruta_real
+                    msg_alerta = f"⚠️ ALERTA DE SEGURIDAD: Me pedís que elimine definitivamente:\n'{ruta_real}'\n\n¿Estás completamente seguro? Respondé SÍ para proceder o NO para cancelar."
+                    print(f"\n🤖 Cortana:\n---\n{msg_alerta}\n---")
+                    if ui_callback: ui_callback("🤖 Cortana", msg_alerta, "#FF4500")
+                    if modo_voz: hablar_no_bloqueante("Alerta de seguridad. Estás a punto de borrar un elemento de forma permanente. ¿Confirmás?")
+                    CONTEXTO_CHAT.extend([{'role': 'model', 'parts': [msg_alerta]}])
+                    return 
+            
+            if modo_voz: hablar_no_bloqueante(respuesta_final)
+            CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [respuesta_final]}])
+
+        # FLUJO DE BÚSQUEDA WEB
+        elif comando_busqueda_detectado:
             if ui_callback: ui_callback("⚙️ Sistema", f"🌍 Buscando en internet: {comando_busqueda_detectado}", "#80868B")
             datos_encontrados = buscar_en_internet(comando_busqueda_detectado)
             if "No se encontraron resultados" in datos_encontrados or not datos_encontrados.strip() or "error" in datos_encontrados.lower():
@@ -227,11 +319,15 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 if modo_voz: hablar_no_bloqueante(respuesta_final)
                 CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [respuesta_final]}])
 
+        # FLUJO DE LECTURA DE ARCHIVOS (MODIFICADO CON PRINTS)
         elif comando_leer_detectado:
+            print(f"📄 [LECTURA] Intentando leer documento: '{comando_leer_detectado}'...")
             if ui_callback: ui_callback("⚙️ Sistema", f"📄 Analizando documento: {comando_leer_detectado}", "#80868B")
             datos_archivo = leer_contenido_archivo(comando_leer_detectado)
+            
             if datos_archivo == "CODIGO_ERROR_NO_ENCONTRADO" or datos_archivo.startswith("CODIGO_ERROR_LECTURA:"):
-                msg_error = f"Che, no encontré ni pude abrir '{comando_leer_detectado}'."
+                msg_error = f"Che, no encontré ni pude abrir el archivo '{comando_leer_detectado}'. Revisá el nombre."
+                print(f"❌ [ERROR DE LECTURA] {msg_error}")
                 if ui_callback: ui_callback("🤖 Cortana", msg_error, "#FF0000")
                 if modo_voz: hablar_no_bloqueante(msg_error)
             else:
