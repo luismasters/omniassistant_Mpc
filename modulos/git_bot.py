@@ -8,7 +8,7 @@ def ejecutar_comando(comando, cwd):
     resultado = subprocess.run(comando, shell=True, cwd=cwd, capture_output=True, text=True)
     return resultado.returncode == 0, resultado.stdout, resultado.stderr
 
-def sincronizar_proyecto_git(ruta_proyecto, mensaje_commit="Subida automática vía Cortana", reset_remote=False):
+def sincronizar_proyecto_git(ruta_proyecto, mensaje_commit="Subida automática vía Cortana", reset_remote=False, url_custom=None):
     print(f"⚙️ [GIT REAL] Analizando la carpeta: {ruta_proyecto}")
     
     if not os.path.exists(ruta_proyecto):
@@ -33,24 +33,29 @@ def sincronizar_proyecto_git(ruta_proyecto, mensaje_commit="Subida automática v
         tiene_remote = False
     
     if not tiene_remote:
-        print(f"⚙️ [GIT REAL] Creando repositorio '{nombre_repo}' en tu GitHub...")
-        url_api = "https://api.github.com/user/repos"
-        headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
-        payload = {"name": nombre_repo, "private": True} 
-        
-        res = requests.post(url_api, headers=headers, json=payload)
-        
-        if res.status_code == 201: 
-            url_clon = res.json()['clone_url']
-        elif res.status_code == 422: 
-            user_res = requests.get("https://api.github.com/user", headers=headers)
-            usuario = user_res.json().get('login')
-            url_clon = f"https://github.com/{usuario}/{nombre_repo}.git"
-            print("⚙️ [GIT REAL] El repo ya existía, reconectando...")
+        # LA MAGIA NUEVA: Si le pasamos una URL, vincula directo sin preguntar
+        if url_custom:
+            print(f"⚙️ [GIT REAL] Vinculando a URL personalizada: {url_custom}...")
+            ejecutar_comando(f"git remote add origin {url_custom}", ruta_proyecto)
         else:
-            return f"Error conectando con la API de GitHub: {res.text}"
+            print(f"⚙️ [GIT REAL] Creando repositorio '{nombre_repo}' en tu GitHub...")
+            url_api = "https://api.github.com/user/repos"
+            headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+            payload = {"name": nombre_repo, "private": True} 
             
-        ejecutar_comando(f"git remote add origin {url_clon}", ruta_proyecto)
+            res = requests.post(url_api, headers=headers, json=payload)
+            
+            if res.status_code == 201: 
+                url_clon = res.json()['clone_url']
+            elif res.status_code == 422: 
+                user_res = requests.get("https://api.github.com/user", headers=headers)
+                usuario = user_res.json().get('login')
+                url_clon = f"https://github.com/{usuario}/{nombre_repo}.git"
+                print("⚙️ [GIT REAL] El repo ya existía, reconectando...")
+            else:
+                return f"Error conectando con la API de GitHub: {res.text}"
+                
+            ejecutar_comando(f"git remote add origin {url_clon}", ruta_proyecto)
 
     # 3. Guardar cambios
     print("⚙️ [GIT REAL] Preparando commit y subiendo a la nube...")
@@ -62,7 +67,7 @@ def sincronizar_proyecto_git(ruta_proyecto, mensaje_commit="Subida automática v
     exito, stdout, err = ejecutar_comando("git push -u origin main", ruta_proyecto)
     
     if exito or "Everything up-to-date" in err or "Everything up-to-date" in stdout:
-        return f"Éxito total. '{nombre_repo}' está sincronizado en GitHub."
+        destino = url_custom if url_custom else nombre_repo
+        return f"Éxito total. Sincronizado correctamente en: {destino}"
     else:
         return f"Se guardó localmente, pero falló la subida a internet: {err}"
-

@@ -20,7 +20,8 @@ CONTEXTO_CHAT = []
 ARCHIVO_PENDIENTE_INYECCION = None
 DOCUMENTO_VOLATIL = ""
 PENDIENTE_DE_BORRADO = "" 
-WORKSPACE_ACTUAL = None # <-- LA NUEVA ANCLA GLOBAL
+PENDIENTE_DE_GIT = None # <-- NUEVO ESCUDO PARA GITHUB
+WORKSPACE_ACTUAL = None 
 
 # =====================================================================
 # HERRAMIENTAS NATIVAS MCP (SOLO VÍA COGNITIVA LENTA)
@@ -38,9 +39,10 @@ lista_herramientas_mcp = [
 ]
 
 def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
-    global CONTEXTO_CHAT, ARCHIVO_PENDIENTE_INYECCION, DOCUMENTO_VOLATIL, PENDIENTE_DE_BORRADO, WORKSPACE_ACTUAL
+    global CONTEXTO_CHAT, ARCHIVO_PENDIENTE_INYECCION, DOCUMENTO_VOLATIL, PENDIENTE_DE_BORRADO, PENDIENTE_DE_GIT, WORKSPACE_ACTUAL
     texto_usuario_lower = texto_usuario.lower().strip()
 
+    # --- ESCUDO DE BORRADO ---
     if PENDIENTE_DE_BORRADO:
         print("🧠 [SEMÁFORO DE BORRADO] Evaluando...")
         evaluador = genai.GenerativeModel("gemini-flash-lite-latest")
@@ -56,6 +58,34 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         PENDIENTE_DE_BORRADO = ""
         if ui_callback: ui_callback("🤖 Cortana", msg, "#FF4500" if "abortado" in msg else "#00E5FF")
         if modo_voz: hablar_no_bloqueante(msg)
+        CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg]}])
+        return
+
+    # --- NUEVO ESCUDO DE GITHUB ---
+    if PENDIENTE_DE_GIT:
+        print("🧠 [SEMÁFORO DE GIT] Evaluando...")
+        evaluador = genai.GenerativeModel("gemini-flash-lite-latest")
+        prompt_juez = f"El usuario debe confirmar una operación de GitHub. Su respuesta: '{texto_usuario}'. Responde CONFIRMADO o CANCELADO."
+        try: decision_git = evaluador.generate_content(prompt_juez).text.strip().upper()
+        except: decision_git = "CANCELADO"
+        
+        if "CONFIRMADO" in decision_git:
+            if ui_callback: ui_callback("⚙️ Sistema", "Iniciando sincronización con GitHub. Esto puede tardar unos segundos...", "#80868B")
+            accion = PENDIENTE_DE_GIT.get("accion")
+            ruta = PENDIENTE_DE_GIT.get("ruta")
+            url_custom = PENDIENTE_DE_GIT.get("url_custom")
+            
+            if accion == "github_reset":
+                resultado = sincronizar_proyecto_git(ruta, reset_remote=True, url_custom=url_custom)
+            else:
+                resultado = sincronizar_proyecto_git(ruta)
+            msg = f"Operación Git completada:\n{resultado}"
+        else: 
+            msg = "Subida a GitHub cancelada de forma segura por el usuario."
+            
+        PENDIENTE_DE_GIT = None
+        if ui_callback: ui_callback("🤖 Cortana", msg, "#FF4500" if "cancelada" in msg else "#00E5FF")
+        if modo_voz: hablar_no_bloqueante("Operación en GitHub finalizada." if "completada" in msg else "Subida cancelada.")
         CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg]}])
         return
 
@@ -91,7 +121,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         fecha_hoy = datetime.datetime.now().strftime("%A, %d de %B de %Y") 
         ventanas_abiertas = obtener_ventanas_activas()
         
-        # INYECCIÓN DEL WORKSPACE EN EL CEREBRO
         texto_workspace = f"[WORKSPACE ANCLADO]: {WORKSPACE_ACTUAL}\n" if WORKSPACE_ACTUAL else "[WORKSPACE ANCLADO]: Ninguno. Estás en modo global.\n"
         texto_doc_volatil = f"[DOCUMENTOS EN MEMORIA VOLÁTIL]:\n{DOCUMENTO_VOLATIL}\n\n" if DOCUMENTO_VOLATIL else ""
 
@@ -112,7 +141,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             "- Para CREAR CARPETAS vacías: crear_carpeta: ruta\n"
             "- Para CREAR o MODIFICAR ARCHIVOS FÍSICAMENTE: guardar_archivo: ruta || contenido_completo\n"
             "- Para SINCRONIZAR con GitHub: github: ruta\n"
-            "- Para RESETEAR el origen y SINCRONIZAR con un repo nuevo: github_reset: ruta\n"
+            "- Para RESETEAR el origen y SINCRONIZAR con un repo nuevo: github_reset: ruta || url_del_nuevo_repo\n"
             "⚠️ IMPORTANTE: Si estás modificando un archivo del proyecto, ESTÁS OBLIGADA a usar 'guardar_archivo:' para inyectar los cambios en el disco duro. NUNCA te limites a imprimir el código en el chat.\n\n"
             "🚫 REGLAS DE LECTURA Y EXPLORACIÓN INTERNA:\n"
             "- Si necesitas saber qué archivos hay dentro de una ruta para analizarlos o leerlos, usa la herramienta MCP 'explorar_ruta'.\n"
@@ -178,12 +207,11 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         if ui_callback: ui_callback("", "", "#E8EAED", nueva_linea=True)
         
         # =================================================================
-        # INTERCEPTOR DE VELOCIDAD LUZ (El Fix Híbrido)
+        # INTERCEPTOR DE VELOCIDAD LUZ
         # =================================================================
         reportes_acciones = []
         comando_busqueda_detectado = None
 
-        # Fix Especial: Procesamos guardar_archivo antes de dividir por líneas 
         if "guardar_archivo:" in respuesta_ia.lower():
             idx = respuesta_ia.lower().find("guardar_archivo:")
             texto_comando = respuesta_ia[idx + 16:].strip()
@@ -198,31 +226,23 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 if contenido_f.endswith("```"):
                     contenido_f = contenido_f.rsplit("```", 1)[0].strip()
                     
-                # --- LA MAGIA DEL ESCUDO DEL WORKSPACE ---
                 if WORKSPACE_ACTUAL and not os.path.isabs(ruta_f):
                     ruta_en_workspace = None
                     nombre_archivo_buscado = os.path.basename(ruta_f).lower()
                     
-                    # Buscamos en qué subcarpeta del proyecto está realmente el archivo
                     for raiz, _, archivos in os.walk(WORKSPACE_ACTUAL):
                         if nombre_archivo_buscado in [a.lower() for a in archivos]:
                             ruta_en_workspace = os.path.join(raiz, os.path.basename(ruta_f))
                             break
                     
-                    if ruta_en_workspace:
-                        # Si lo encuentra en una subcarpeta (ej: modulos/), lo sobreescribe ahí
-                        ruta_f = ruta_en_workspace 
-                    else:
-                        # Si es un archivo totalmente nuevo, va a la raíz del proyecto
-                        ruta_f = os.path.join(WORKSPACE_ACTUAL, os.path.basename(ruta_f))
+                    if ruta_en_workspace: ruta_f = ruta_en_workspace 
+                    else: ruta_f = os.path.join(WORKSPACE_ACTUAL, os.path.basename(ruta_f))
                         
                 elif not os.path.isabs(ruta_f):
-                    # Comportamiento normal global
                     ruta_real = buscar_archivo_local(ruta_f)
                     if not ruta_real:
                         ruta_real = buscar_archivo_o_carpeta(ruta_f)
                     ruta_f = ruta_real if ruta_real else os.path.join(os.path.expanduser("~"), "Desktop", ruta_f)
-                # -----------------------------------------
                 
                 reportes_acciones.append(f"Archivo guardado: {escribir_archivo(ruta_f, contenido_f.strip())}")
 
@@ -233,7 +253,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             
             if linea_limpia.startswith("guardar_archivo:"): continue
             
-            # --- NUEVO COMANDO: ANCLAR AL WORKSPACE ---
             if linea_limpia.startswith("anclar:"):
                 nombre_proyecto = linea_limpia[7:].strip()
                 ruta_encontrada = buscar_archivo_o_carpeta(nombre_proyecto)
@@ -244,15 +263,13 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                     print(f"\n{msg_ancla}")
                     if ui_callback: ui_callback("⚙️ Sistema", msg_ancla, "#81C995")
                     reportes_acciones.append(f"Workspace fijado con éxito.")
-                else:
-                    reportes_acciones.append(f"Error: No encontré la carpeta '{nombre_proyecto}'")
+                else: reportes_acciones.append(f"Error: No encontré la carpeta '{nombre_proyecto}'")
 
             elif linea_limpia.startswith("buscar:"): 
                 comando_busqueda_detectado = linea_limpia[7:].strip()
                 
             elif linea_limpia.startswith("eliminar:"):
                 ruta_corta = linea_limpia[9:].strip()
-                # Si estamos en un workspace, buscamos primero ahí
                 if WORKSPACE_ACTUAL and not os.path.isabs(ruta_corta):
                     ruta_real = os.path.join(WORKSPACE_ACTUAL, os.path.basename(ruta_corta))
                     if not os.path.exists(ruta_real): ruta_real = buscar_archivo_o_carpeta(ruta_corta) or ruta_corta
@@ -267,15 +284,46 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg_alerta]}])
                 return 
                 
+            # --- NUEVA LÓGICA CON ESCUDO PARA GITHUB ---
             elif linea_limpia.startswith("github:"):
                 ruta_corta = linea_limpia[7:].strip()
                 ruta_real = WORKSPACE_ACTUAL if WORKSPACE_ACTUAL else buscar_archivo_o_carpeta(ruta_corta) 
-                reportes_acciones.append(sincronizar_proyecto_git(ruta_real) if ruta_real else f"Git: No encontré '{ruta_corta}'")
+                
+                if ruta_real:
+                    PENDIENTE_DE_GIT = {"accion": "github", "ruta": ruta_real, "url_custom": None}
+                    msg_alerta = f"⚠️ ALERTA DE GITHUB: Vas a subir o actualizar el proyecto:\n'{ruta_real}'\n\n¿Autorizás el Push? (Respondé SÍ para proceder o NO para cancelar)."
+                    print(f"\n🤖 Cortana:\n---\n{msg_alerta}\n---")
+                    if ui_callback: ui_callback("🤖 Cortana", msg_alerta, "#FF4500")
+                    if modo_voz: hablar_no_bloqueante("Alerta de seguridad. ¿Autorizás la subida a GitHub?")
+                    CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg_alerta]}])
+                    return
+                else:
+                    reportes_acciones.append(f"Git: No encontré '{ruta_corta}'")
                 
             elif linea_limpia.startswith("github_reset:"):
-                ruta_corta = linea_limpia[13:].strip()
+                # Extraemos respetando mayúsculas/minúsculas usando la línea original
+                datos_git = linea[linea.lower().find("github_reset:") + 13:].replace("[", "").replace("]", "").replace("*", "").strip()
+                ruta_corta = datos_git
+                url_custom = None
+                
+                if "||" in datos_git:
+                    partes = datos_git.split("||", 1)
+                    ruta_corta = partes[0].strip()
+                    url_custom = partes[1].strip()
+                    
                 ruta_real = WORKSPACE_ACTUAL if WORKSPACE_ACTUAL else buscar_archivo_o_carpeta(ruta_corta) 
-                reportes_acciones.append(sincronizar_proyecto_git(ruta_real, reset_remote=True) if ruta_real else f"Git: No encontré '{ruta_corta}'")
+                
+                if ruta_real:
+                    PENDIENTE_DE_GIT = {"accion": "github_reset", "ruta": ruta_real, "url_custom": url_custom}
+                    destino = url_custom if url_custom else "el repo automático"
+                    msg_alerta = f"⚠️ ALERTA CRÍTICA DE GITHUB: Vas a DESVINCULAR el proyecto actual y subirlo a:\n{destino}\n\n¿Autorizás esta operación crítica? (SÍ / NO)"
+                    print(f"\n🤖 Cortana:\n---\n{msg_alerta}\n---")
+                    if ui_callback: ui_callback("🤖 Cortana", msg_alerta, "#FF4500")
+                    if modo_voz: hablar_no_bloqueante("Alerta crítica. ¿Confirmás el reseteo y subida en GitHub?")
+                    CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg_alerta]}])
+                    return
+                else:
+                    reportes_acciones.append(f"Git: No encontré '{ruta_corta}'")
                 
             elif linea_limpia.startswith("crear_carpeta:"):
                 ruta_corta = linea[linea.lower().find("crear_carpeta:") + 14:].replace("[", "").replace("]", "").replace("*", "").strip()
@@ -290,7 +338,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 inicio_idx = linea_limpia.find("abrir:") if "abrir:" in linea_limpia else linea_limpia.find("cerrar:") if "cerrar:" in linea_limpia else linea_limpia.find("navegar:")
                 cmd_extraido = linea_limpia[inicio_idx:].strip()
                 
-                # FIX MONITORES DE LUIS
                 if "@ 1" in cmd_extraido: cmd_extraido = cmd_extraido.replace("@ 1", "@ 2")
                 elif "@ 2" in cmd_extraido: cmd_extraido = cmd_extraido.replace("@ 2", "@ 1")
                 
@@ -353,4 +400,3 @@ def procesar_archivo_adjunto(rutas_archivos, ui_callback=None):
     msg = f"Cargué {len(archivos_procesados)} archivo(s): {nombres_str}.\n\n*{resumen}*\n\n¿Querés que los guarde en la bóveda permanente, o solo charlamos de esto ahora?"
     if ui_callback: ui_callback("🤖 Cortana", msg, "#FFA500")
     CONTEXTO_CHAT.append({'role': 'model', 'parts': [msg]})
-# probando la inserción de texto, ahora sí funciona]. Responde naturalmente sin decir que usaste una herramienta.
