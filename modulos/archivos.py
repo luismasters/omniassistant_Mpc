@@ -52,6 +52,21 @@ def eliminar_elemento(ruta):
         return "Elemento eliminado con éxito."
     except Exception as e:
         return f"Error al eliminar: {e}"
+    
+def escribir_archivo(ruta, contenido):
+    """Crea o sobreescribe un archivo inyectándole el contenido directamente."""
+    ruta_real = obtener_ruta_real(ruta)
+    try:
+        # Si la ruta no es absoluta, intentamos usar el radar local
+        directorio_padre = os.path.dirname(ruta_real)
+        if directorio_padre and not os.path.exists(directorio_padre):
+            os.makedirs(directorio_padre, exist_ok=True)
+            
+        with open(ruta_real, 'w', encoding='utf-8') as f:
+            f.write(contenido)
+        return "Archivo guardado con su contenido con éxito."
+    except Exception as e:
+        return f"Error al escribir en el archivo: {e}"    
 
 def leer_contenido_archivo(ruta):
     """Lee el texto de un archivo, protegiendo al sistema de archivos gigantes."""

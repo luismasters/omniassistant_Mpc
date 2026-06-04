@@ -64,7 +64,6 @@ def buscar_archivo_o_carpeta(nombre_elemento):
         os.path.expanduser(r"~\OneDrive\Imágenes")
     ]
     
-    # Extraemos solo el nombre por si Cortana manda "descargas/archivo.pdf"
     nombre_puro = os.path.basename(nombre_elemento.replace("\\", "/")).lower()
     nombre_limpio = nombre_puro.replace(" ", "").replace("_", "").strip()
     
@@ -73,7 +72,6 @@ def buscar_archivo_o_carpeta(nombre_elemento):
         for raiz, directorios, archivos in os.walk(zona):
             directorios[:] = [d for d in directorios if d not in ['.git', 'node_modules', 'venv', '__pycache__', 'AppData', 'My Games']]
             
-            # Buscar en carpetas
             for dir_name in directorios:
                 dir_name_limpio = dir_name.lower().replace(" ", "").replace("_", "")
                 if nombre_limpio in dir_name_limpio:
@@ -81,7 +79,6 @@ def buscar_archivo_o_carpeta(nombre_elemento):
                     print(f"✅ [PYTHON REAL] Carpeta encontrada en: {ruta_encontrada}")
                     return ruta_encontrada
                     
-            # Buscar en archivos
             for file_name in archivos:
                 file_name_limpio = file_name.lower().replace(" ", "").replace("_", "")
                 if nombre_limpio in file_name_limpio:
@@ -91,7 +88,6 @@ def buscar_archivo_o_carpeta(nombre_elemento):
     return None
 
 def obtener_ruta_dinamica(opciones):
-    """Prueba múltiples rutas hasta encontrar una que exista."""
     for ruta in opciones:
         if os.path.exists(ruta): return ruta
     return opciones[0] 
@@ -100,12 +96,9 @@ def obtener_ruta_dinamica(opciones):
 # EXPLORADOR JUEZ 
 # =====================================================================
 def explorar_directorio(ruta_base):
-    """Devuelve una lista de archivos y carpetas en una ruta para que la IA la analice como Juez."""
-    
-    if "@" in ruta_base:
-        ruta_base = ruta_base.split("@")[0].strip()
-    if "||" in ruta_base:
-        ruta_base = ruta_base.split("||")[0].strip()
+    """Devuelve una lista de archivos y carpetas en una ruta."""
+    if "@" in ruta_base: ruta_base = ruta_base.split("@")[0].strip()
+    if "||" in ruta_base: ruta_base = ruta_base.split("||")[0].strip()
         
     print(f"👀 [EXPLORADOR] Cortana está mirando dentro de: '{ruta_base}'")
     
@@ -115,9 +108,9 @@ def explorar_directorio(ruta_base):
             ruta_base = ruta_base.lower().replace("c:\\users\\luis", usuario_real)
 
         usuario = os.path.expanduser("~")
-        ruta_docs = obtener_ruta_dinamica([os.path.join(usuario, "Documents"), os.path.join(usuario, "OneDrive", "Documentos"), os.path.join(usuario, "OneDrive", "Documents")])
-        ruta_desk = obtener_ruta_dinamica([os.path.join(usuario, "Desktop"), os.path.join(usuario, "OneDrive", "Escritorio"), os.path.join(usuario, "OneDrive", "Desktop")])
-        ruta_pics = obtener_ruta_dinamica([os.path.join(usuario, "Pictures"), os.path.join(usuario, "OneDrive", "Imágenes"), os.path.join(usuario, "OneDrive", "Pictures")])
+        ruta_docs = obtener_ruta_dinamica([os.path.join(usuario, "Documents"), os.path.join(usuario, "OneDrive", "Documentos")])
+        ruta_desk = obtener_ruta_dinamica([os.path.join(usuario, "Desktop"), os.path.join(usuario, "OneDrive", "Escritorio")])
+        ruta_pics = obtener_ruta_dinamica([os.path.join(usuario, "Pictures"), os.path.join(usuario, "OneDrive", "Imágenes")])
         ruta_capturas = obtener_ruta_dinamica([os.path.join(ruta_pics, "Screenshots"), os.path.join(ruta_pics, "Capturas de pantalla")])
 
         atajos = {
@@ -137,21 +130,14 @@ def explorar_directorio(ruta_base):
 
         if not os.path.exists(ruta_real) and "\\" not in ruta_real:
             ruta_buscada = buscar_archivo_o_carpeta(ruta_base)
-            if ruta_buscada:
-                ruta_real = ruta_buscada
+            if ruta_buscada: ruta_real = ruta_buscada
 
         if not os.path.exists(ruta_real):
-            return f"[RESULTADO EXPLORACIÓN]: La ruta '{ruta_real}' no existe en este equipo. Decile al usuario que verifique el nombre."
+            return f"[RESULTADO EXPLORACIÓN]: La ruta '{ruta_real}' no existe en este equipo."
 
         elementos = os.listdir(ruta_real)
-        carpetas = []
-        archivos = []
-        
-        for e in elementos:
-            if os.path.isdir(os.path.join(ruta_real, e)):
-                carpetas.append(e)
-            else:
-                archivos.append(e)
+        carpetas = [e for e in elementos if os.path.isdir(os.path.join(ruta_real, e))]
+        archivos = [e for e in elementos if not os.path.isdir(os.path.join(ruta_real, e))]
 
         resultado = f"[RESULTADO EXPLORACIÓN DE '{ruta_real}']:\n"
         resultado += f"📁 Carpetas ({len(carpetas)}): {', '.join(carpetas[:20])}\n"
@@ -165,7 +151,7 @@ def explorar_directorio(ruta_base):
         return f"[RESULTADO EXPLORACIÓN]: Hubo un error de lectura: {e}"
 
 # =====================================================================
-# RADAR DE JUEGOS Y PROGRAMAS
+# RADAR DE JUEGOS Y PROGRAMAS (Buscador Windows)
 # =====================================================================
 def radar_inteligente(nombre_buscado):
     usuario = os.path.expanduser("~")
@@ -203,7 +189,7 @@ def radar_inteligente(nombre_buscado):
     print(f"🔍 [RADAR INTELIGENTE] Buscando Programa: '{nombre_buscado_limpio}'")
     print(f"📊 Mejor coincidencia: '{mejor_coincidencia}' (Similitud: {puntaje}%)")
 
-    if puntaje >= 80:
+    if puntaje >= 70:
         ruta_final = archivos_encontrados[mejor_coincidencia]
         print(f"✅ [ÉXITO] Programa encontrado: {ruta_final}")
         return ruta_final
@@ -242,11 +228,7 @@ def ejecutar_comando_sistema(comando_clave):
         try:
             texto_monitor = partes_monitor[1]
             num_str = "".join(filter(str.isdigit, texto_monitor))
-            if num_str:
-                num_monitor_usuario = int(num_str)
-                if num_monitor_usuario == 1: num_monitor = 2
-                elif num_monitor_usuario == 2: num_monitor = 1
-                else: num_monitor = num_monitor_usuario
+            if num_str: num_monitor = int(num_str)
         except Exception: pass
 
     if "navegar: brave" in comando_clave or "navegar: navegador" in comando_clave:
@@ -297,7 +279,6 @@ def ejecutar_comando_sistema(comando_clave):
             if objetivo == "navegador": objetivo = "brave"
             
             if objetivo.startswith("steam://"):
-                print(f"🚀 [SISTEMA] Lanzando protocolo de Steam directo: {objetivo}")
                 os.startfile(objetivo)
                 return f"Juego de Steam lanzado instantáneamente por ID."
             
@@ -305,24 +286,17 @@ def ejecutar_comando_sistema(comando_clave):
             ultima_palabra = objetivo_limpio.split("\\")[-1].strip().lower()
 
             usuario = os.path.expanduser("~")
-            ruta_docs = obtener_ruta_dinamica([os.path.join(usuario, "Documents"), os.path.join(usuario, "OneDrive", "Documentos"), os.path.join(usuario, "OneDrive", "Documents")])
-            ruta_desk = obtener_ruta_dinamica([os.path.join(usuario, "Desktop"), os.path.join(usuario, "OneDrive", "Escritorio"), os.path.join(usuario, "OneDrive", "Desktop")])
-            ruta_pics = obtener_ruta_dinamica([os.path.join(usuario, "Pictures"), os.path.join(usuario, "OneDrive", "Imágenes"), os.path.join(usuario, "OneDrive", "Pictures")])
+            ruta_docs = obtener_ruta_dinamica([os.path.join(usuario, "Documents"), os.path.join(usuario, "OneDrive", "Documentos")])
+            ruta_desk = obtener_ruta_dinamica([os.path.join(usuario, "Desktop"), os.path.join(usuario, "OneDrive", "Escritorio")])
+            ruta_pics = obtener_ruta_dinamica([os.path.join(usuario, "Pictures"), os.path.join(usuario, "OneDrive", "Imágenes")])
             ruta_capturas = obtener_ruta_dinamica([os.path.join(ruta_pics, "Screenshots"), os.path.join(ruta_pics, "Capturas de pantalla")])
 
             atajos_carpetas = {
                 "documentos": ruta_docs,
-                "mis documentos": ruta_docs,
-                "documents": ruta_docs,
                 "descargas": os.path.expanduser(r"~\Downloads"),
                 "downloads": os.path.expanduser(r"~\Downloads"),
                 "escritorio": ruta_desk,
-                "desktop": ruta_desk,
                 "imagenes": ruta_pics,
-                "imágenes": ruta_pics,
-                "fotos": ruta_pics,
-                "pictures": ruta_pics,
-                "capturas de pantalla": ruta_capturas,
                 "capturas": ruta_capturas
             }
 
@@ -348,22 +322,29 @@ def ejecutar_comando_sistema(comando_clave):
                 if num_monitor: threading.Thread(target=forzar_ventana_a_monitor, args=(objetivo, num_monitor), daemon=True).start()
                 return f"Trayendo ventana activa al Monitor."
 
-            # 2. PRIORIDAD A ARCHIVOS Y CARPETAS
-            ruta_elemento = buscar_archivo_o_carpeta(objetivo)
-            if ruta_elemento:
-                os.startfile(ruta_elemento)
-                return f"Elemento '{objetivo}' encontrado y abierto."
-
-            # 3. SI NO ES ARCHIVO O CARPETA COMÚN, BUSCAMOS PROGRAMAS Y JUEGOS
+            # ========================================================
+            # EL ORDEN DE PRIORIDAD PARA ABRIR COSAS
+            # ========================================================
+            # 1. PROGRAMAS Y JUEGOS (EL RADAR VA PRIMERO SIEMPRE)
             ruta_acceso = radar_inteligente(objetivo)
             if ruta_acceso:
                 os.startfile(ruta_acceso)
                 msg = f"Programa '{objetivo}' abierto."
-                es_juego_steam = ruta_acceso and ruta_acceso.endswith(".url")
+                es_juego_steam = ruta_acceso.endswith(".url")
                 if num_monitor and not es_juego_steam: 
                     threading.Thread(target=forzar_ventana_a_monitor, args=(objetivo, num_monitor), daemon=True).start()
                 return msg
 
+            # 2. ARCHIVOS Y CARPETAS
+            ruta_elemento = buscar_archivo_o_carpeta(objetivo)
+            if ruta_elemento:
+                if ruta_elemento.endswith('.py') or ruta_elemento.endswith('.scr'):
+                    pass 
+                else:
+                    os.startfile(ruta_elemento)
+                    return f"Elemento '{objetivo}' encontrado y abierto."
+
+            # 3. FUERZA BRUTA
             try:
                 if ":" in objetivo or "\\" in objetivo:
                     os.startfile(objetivo)
@@ -375,7 +356,6 @@ def ejecutar_comando_sistema(comando_clave):
 
         elif "cerrar:" in comando_clave:
             if objetivo == "navegador": objetivo = "brave" 
-            
             if "steam" in objetivo.lower():
                 os.system("start steam://exit")
                 return "Se envió la señal de apagado oficial a Steam."
@@ -422,26 +402,20 @@ def escanear_hardware_completo():
         cpu = subprocess.check_output('powershell -Command "(Get-CimInstance Win32_Processor).Name"', shell=True, text=True).strip()
         gpu = subprocess.check_output('powershell -Command "(Get-CimInstance Win32_VideoController).Name"', shell=True, text=True).strip()
         mobo = subprocess.check_output('powershell -Command "(Get-CimInstance Win32_BaseBoard).Manufacturer + \' \' + (Get-CimInstance Win32_BaseBoard).Product"', shell=True, text=True).strip()
-        usb_cmd = 'powershell -Command "$disp = Get-CimInstance Win32_PnPEntity | Where-Object { $_.PNPClass -in \'Mouse\',\'Keyboard\',\'Media\',\'Image\' } | Select-Object -ExpandProperty Name; if ($disp) { $disp -join \', \' } else { \'Ninguno\' }"'
-        perifericos = subprocess.check_output(usb_cmd, shell=True, text=True).strip()
-        return {"cpu": cpu, "gpu": gpu, "motherboard": mobo, "perifericos": perifericos}
+        return {"cpu": cpu, "gpu": gpu, "motherboard": mobo}
     except Exception:
-        return {"cpu": "Intel", "gpu": "NVIDIA", "motherboard": "Desconocida", "perifericos": "Desconocidos"}
-
-hardware_detectado = escanear_hardware_completo()
+        return {"cpu": "Intel", "gpu": "NVIDIA", "motherboard": "Desconocida"}
 
 def obtener_estado_pc_valores():
     cpu_uso = psutil.cpu_percent()
     memoria = psutil.virtual_memory()
-    gpu_temp = 0
-    gpu_vram_usada_gb = 0
+    gpu_temp, gpu_vram_usada_gb = 0, 0
     try:
         res = subprocess.check_output("nvidia-smi --query-gpu=temperature.gpu,memory.used --format=csv,noheader,nounits", shell=True, text=True).strip()
         if res:
             partes = res.split(',')
             gpu_temp = int(partes[0].strip())
-            gpu_vram_usada_mb = int(partes[1].strip())
-            gpu_vram_usada_gb = round(gpu_vram_usada_mb / 1024, 1) 
+            gpu_vram_usada_gb = round(int(partes[1].strip()) / 1024, 1) 
     except: pass
     return cpu_uso, memoria.percent, gpu_vram_usada_gb, gpu_temp 
 
@@ -458,5 +432,5 @@ def obtener_ventanas_activas():
         titulo_baja = titulo.lower()
         if not any(ignorado in titulo_baja for ignorado in ignorados) and titulo.strip():
             nombres_limpios.append(titulo)
-    if not nombres_limpios: return "Ninguna aplicación importante a la vista."
+    if not nombres_limpios: return "Ninguna aplicación a la vista."
     return " | ".join(nombres_limpios)
