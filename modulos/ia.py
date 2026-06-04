@@ -9,7 +9,7 @@ from modulos.sistema import ejecutar_comando_sistema, obtener_ventanas_activas, 
 from modulos.busqueda import buscar_en_internet
 from modulos.audio import hablar_no_bloqueante
 from modulos.vision import capturar_pantalla
-from modulos.git_bot import sincronizar_proyecto_git
+from modulos.git_bot import sincronizar_proyecto_git, ejecutar_comando_git_libre
 from modulos.memoria import guardar_recuerdo 
 
 from modulos.cliente_mcp import cliente_sistema 
@@ -70,22 +70,24 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         except: decision_git = "CANCELADO"
         
         if "CONFIRMADO" in decision_git:
-            if ui_callback: ui_callback("⚙️ Sistema", "Iniciando sincronización con GitHub. Esto puede tardar unos segundos...", "#80868B")
+            if ui_callback: ui_callback("⚙️ Sistema", "Iniciando operación en GitHub. Esto puede tardar unos segundos...", "#80868B")
             accion = PENDIENTE_DE_GIT.get("accion")
             ruta = PENDIENTE_DE_GIT.get("ruta")
             url_custom = PENDIENTE_DE_GIT.get("url_custom")
             
             if accion == "github_reset":
                 resultado = sincronizar_proyecto_git(ruta, reset_remote=True, url_custom=url_custom)
+            elif accion == "git_libre":
+                resultado = ejecutar_comando_git_libre(ruta, url_custom)
             else:
                 resultado = sincronizar_proyecto_git(ruta)
             msg = f"Operación Git completada:\n{resultado}"
         else: 
-            msg = "Subida a GitHub cancelada de forma segura por el usuario."
+            msg = "Operación en GitHub cancelada de forma segura por el usuario."
             
         PENDIENTE_DE_GIT = None
         if ui_callback: ui_callback("🤖 Cortana", msg, "#FF4500" if "cancelada" in msg else "#00E5FF")
-        if modo_voz: hablar_no_bloqueante("Operación en GitHub finalizada." if "completada" in msg else "Subida cancelada.")
+        if modo_voz: hablar_no_bloqueante("Operación en GitHub finalizada." if "completada" in msg else "Operación cancelada.")
         CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg]}])
         return
 
@@ -142,6 +144,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             "- Para CREAR o MODIFICAR ARCHIVOS FÍSICAMENTE: guardar_archivo: ruta || contenido_completo\n"
             "- Para SINCRONIZAR con GitHub: github: ruta\n"
             "- Para RESETEAR el origen y SINCRONIZAR con un repo nuevo: github_reset: ruta || url_del_nuevo_repo\n"
+            "- Para ejecutar comandos libres de Git (reset, status, log, push force): git_comando: ruta || tu_comando_git\n"
             "⚠️ IMPORTANTE: Si estás modificando un archivo del proyecto, ESTÁS OBLIGADA a usar 'guardar_archivo:' para inyectar los cambios en el disco duro. NUNCA te limites a imprimir el código en el chat.\n\n"
             "🚫 REGLAS DE LECTURA Y EXPLORACIÓN INTERNA:\n"
             "- Si necesitas saber qué archivos hay dentro de una ruta para analizarlos o leerlos, usa la herramienta MCP 'explorar_ruta'.\n"
@@ -284,7 +287,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg_alerta]}])
                 return 
                 
-            # --- NUEVA LÓGICA CON ESCUDO PARA GITHUB ---
             elif linea_limpia.startswith("github:"):
                 ruta_corta = linea_limpia[7:].strip()
                 ruta_real = WORKSPACE_ACTUAL if WORKSPACE_ACTUAL else buscar_archivo_o_carpeta(ruta_corta) 
@@ -301,7 +303,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                     reportes_acciones.append(f"Git: No encontré '{ruta_corta}'")
                 
             elif linea_limpia.startswith("github_reset:"):
-                # Extraemos respetando mayúsculas/minúsculas usando la línea original
                 datos_git = linea[linea.lower().find("github_reset:") + 13:].replace("[", "").replace("]", "").replace("*", "").strip()
                 ruta_corta = datos_git
                 url_custom = None
@@ -324,6 +325,30 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                     return
                 else:
                     reportes_acciones.append(f"Git: No encontré '{ruta_corta}'")
+            
+            # --- NUEVO INTERCEPTOR PARA GIT LIBRE ---
+            elif linea_limpia.startswith("git_comando:"):
+                datos_git = linea[linea.lower().find("git_comando:") + 12:].replace("[", "").replace("]", "").replace("*", "").strip()
+                ruta_corta = datos_git
+                comando_libre = ""
+                
+                if "||" in datos_git:
+                    partes = datos_git.split("||", 1)
+                    ruta_corta = partes[0].strip()
+                    comando_libre = partes[1].strip()
+                    
+                ruta_real = WORKSPACE_ACTUAL if WORKSPACE_ACTUAL else buscar_archivo_o_carpeta(ruta_corta) 
+                
+                if ruta_real and comando_libre:
+                    PENDIENTE_DE_GIT = {"accion": "git_libre", "ruta": ruta_real, "url_custom": comando_libre}
+                    msg_alerta = f"⚠️ ALERTA DE GITHUB: Vas a ejecutar un comando libre en:\n'{ruta_real}'\nComando: {comando_libre}\n\n¿Autorizás esta operación? (SÍ / NO)"
+                    print(f"\n🤖 Cortana:\n---\n{msg_alerta}\n---")
+                    if ui_callback: ui_callback("🤖 Cortana", msg_alerta, "#FF4500")
+                    if modo_voz: hablar_no_bloqueante("Alerta de seguridad. ¿Autorizás ejecutar este comando de Git?")
+                    CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg_alerta]}])
+                    return
+                else:
+                    reportes_acciones.append(f"Git Libre: Error en formato o ruta no encontrada.")
                 
             elif linea_limpia.startswith("crear_carpeta:"):
                 ruta_corta = linea[linea.lower().find("crear_carpeta:") + 14:].replace("[", "").replace("]", "").replace("*", "").strip()

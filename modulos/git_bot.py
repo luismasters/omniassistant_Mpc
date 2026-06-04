@@ -71,3 +71,19 @@ def sincronizar_proyecto_git(ruta_proyecto, mensaje_commit="Subida automática v
         return f"Éxito total. Sincronizado correctamente en: {destino}"
     else:
         return f"Se guardó localmente, pero falló la subida a internet: {err}"
+
+def ejecutar_comando_git_libre(ruta_proyecto, comando_git):
+    """Ejecuta cualquier comando de Git (reset, checkout, pull, etc.) directamente en la consola."""
+    if not os.path.exists(ruta_proyecto):
+        return f"Error: La carpeta {ruta_proyecto} no existe."
+        
+    if not comando_git.strip().startswith("git "):
+        return f"Error de seguridad: Solo se permiten comandos que empiecen con 'git '. Recibido: {comando_git}"
+        
+    print(f"⚙️ [GIT REAL] Ejecutando comando libre: {comando_git}")
+    exito, stdout, err = ejecutar_comando(comando_git, ruta_proyecto)
+    
+    if exito:
+        return f"Comando '{comando_git}' ejecutado con éxito:\n{stdout}"
+    else:
+        return f"Error al ejecutar '{comando_git}':\n{err}"
