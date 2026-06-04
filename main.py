@@ -210,4 +210,4 @@ if __name__ == "__main__":
 
     agregar_mensaje_ui("Sistema", "OmniAssistant RAG Multi-Archivo inicializado. Presioná Tab para contraer.", "#80868B")
 
-    root.mainloop()
+    root.mainloop() 
