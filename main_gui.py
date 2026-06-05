@@ -2,6 +2,7 @@ import customtkinter as ctk
 import threading
 import keyboard
 import time
+import sys
 
 # Importaciones de tu backend
 from config import TECLA_HABLAR
@@ -37,6 +38,21 @@ USER_BUBBLE_MAX_H = MAX_USER_LINES * LINE_HEIGHT_PX + 20
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
+
+# ─────────────────────────────────────────────────────────────────────────────
+class LogRedirector:
+    def __init__(self, target_widget):
+        self.target = target_widget
+    def write(self, string):
+        if string.strip():
+            # Evitamos agregar un salto de línea extra si el string ya lo trae
+            self.target.after(0, lambda: self._add_log(string.strip()))
+    def flush(self): pass
+    def _add_log(self, text):
+        self.target.configure(state="normal")
+        self.target.insert("end", text + "\n")
+        self.target.see("end")
+        self.target.configure(state="disabled")
 
 # ─────────────────────────────────────────────────────────────────────────────
 class UserBubble(ctk.CTkFrame):
@@ -144,14 +160,34 @@ class OmniApp(ctk.CTk):
         self.grid_rowconfigure(0, weight=1)
 
         self._build_sidebar()
-        self._build_chat_area()
-        self._build_input_bar()
-
+        self._build_main_area() # Contenedor principal para pestañas
+        
         self.burbuja_ia_actual: AIBubble | None = None
-        self.entry.focus()
-
+        
         # Iniciar el motor de voz en segundo plano
         threading.Thread(target=self.motor_microfono, daemon=True).start()
+
+    def _build_main_area(self):
+        # CORRECCIÓN: Quitamos el 'transparent' de segmented_button_fg_color
+        self.tabs = ctk.CTkTabview(
+            self, 
+            fg_color="transparent", 
+            segmented_button_fg_color=BG_INPUT,
+            segmented_button_selected_color=ACCENT,
+            segmented_button_selected_hover_color=ACCENT_HOVER
+        )
+        self.tabs.grid(row=0, column=1, sticky="nsew")
+        self.tab_chat = self.tabs.add("Chat")
+        self.tab_logs = self.tabs.add("Logs")
+        
+        self._build_chat_area(self.tab_chat)
+        self._build_log_area(self.tab_logs)
+
+    def _build_log_area(self, parent):
+        self.log_box = ctk.CTkTextbox(parent, fg_color=BG_SIDEBAR, text_color="#a8a29e", font=("Consolas", 12))
+        self.log_box.pack(fill="both", expand=True, padx=10, pady=10)
+        self.log_box.configure(state="disabled")
+        sys.stdout = LogRedirector(self.log_box)
 
     # ── Sidebar ────────────────────────────────────────────────────────────────
     def _build_sidebar(self):
@@ -192,13 +228,13 @@ class OmniApp(ctk.CTk):
         sb.grid_rowconfigure(9, weight=1)
 
     # ── Área de chat ────────────────────────────────────────────────────────────
-    def _build_chat_area(self):
+    def _build_chat_area(self, parent):
         self.chat_scroll = ctk.CTkScrollableFrame(
-            self, fg_color=BG_CHAT, corner_radius=0,
+            parent, fg_color=BG_CHAT, corner_radius=0,
             scrollbar_button_color="#3c3835",
             scrollbar_button_hover_color="#57534e"
         )
-        self.chat_scroll.grid(row=0, column=1, sticky="nsew")
+        self.chat_scroll.pack(fill="both", expand=True)
         self.chat_scroll.grid_columnconfigure(0, weight=1)
 
         self._welcome_label = ctk.CTkLabel(
@@ -207,6 +243,8 @@ class OmniApp(ctk.CTk):
             font=("Segoe UI", 24, "bold"), text_color="#3c3835"
         )
         self._welcome_label.pack(expand=True, pady=(100, 0))
+        
+        self._build_input_bar()
 
     # ── Input bar ───────────────────────────────────────────────────────────────
     def _build_input_bar(self):
@@ -276,26 +314,21 @@ class OmniApp(ctk.CTk):
         """Hilo que escucha la tecla F8 para capturar voz"""
         while True:
             try:
-                # Si Cortana está hablando y apretás Espacio, se calla
                 if audio_modulo.hablando_actualmente and keyboard.is_pressed('space'):
                     detener_voz()
                     while keyboard.is_pressed('space'): time.sleep(0.05)
                     continue
 
-                # Si apretás F8 (TECLA_HABLAR)
                 if keyboard.is_pressed(TECLA_HABLAR):
                     if audio_modulo.hablando_actualmente: 
                         detener_voz()
                     
-                    # Llamamos a tu módulo de audio
                     texto_voz = capturar_voz_micro()
                     
                     if texto_voz:
-                        # Mostramos el texto en la interfaz (con un iconito para diferenciar)
                         self.after(0, self._agregar_usuario, f"🎤 {texto_voz}")
                         self.burbuja_ia_actual = None
                         
-                        # Mandamos a Gemini, indicando que responda por VOZ (modo_voz=True)
                         threading.Thread(target=enviar_a_gemini, args=(texto_voz, True, self.callback_ia), daemon=True).start()
                     
                     while keyboard.is_pressed(TECLA_HABLAR): 
@@ -320,7 +353,6 @@ class OmniApp(ctk.CTk):
         self._agregar_usuario(texto)
         self.burbuja_ia_actual = None
 
-        # Mensaje por texto (modo_voz=False)
         threading.Thread(target=enviar_a_gemini, args=(texto, False, self.callback_ia), daemon=True).start()
 
     def callback_ia(self, remitente, texto: str, color=None, nueva_linea=True):
