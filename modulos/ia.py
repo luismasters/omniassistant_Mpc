@@ -262,6 +262,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             if linea_limpia.startswith("guardar_archivo:"): continue
             
             # --- ANCLAR AL WORKSPACE Y CARGAR SU FOTO DE ESTADO ---
+            # --- ANCLAR AL WORKSPACE Y GENERAR SNAPSHOT EN TIEMPO REAL ---
             if linea_limpia.startswith("anclar:"):
                 nombre_proyecto = linea_limpia[7:].strip()
                 ruta_encontrada = buscar_archivo_o_carpeta(nombre_proyecto)
@@ -269,15 +270,36 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 if ruta_encontrada:
                     WORKSPACE_ACTUAL = ruta_encontrada
                     nombre_proj = os.path.basename(WORKSPACE_ACTUAL)
-                    SNAPSHOT_ACTUAL = cargar_snapshot(nombre_proj)
                     
-                    msg_ancla = f"⚓ Anclada al proyecto: {WORKSPACE_ACTUAL}"
-                    if SNAPSHOT_ACTUAL: msg_ancla += "\n🧠 Memoria del proyecto recuperada."
+                    # 1. Escaneo físico del directorio (igual que el botón de la UI)
+                    estructura = []
+                    for raiz, carpetas, archivos in os.walk(WORKSPACE_ACTUAL):
+                        # Filtramos las carpetas basura
+                        carpetas[:] = [d for d in carpetas if d not in ['.git', '__pycache__', 'venv', 'node_modules']]
+                        
+                        nivel = raiz.replace(WORKSPACE_ACTUAL, '').count(os.sep)
+                        indentacion = ' ' * 4 * nivel
+                        estructura.append(f"{indentacion}📂 {os.path.basename(raiz)}/")
+                        
+                        subindentacion = ' ' * 4 * (nivel + 1)
+                        for f in archivos:
+                            estructura.append(f"{subindentacion}📄 {f}")
+                            
+                    arbol_texto = f"Estructura del proyecto '{nombre_proj}':\n" + "\n".join(estructura)
+                    
+                    # 2. Guardamos el snapshot fresco en ChromaDB
+                    guardar_snapshot(nombre_proj, arbol_texto)
+                    
+                    # 3. Lo cargamos en mi memoria a corto plazo
+                    SNAPSHOT_ACTUAL = arbol_texto 
+                    
+                    msg_ancla = f"⚓ Anclada al proyecto: {WORKSPACE_ACTUAL}\n📸 Snapshot escaneado y actualizado al instante."
                         
                     print(f"\n{msg_ancla}")
                     if ui_callback: ui_callback("⚙️ Sistema", msg_ancla, "#81C995")
-                    reportes_acciones.append(f"Workspace fijado con éxito.")
-                else: reportes_acciones.append(f"Error: No encontré la carpeta '{nombre_proyecto}'")
+                    reportes_acciones.append(f"Workspace fijado y snapshot renovado con éxito.")
+                else: 
+                    reportes_acciones.append(f"Error: No encontré la carpeta '{nombre_proyecto}'")
 
             # --- NUEVO: GUARDAR EL SNAPSHOT EN LA BÓVEDA ---
             elif linea_limpia.startswith("snapshot:"):

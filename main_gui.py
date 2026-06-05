@@ -1,4 +1,6 @@
+import os
 import customtkinter as ctk
+from customtkinter import filedialog
 import threading
 import keyboard
 import time
@@ -9,6 +11,8 @@ from config import TECLA_HABLAR
 from modulos.ia import enviar_a_gemini
 from modulos.audio import capturar_voz_micro, detener_voz
 import modulos.audio as audio_modulo
+import modulos.ia as motor_ia
+from modulos.memoria import guardar_snapshot
 
 # ─── Paleta de colores (inspirada en Claude.ai) ───────────────────────────────
 BG_MAIN       = "#1c1917"
@@ -168,7 +172,6 @@ class OmniApp(ctk.CTk):
         threading.Thread(target=self.motor_microfono, daemon=True).start()
 
     def _build_main_area(self):
-        # CORRECCIÓN: Quitamos el 'transparent' de segmented_button_fg_color
         self.tabs = ctk.CTkTabview(
             self, 
             fg_color="transparent", 
@@ -198,7 +201,7 @@ class OmniApp(ctk.CTk):
         sb.grid_rowconfigure(8, weight=1)
 
         ctk.CTkLabel(
-            sb, text="◆ OmniAssistant",
+            sb, text="◆ Cortana",
             font=("Segoe UI", 14, "bold"), text_color=ACCENT
         ).grid(row=0, column=0, padx=16, pady=(22, 2), sticky="w")
 
@@ -213,7 +216,7 @@ class OmniApp(ctk.CTk):
         botones = [
             ("＋  Nueva conversación", self._nueva_conversacion),
             ("⚙   Configuración",      lambda: None),
-            ("◉   Anclar proyecto",    lambda: None),
+            ("◉   Anclar proyecto",    self._anclar_proyecto),
         ]
         for i, (txt, cmd) in enumerate(botones, start=3):
             ctk.CTkButton(
@@ -226,6 +229,51 @@ class OmniApp(ctk.CTk):
             sb, text="v0.1.0", font=FONT_UI_SM, text_color=TEXT_DIM
         ).grid(row=9, column=0, padx=16, pady=14, sticky="sw")
         sb.grid_rowconfigure(9, weight=1)
+
+    # ── Lógica para Anclar Proyecto ─────────────────────────────────────────────
+    def _anclar_proyecto(self):
+        # 1. Levantar el diálogo de selección del sistema
+        ruta_directorio = filedialog.askdirectory(title="Selecciona la carpeta del proyecto a anclar")
+        
+        if not ruta_directorio:
+            return # El usuario canceló la selección
+            
+        nombre_proyecto = os.path.basename(ruta_directorio)
+        
+        # 2. Escaneo profundo de la estructura (Generación del Snapshot)
+        estructura = []
+        for raiz, carpetas, archivos in os.walk(ruta_directorio):
+            # Filtro para ignorar directorios pesados y sin valor semántico
+            carpetas[:] = [d for d in carpetas if d not in ['.git', '__pycache__', 'venv', 'node_modules']]
+            
+            nivel = raiz.replace(ruta_directorio, '').count(os.sep)
+            indentacion = ' ' * 4 * nivel
+            estructura.append(f"{indentacion}📂 {os.path.basename(raiz)}/")
+            
+            subindentacion = ' ' * 4 * (nivel + 1)
+            for f in archivos:
+                estructura.append(f"{subindentacion}📄 {f}")
+                
+        arbol_texto = f"Estructura del proyecto '{nombre_proyecto}':\n" + "\n".join(estructura)
+        
+        # 3. Guardar el snapshot en la Bóveda Vectorial ChromaDB
+        guardar_snapshot(nombre_proyecto, arbol_texto)
+        
+        # 4. Aislar el contexto inyectando el estado en el cerebro de la IA
+        motor_ia.WORKSPACE_ACTUAL = ruta_directorio
+        motor_ia.SNAPSHOT_ACTUAL = arbol_texto
+        
+        # 5. Feedback visual en la interfaz gráfica
+        mensaje_exito = f"⚓ Proyecto '{nombre_proyecto}' anclado con éxito. Contexto aislado y snapshot actualizado en memoria."
+        
+        self._agregar_usuario(f"*(Sistema: Anclando workspace en {ruta_directorio})*")
+        
+        if not self.burbuja_ia_actual:
+            self.burbuja_ia_actual = AIBubble(self.chat_scroll)
+            self.burbuja_ia_actual.pack(fill="x", padx=16, pady=(2, 6))
+            
+        self.burbuja_ia_actual.append_text(mensaje_exito)
+        self._scroll_abajo()
 
     # ── Área de chat ────────────────────────────────────────────────────────────
     def _build_chat_area(self, parent):
