@@ -5,8 +5,7 @@ import keyboard
 import msvcrt
 import warnings
 import tkinter as tk
-from tkinter import scrolledtext
-from tkinter import filedialog 
+from tkinter import scrolledtext, filedialog 
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
@@ -35,28 +34,23 @@ def agregar_mensaje_ui(remitente, texto, color="#E8EAED", nueva_linea=True):
         def actualizar():
             historial_chat.config(state=tk.NORMAL)
             
-            if remitente:
-                color_remitente = color
-                if "luis" in remitente.lower(): color_remitente = "#81C995" 
-                elif "cortana" in remitente.lower(): color_remitente = "#A8C7FA" 
-                elif "sistema" in remitente.lower(): color_remitente = "#80868B" 
-                
-                if color_remitente not in historial_chat.tag_names():
-                    historial_chat.tag_config(color_remitente, foreground=color_remitente)
-                
-                historial_chat.insert(tk.END, f"{remitente}: ", ("bold", color_remitente))
-                
-            if texto:
-                color_texto = "#E8EAED" 
-                if remitente and "sistema" in remitente.lower(): color_texto = "#80868B"
-                elif remitente and "luis" in remitente.lower(): color_texto = "#C4EDD0" 
-                    
-                if color_texto not in historial_chat.tag_names():
-                    historial_chat.tag_config(color_texto, foreground=color_texto)
-                    
-                historial_chat.insert(tk.END, texto, (color_texto,))
-                
-            if nueva_linea: historial_chat.insert(tk.END, "\n\n")
+            # --- INTERFAZ MODERNA (Estilo Chat) ---
+            es_usuario = "luis" in remitente.lower()
+            align = "e" if es_usuario else "w"
+            bg_burbuja = "#1E88E5" if es_usuario else "#37474F"
+            fg_texto = "white"
+            
+            frame_msg = tk.Frame(historial_chat, bg="#18181B")
+            historial_chat.window_create(tk.END, window=frame_msg)
+            
+            lbl_remitente = tk.Label(frame_msg, text=remitente, fg="#9E9E9E", bg="#18181B", font=("Segoe UI", 8, "bold"))
+            lbl_remitente.pack(anchor=align, padx=10)
+            
+            lbl_texto = tk.Label(frame_msg, text=texto, fg=fg_texto, bg=bg_burbuja, 
+                                 font=("Segoe UI", 11), padx=10, pady=5, wraplength=400, justify="left")
+            lbl_texto.pack(anchor=align, padx=10, pady=(0, 10))
+            
+            historial_chat.insert(tk.END, "\n")
             historial_chat.see(tk.END)
             historial_chat.config(state=tk.DISABLED)
         root.after(0, actualizar)
@@ -87,33 +81,30 @@ def procesar_envio_texto(event=None):
 
 def accion_adjuntar():
     rutas_archivos = filedialog.askopenfilenames(
-        title="Selecciona los archivos para Cortana (Puedes elegir varios)",
+        title="Selecciona archivos para Cortana",
         filetypes=[("Documentos y Código", "*.pdf *.txt *.docx *.py *.js *.cs *.html *.json *.md *.csv")]
     )
     if rutas_archivos:
         threading.Thread(target=procesar_archivo_adjunto, args=(rutas_archivos, agregar_mensaje_ui), daemon=True).start()
 
-ALERTA_GPU_DISPARADA = False
-ALERTA_RAM_DISPARADA = False
-
 def _hilo_alerta_hardware():
     global ALERTA_GPU_DISPARADA, ALERTA_RAM_DISPARADA
+    ALERTA_GPU_DISPARADA = False
+    ALERTA_RAM_DISPARADA = False
     while True:
         time.sleep(30)
         try:
             _, ram_uso, _, gpu_temp = obtener_estado_pc_valores()
-            if gpu_temp >= 82:
-                if not ALERTA_GPU_DISPARADA and not audio_modulo.hablando_actualmente:
-                    actualizar_estado_ui(f"🚨 GPU a {gpu_temp}°C!", "#FF0000")
-                    hablar_no_bloqueante(f"Luis, la placa de video llegó a {gpu_temp} grados.")
-                    ALERTA_GPU_DISPARADA = True
+            if gpu_temp >= 82 and not ALERTA_GPU_DISPARADA and not audio_modulo.hablando_actualmente:
+                actualizar_estado_ui(f"🚨 GPU a {gpu_temp}°C!", "#FF0000")
+                hablar_no_bloqueante(f"Luis, la placa de video llegó a {gpu_temp} grados.")
+                ALERTA_GPU_DISPARADA = True
             else: ALERTA_GPU_DISPARADA = False
                 
-            if ram_uso >= 92:
-                if not ALERTA_RAM_DISPARADA and not audio_modulo.hablando_actualmente:
-                    actualizar_estado_ui(f"🚨 RAM saturada al {ram_uso}%!", "#FF0000")
-                    hablar_no_bloqueante(f"Luis, memoria RAM al {ram_uso} por ciento.")
-                    ALERTA_RAM_DISPARADA = True
+            if ram_uso >= 92 and not ALERTA_RAM_DISPARADA and not audio_modulo.hablando_actualmente:
+                actualizar_estado_ui(f"🚨 RAM saturada al {ram_uso}%!", "#FF0000")
+                hablar_no_bloqueante(f"Luis, memoria RAM al {ram_uso} por ciento.")
+                ALERTA_RAM_DISPARADA = True
             else: ALERTA_RAM_DISPARADA = False
         except: pass
 
@@ -123,10 +114,11 @@ def motor_microfono():
 
     while True:
         try:
-            if audio_modulo.hablando_actualmente and keyboard.is_pressed('esc'):
+            # BOTÓN DE PÁNICO: Espacio para silenciar
+            if audio_modulo.hablando_actualmente and keyboard.is_pressed('space'):
                 detener_voz()
-                actualizar_estado_ui("🛑 Interrumpida", "#FFA500")
-                while keyboard.is_pressed('esc'): time.sleep(0.05)
+                actualizar_estado_ui("🔇 Silenciada", "#FFA500")
+                while keyboard.is_pressed('space'): time.sleep(0.05)
                 actualizar_estado_ui("🔵 Cortana | En línea", "#A8C7FA")
                 continue
 
@@ -138,11 +130,6 @@ def motor_microfono():
                 
                 if texto_voz:
                     agregar_mensaje_ui("Luis (Voz)", texto_voz, "#81C995")
-                    texto_corto = texto_voz[:27] + "..." if len(texto_voz) > 30 else texto_voz
-                    actualizar_estado_ui(f"🗣️ {texto_corto}", "#E8EAED")
-                    
-                    if texto_voz.lower().strip(".,¿?") in ["cerrar", "salir", "chau"]: os._exit(0)
-                        
                     actualizar_estado_ui("🧠 Pensando...", "#FF00FF")
                     enviar_a_gemini(texto_voz, modo_voz=True, ui_callback=agregar_mensaje_ui)
                     actualizar_estado_ui("🔵 Cortana | En línea", "#A8C7FA")
@@ -151,7 +138,6 @@ def motor_microfono():
                 
                 while keyboard.is_pressed(TECLA_HABLAR): time.sleep(0.05)
                 continue
-            
             time.sleep(0.02)
         except KeyboardInterrupt:
             os._exit(0)
@@ -194,7 +180,7 @@ if __name__ == "__main__":
 
     historial_chat = scrolledtext.ScrolledText(
         frame_chat, bg="#18181B", fg="#E8EAED", font=("Segoe UI", 11),
-        state=tk.DISABLED, wrap=tk.WORD, bd=0, padx=12, pady=12
+        state=tk.DISABLED, wrap=tk.WORD, bd=0, padx=0, pady=12
     )
     historial_chat.pack(fill="both", expand=True, side=tk.TOP)
     historial_chat.tag_config("bold", font=("Segoe UI", 11, "bold"))
@@ -210,4 +196,4 @@ if __name__ == "__main__":
 
     agregar_mensaje_ui("Sistema", "OmniAssistant RAG Multi-Archivo inicializado. Presioná Tab para contraer.", "#80868B")
 
-    root.mainloop() 
+    root.mainloop()
