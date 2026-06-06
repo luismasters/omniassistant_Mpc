@@ -17,3 +17,32 @@ Voz: OpenAI Whisper (STT) / Edge TTS
 SO & Automatización: psutil, win32gui, screeninfo, thefuzz (Similitud de strings)
 
 GUI: Tkinter
+
+-------------------------------------------------------------------
+
+Actúa como un Desarrollador Python Senior y Arquitecto de Software.
+
+Estoy desarrollando "OmniAssistant", un asistente de IA local para Windows. Actualmente, mi sistema modifica el código de mis proyectos utilizando un enfoque de "reescritura total": la IA devuelve el comando guardar_archivo: ruta || contenido_completo y mi script sobreescribe el archivo de principio a fin.
+
+Quiero optimizar esto implementando una funcionalidad de "Cirugía Láser" (Modificación Parcial) para ahorrar tokens de salida y hacer el sistema más seguro.
+
+Necesito que me des el código exacto para implementar el nuevo comando: modificar_archivo: ruta ||| código_viejo_exacto ||| código_nuevo
+
+Requisitos de la implementación:
+
+En modulos/archivos.py:
+Crea una función llamada modificar_archivo_local(ruta, fragmento_viejo, fragmento_nuevo). Esta función debe abrir el archivo, buscar el bloque de texto fragmento_viejo de forma exacta (respetando saltos de línea e indentación), reemplazarlo por fragmento_nuevo y guardar el archivo. Debe manejar errores (ej. si el fragmento viejo no se encuentra) y devolver un string con el resultado.
+
+En modulos/ia.py (System Prompt):
+Indícame cómo actualizar la variable contexto_sistema para enseñarle a la IA a usar este nuevo comando. Debe quedar muy claro que para modificar, primero debe leer el archivo, y luego usar los separadores ||| enviando el código viejo exacto y el nuevo.
+
+En modulos/ia.py (Interceptor de comandos):
+Escribe el bloque de código en Python que debo agregar en mi flujo de intercepción de respuestas (donde analizo respuesta_ia.lower()). El código debe:
+
+Detectar si la respuesta contiene modificar_archivo:.
+
+Hacer un .split("|||") para extraer la ruta, el fragmento viejo y el nuevo.
+
+CRÍTICO: Implementar una limpieza de Markdown con expresiones regulares (Regex) o .replace(), ya que las IA suelen envolver los bloques de código con backticks (python ... ) y esto hace que la búsqueda exacta del string falle. Debe limpiar esos backticks antes de llamar a la función de modificación física.
+
+Por favor, dame solo los bloques de código actualizados y las instrucciones precisas de dónde pegarlos.-------------------------------------------------
