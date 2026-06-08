@@ -194,6 +194,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 "- Para GITHUB: github: ruta\n"
                 "- Para GITHUB RESET: github_reset: ruta || url\n"
                 "- Para GIT COMANDO: git_comando: ruta || comando\n"
+                "- Para ESCANEAR y analizar TODO el proyecto generando el PROJECT_STATE.md: escanear_proyecto:\n"
             )
             modelo_activo = "gemini"
 
@@ -406,6 +407,65 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 ruta_corta = linea[linea.lower().find("crear_carpeta:") + 14:].replace("[", "").replace("]", "").replace("*", "").strip()
                 ruta_final = os.path.join(WORKSPACE_ACTUAL, ruta_corta) if WORKSPACE_ACTUAL and not os.path.isabs(ruta_corta) else ruta_corta
                 reportes_acciones.append(f"Carpeta: {crear_carpeta(ruta_final)}")
+            # ==========================================================
+            # INICIO DEL NUEVO BLOQUE DEL CRAWLER
+            # ==========================================================
+            elif linea_limpia.startswith("escanear_proyecto:"):
+                if WORKSPACE_ACTUAL:
+                    if ui_callback: ui_callback("⚙️ Sistema", "🔍 Iniciando Crawler... Extrayendo todo tu código base.", "#80868B")
+                    
+                    from modulos.crawler import extraer_codigo_proyecto
+                    from modulos.archivos import escribir_archivo
+                    
+                    codigo_completo = extraer_codigo_proyecto(WORKSPACE_ACTUAL)
+                    
+                    prompt_analisis = f"""Actúa como el Arquitecto Principal del proyecto.
+A continuación te proporciono el código completo de mi aplicación actual:
+
+{codigo_completo}
+
+Tu tarea es crear un documento de estado (PROJECT_STATE.md) que servirá como 'Fuente de la Verdad' para futuras planificaciones.
+El documento DEBE contener estrictamente:
+1. **Resumen Ejecutivo:** Propósito general del software.
+2. **Arquitectura:** Lista de los módulos principales y para qué sirve cada archivo.
+3. **Estado Actual:** Qué funcionalidades ya están construidas y operativas.
+4. **Deuda Técnica / Próximos Pasos:** Posibles errores ocultos, funciones repetitivas que deban limpiarse o mejoras de arquitectura.
+
+Responde ÚNICAMENTE con el Markdown final estructurado. No uses saludos, ni confirmaciones."""
+
+                    if ui_callback: ui_callback("⚙️ Sistema", "🧠 Analizando arquitectura global con DeepSeek (Thinking)...", "#80868B")
+                    print("\n[CRAWLER] Enviando mega-contexto a DeepSeek V4...")
+                    
+                    try:
+                        # Llamada especial directa a DeepSeek para el mega-análisis
+                        response = cliente_deepseek.chat.completions.create(
+                            model="deepseek-v4-flash",
+                            messages=[{"role": "user", "content": prompt_analisis}],
+                            extra_body={"thinking": {"type": "enabled"}}
+                        )
+                        
+                        estado_md = response.choices[0].message.content
+                        
+                        # Limpiamos los backticks si la IA los pone
+                        if estado_md.startswith("```markdown"):
+                            estado_md = estado_md.split("```markdown")[1].rsplit("```", 1)[0].strip()
+                        elif estado_md.startswith("```"):
+                            estado_md = estado_md.split("```")[1].rsplit("```", 1)[0].strip()
+                            
+                        ruta_state = os.path.join(WORKSPACE_ACTUAL, "PROJECT_STATE.md")
+                        escribir_archivo(ruta_state, estado_md)
+                        
+                        msg_exito = "✅ ¡PROJECT_STATE.md generado con éxito! El Planificador ya tiene visión total del código."
+                        if ui_callback: ui_callback("⚙️ Sistema", msg_exito, "#86efac")
+                        print(msg_exito)
+                        
+                    except Exception as e:
+                        if ui_callback: ui_callback("⚙️ Sistema", f"❌ Error en el Crawler: {e}", "#ff4500")
+                else:
+                    if ui_callback: ui_callback("🤖 Cortana", "Necesito estar dentro del Modo Planificador o Programador para saber qué proyecto escanear.", "#FFA500")
+            # ==========================================================
+            # FIN DEL NUEVO BLOQUE DEL CRAWLER
+            # ==========================================================    
             
             elif linea_limpia.startswith("abrir:") or linea_limpia.startswith("cerrar:") or linea_limpia.startswith("mover:"):
                 cmd_extraido = linea_limpia[linea_limpia.find(":")+1:].strip()
