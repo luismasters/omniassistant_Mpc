@@ -7,7 +7,7 @@ from openai import OpenAI # Cliente para DeepSeek
 # Importación de llaves
 from config import GEMINI_API_KEY, DEEPSEEK_API_KEY
 
-from modulos.archivos import crear_carpeta, crear_archivo, eliminar_elemento, leer_contenido_archivo, buscar_archivo_local, escribir_archivo
+from modulos.archivos import crear_carpeta,eliminar_elemento, leer_contenido_archivo, buscar_archivo_local, escribir_archivo
 from modulos.sistema import ejecutar_comando_sistema, obtener_ventanas_activas, buscar_archivo_o_carpeta, explorar_directorio
 from modulos.busqueda import buscar_en_internet
 from modulos.audio import hablar_no_bloqueante
@@ -310,32 +310,37 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         comando_busqueda_detectado = None
 
         if "guardar_archivo:" in respuesta_ia.lower():
-            idx = respuesta_ia.lower().find("guardar_archivo:")
-            texto_comando = respuesta_ia[idx + 16:].strip()
-            if "||" in texto_comando:
-                ruta_f, contenido_f = texto_comando.split("||", 1)
-                ruta_f = ruta_f.strip()
-                contenido_f = contenido_f.strip()
-                
-                if contenido_f.startswith("```"):
-                    partes = contenido_f.split("\n", 1)
-                    if len(partes) > 1: contenido_f = partes[1]
-                if contenido_f.endswith("```"):
-                    contenido_f = contenido_f.rsplit("```", 1)[0].strip()
+            try:
+                idx = respuesta_ia.lower().find("guardar_archivo:")
+                texto_comando = respuesta_ia[idx + 16:].strip()
+                if "||" in texto_comando:
+                    ruta_f, contenido_f = texto_comando.split("||", 1)
+                    ruta_f = ruta_f.strip()
+                    contenido_f = contenido_f.strip()
                     
-                if WORKSPACE_ACTUAL and not os.path.isabs(ruta_f):
-                    ruta_en_workspace = None
-                    nombre_archivo_buscado = os.path.basename(ruta_f).lower()
-                    for raiz, _, archivos in os.walk(WORKSPACE_ACTUAL):
-                        if nombre_archivo_buscado in [a.lower() for a in archivos]:
-                            ruta_en_workspace = os.path.join(raiz, os.path.basename(ruta_f))
-                            break
-                    ruta_f = ruta_en_workspace if ruta_en_workspace else os.path.join(WORKSPACE_ACTUAL, os.path.basename(ruta_f))
-                elif not os.path.isabs(ruta_f):
-                    ruta_real = buscar_archivo_local(ruta_f)
-                    ruta_f = ruta_real if ruta_real else os.path.join(os.path.expanduser("~"), "Desktop", ruta_f)
-                
-                reportes_acciones.append(f"Archivo guardado: {escribir_archivo(ruta_f, contenido_f.strip())}")
+                    if contenido_f.startswith("```"):
+                        partes = contenido_f.split("\n", 1)
+                        if len(partes) > 1: contenido_f = partes[1]
+                    if contenido_f.endswith("```"):
+                        contenido_f = contenido_f.rsplit("```", 1)[0].strip()
+                        
+                    if WORKSPACE_ACTUAL and not os.path.isabs(ruta_f):
+                        ruta_en_workspace = None
+                        nombre_archivo_buscado = os.path.basename(ruta_f).lower()
+                        for raiz, _, archivos in os.walk(WORKSPACE_ACTUAL):
+                            if nombre_archivo_buscado in [a.lower() for a in archivos]:
+                                ruta_en_workspace = os.path.join(raiz, os.path.basename(ruta_f))
+                                break
+                        ruta_f = ruta_en_workspace if ruta_en_workspace else os.path.join(WORKSPACE_ACTUAL, os.path.basename(ruta_f))
+                    elif not os.path.isabs(ruta_f):
+                        ruta_real = buscar_archivo_local(ruta_f)
+                        ruta_f = ruta_real if ruta_real else os.path.join(os.path.expanduser("~"), "Desktop", ruta_f)
+                    
+                    reportes_acciones.append(f"Archivo guardado: {escribir_archivo(ruta_f, contenido_f.strip())}")
+            except Exception as e:
+                msg_error = f"❌ Error local al guardar el archivo: {e}"
+                print(msg_error)
+                if ui_callback: ui_callback("⚙️ Sistema", msg_error, "#ff4500")
 
         lineas = respuesta_ia.split('\n')
         
@@ -415,7 +420,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                     if ui_callback: ui_callback("⚙️ Sistema", "🔍 Iniciando Crawler... Extrayendo todo tu código base.", "#80868B")
                     
                     from modulos.crawler import extraer_codigo_proyecto
-                    from modulos.archivos import escribir_archivo
+                    # ¡LÍNEA PROBLEMÁTICA BORRADA!
                     
                     codigo_completo = extraer_codigo_proyecto(WORKSPACE_ACTUAL)
                     
