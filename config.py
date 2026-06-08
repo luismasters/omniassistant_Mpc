@@ -7,6 +7,7 @@ load_dotenv()
 # Rescatamos la llave
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 
 # --- NUEVA CONFIGURACIÓN DE AUDIO DISTRIBUIBLE ---
 WHISPER_MODEL_SIZE = os.getenv("WHISPER_MODEL_SIZE", "medium")

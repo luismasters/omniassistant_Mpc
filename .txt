@@ -18,7 +18,7 @@ SO & Automatización: psutil, win32gui, screeninfo, thefuzz (Similitud de string
 
 GUI: Tkinter
 
--------------------------------------------------------------------
+-----------------------------------------------pront metodo para modificacion por bloques y no por total --------------------
 
 Actúa como un Desarrollador Python Senior y Arquitecto de Software.
 
@@ -46,3 +46,30 @@ Hacer un .split("|||") para extraer la ruta, el fragmento viejo y el nuevo.
 CRÍTICO: Implementar una limpieza de Markdown con expresiones regulares (Regex) o .replace(), ya que las IA suelen envolver los bloques de código con backticks (python ... ) y esto hace que la búsqueda exacta del string falle. Debe limpiar esos backticks antes de llamar a la función de modificación física.
 
 Por favor, dame solo los bloques de código actualizados y las instrucciones precisas de dónde pegarlos.-------------------------------------------------
+
+
+
+--------------------------------------------------pront para prueba de pensamiento antes de modificar------------------------------------
+
+Copialo y guardalo para cuando quieras poner a prueba el sistema:
+
+Actúa como Arquitecto de Software de OmniAssistant.
+
+Necesito implementar la funcionalidad del botón "◉ Anclar proyecto" en la interfaz. El objetivo de este botón es abrir un selector de carpetas, guardar esa ruta en la memoria del programa y generar un "Snapshot" de la estructura de esa carpeta para aislar el contexto de trabajo.
+
+En base al contexto del proyecto que ya tienes en memoria, necesito que hagas lo siguiente:
+
+Identifica exactamente qué archivos .py del proyecto necesitan ser modificados para que esta función opere correctamente desde que el usuario hace clic hasta que el cerebro de la IA recibe la información.
+
+Explica brevemente por qué elegiste cada archivo y qué responsabilidad tendrá en esta función.
+
+Diseña el plan de ataque paso a paso.
+
+⚠️ REGLA ESTRICTA: NO escribas ni una sola línea de código en esta respuesta. Solo quiero tu análisis lógico, arquitectónico y el plan de acción.
+
+¿Por qué este prompt te va a salvar de muchos dolores de cabeza?
+Al ponerle la regla estricta de "NO escribas código", estás bloqueando el impulso automático que tienen las IAs de querer resolver todo de golpe. Las obligás a usar sus tokens para pensar y argumentar.
+
+Cuando uses este prompt (ya sea con DeepSeek, Claude o el modelo que prefieras), vas a poder leer su plan. Si ves que te dice "Voy a modificar main.py, ia.py y busqueda.py", vos mismo como programador te vas a dar cuenta al instante si está alucinando (porque busqueda.py no tiene nada que ver ahí) y vas a poder corregirla antes de que te rompa el proyecto.
+
+¡Guardátelo y usalo cada vez que vayas a implementar un hito nuevo grande! Cualquier otra cosa que quieras debatir sobre la API o la arquitectura, acá estoy.

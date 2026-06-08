@@ -49,16 +49,24 @@ SYN = {
     "default":  "#e0e0ff",
 }
 
-_F  = "Inter"
-_FM = "JetBrains Mono"
-FONT_CHAT    = (_F, 15)
-FONT_CHAT_MD = (_F, 14)
-FONT_UI      = (_F, 13)
-FONT_UI_SM   = (_F, 11)
-FONT_CODE    = (_FM, 13)
+_F  = "Segoe UI"
+_FM = "Consolas"
+
+TAMANO_BASE = 15
+
+FONT_CHAT    = (_F, TAMANO_BASE)
+FONT_CHAT_MD = (_F, TAMANO_BASE)
+FONT_UI      = (_F, TAMANO_BASE - 1)
+FONT_UI_SM   = (_F, TAMANO_BASE - 2)
+FONT_CODE    = (_FM, TAMANO_BASE - 1)
+
+# tk.Text nativo usa puntos tipográficos; negativo = píxeles (igual que CTk)
+# Esto hace que el texto de la IA se vea del mismo tamaño que el del usuario
+_TK_SIZE     = -TAMANO_BASE        # px equivalente para tk.Text normal
+_TK_SIZE_CO  = -(TAMANO_BASE - 1)  # px equivalente para código inline
 
 MAX_USER_LINES    = 5
-LINE_HEIGHT_PX    = 22
+LINE_HEIGHT_PX    = 24
 USER_BUBBLE_MAX_H = MAX_USER_LINES * LINE_HEIGHT_PX + 20
 
 # Márgenes tipo Bootstrap container — se aplica como padx en pack/grid
@@ -98,7 +106,7 @@ class CodeBlock(ctk.CTkFrame):
                          border_width=1, border_color=BORDER_CODE, **kwargs)
         hdr = ctk.CTkFrame(self, fg_color="#0a0a18", corner_radius=0)
         hdr.pack(fill="x")
-        ctk.CTkLabel(hdr, text=lang or "code", font=(_FM,11),
+        ctk.CTkLabel(hdr, text=lang or "code", font=(_FM, TAMANO_BASE - 3),
                      text_color=TEXT_DIM).pack(side="left", padx=10, pady=5)
         ctk.CTkButton(hdr, text="copiar", width=60, height=24,
                       fg_color="transparent", hover_color=ACCENT_SOFT,
@@ -137,7 +145,7 @@ class TableBlock(ctk.CTkFrame):
             cell.grid(row=0, column=col_i, sticky="nsew", padx=(0,1), pady=(0,1))
             self.grid_columnconfigure(col_i, weight=1)
             ctk.CTkLabel(cell, text=_strip_md(header.strip()),
-                         font=(_F,13,"bold"), text_color=TEXT_PRIMARY,
+                         font=(_F, TAMANO_BASE - 1, "bold"), text_color=TEXT_PRIMARY,
                          anchor="w").pack(padx=10, pady=6, fill="x")
 
         for row_i, row in enumerate(data):
@@ -172,13 +180,14 @@ def _parse_table(lines: list[str]) -> list[list[str]] | None:
 # ─── Texto inline con negrita/itálica ─────────────────────────────────────────
 def _make_inline_text(parent, text: str, wrap_px: int) -> tk.Text:
     """tk.Text de una o más líneas con soporte **bold** *italic* `code`."""
-    t = tk.Text(parent, bg=BG_CHAT, fg=TEXT_AI, font=FONT_CHAT_MD,
+    t = tk.Text(parent, bg=BG_CHAT, fg=TEXT_AI, font=(_F, _TK_SIZE),
                 wrap="word", bd=0, relief="flat", highlightthickness=0,
-                state="normal", cursor="arrow", height=1,
-                width=1)   # width=1 → se expande via pack fill="x"
-    t.tag_configure("bold",        font=(_F, 14, "bold"))
-    t.tag_configure("italic",      font=(_F, 14, "italic"))
-    t.tag_configure("code_inline", font=(_FM,13),
+                state="normal", cursor="xterm", height=1,
+                width=1,   # width=1 → se expande via pack fill="x"
+                selectbackground=ACCENT_SOFT, selectforeground=TEXT_PRIMARY)
+    t.tag_configure("bold",        font=(_F, _TK_SIZE, "bold"))
+    t.tag_configure("italic",      font=(_F, _TK_SIZE, "italic"))
+    t.tag_configure("code_inline", font=(_FM, _TK_SIZE_CO),
                     foreground=SYN["builtin"], background=BG_CODE)
 
     pat = re.compile(r'\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`')
@@ -196,14 +205,25 @@ def _make_inline_text(parent, text: str, wrap_px: int) -> tk.Text:
     t.configure(state="disabled")
     return t
 
-def _auto_height(t: tk.Text, wrap_px: int):
-    """Ajusta altura de tk.Text según líneas reales tras wrap."""
+def _auto_height(t: tk.Text, wrap_px: int = 0):
+    """Ajusta altura de tk.Text usando displaylines (cuenta líneas visuales tras wrap)."""
     t.update_idletasks()
     try:
-        lines = int(t.index("end-1c").split(".")[0])
-        t.configure(height=max(1, lines))
+        result = t.count("1.0", "end", "displaylines")
+        vis_lines = result[0] if result else 1
+        t.configure(height=max(1, vis_lines))
     except Exception:
-        pass
+        try:
+            lines = int(t.index("end-1c").split(".")[0])
+            t.configure(height=max(1, lines))
+        except Exception:
+            pass
+
+def _pack_text(t: tk.Text, parent, pady=(1,1)):
+    """Pack un tk.Text y ajusta su altura sincrónicamente."""
+    t.pack(fill="x", pady=pady)
+    t.update_idletasks()
+    _auto_height(t)
 
 
 # ─── UserBubble ───────────────────────────────────────────────────────────────
@@ -253,10 +273,21 @@ class AIBubble(ctk.CTkFrame):
         # Header
         hdr = ctk.CTkFrame(self, fg_color="transparent")
         hdr.pack(fill="x", padx=4, pady=(12, 4))
-        ctk.CTkLabel(hdr, text="◆", font=(_F,13), text_color=ACCENT, width=20
+        ctk.CTkLabel(hdr, text="◆", font=(_F, TAMANO_BASE), text_color=ACCENT, width=20
                      ).pack(side="left", padx=(0, 6))
-        ctk.CTkLabel(hdr, text="Cortana", font=(_F,12,"bold"), text_color=TEXT_DIM
+        
+        # --- NUEVO: LEER EL MODELO ACTIVO PARA EL TÍTULO ---
+        nombres_modelos = {
+            "general": "Gemini Flash",
+            "planificador": "DeepSeek V4 (Thinking)",
+            "programador": "DeepSeek V4 (Fast)"
+        }
+        modo_actual = getattr(motor_ia, 'MODO_ACTUAL', 'general')
+        nombre_modelo = nombres_modelos.get(modo_actual, "IA")
+        
+        ctk.CTkLabel(hdr, text=f"Cortana ({nombre_modelo})", font=(_F, TAMANO_BASE - 1, "bold"), text_color=TEXT_DIM
                      ).pack(side="left")
+
 
         # Contenedor de contenido
         self._content = ctk.CTkFrame(self, fg_color="transparent")
@@ -369,15 +400,39 @@ class AIBubble(ctk.CTkFrame):
                     TableBlock(parent, rows).pack(fill="x", pady=(6,6))
                 continue
 
-            # ── Lista no ordenada ───────────────────────────────────────────
+            # ── Lista no ordenada — recolectar todos los ítems en un bloque ──
             if stripped.startswith(("- ","* ","• ")):
-                self._add_inline(parent, "  •  " + stripped[2:])
-                i += 1; continue
+                items = []
+                while i < len(lines):
+                    s2 = lines[i].strip()
+                    if s2.startswith(("- ","* ","• ")):
+                        items.append("  •  " + s2[2:])
+                        i += 1
+                    elif s2 and not s2.startswith(("- ","* ","• ")) and not re.match(r'^\d+\. ', s2):
+                        break
+                    elif not s2:
+                        i += 1  # línea vacía entre ítems: ignorar
+                    else:
+                        break
+                self._add_text_block(parent, "\n".join(items))
+                continue
 
-            # ── Lista ordenada ──────────────────────────────────────────────
+            # ── Lista ordenada — recolectar todos los ítems en un bloque ────
             if re.match(r'^\d+\. ', stripped):
-                self._add_inline(parent, "  " + stripped)
-                i += 1; continue
+                items = []
+                while i < len(lines):
+                    s2 = lines[i].strip()
+                    if re.match(r'^\d+\. ', s2):
+                        items.append("  " + s2)
+                        i += 1
+                    elif s2 and not re.match(r'^\d+\. ', s2):
+                        break
+                    elif not s2:
+                        i += 1
+                    else:
+                        break
+                self._add_text_block(parent, "\n".join(items))
+                continue
 
             # ── Bloque de código heurístico (sin backticks) ─────────────────
             # Detecta bloques de 3+ líneas con patrones de código Python/JS/etc.
@@ -420,30 +475,67 @@ class AIBubble(ctk.CTkFrame):
                 para_lines.append(lines[i].strip())
                 i += 1
             if para_lines:
-                self._add_inline(parent, " ".join(para_lines))
+                self._add_text_block(parent, " ".join(para_lines))
 
         # fin while
 
+    def _add_text_block(self, parent, text: str, pady=(1, 1)):
+        """Un solo tk.Text seleccionable para bloques de varias líneas (listas, párrafos)."""
+        t = tk.Text(parent, bg=BG_CHAT, fg=TEXT_AI, font=(_F, _TK_SIZE),
+                    wrap="word", bd=0, relief="flat", highlightthickness=0,
+                    state="normal", cursor="xterm", height=1, width=1,
+                    selectbackground=ACCENT_SOFT, selectforeground=TEXT_PRIMARY)
+        # Insertar con soporte básico de bold/italic por línea
+        pat = re.compile(r'\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`')
+        t.tag_configure("bold",        font=(_F, _TK_SIZE, "bold"))
+        t.tag_configure("italic",      font=(_F, _TK_SIZE, "italic"))
+        t.tag_configure("code_inline", font=(_FM, _TK_SIZE_CO),
+                        foreground=SYN["builtin"], background=BG_CODE)
+        for line_idx, line in enumerate(text.split("\n")):
+            if line_idx > 0:
+                t.insert("end", "\n")
+            last = 0
+            for m in pat.finditer(line):
+                if m.start() > last:
+                    t.insert("end", line[last:m.start()])
+                if m.group(1):   t.insert("end", m.group(1), "bold")
+                elif m.group(2): t.insert("end", m.group(2), "italic")
+                elif m.group(3): t.insert("end", m.group(3), "code_inline")
+                last = m.end()
+            if last < len(line):
+                t.insert("end", line[last:])
+        t.configure(state="disabled")
+        _pack_text(t, parent, pady)
+
     def _add_label(self, parent, text, font, color, pady=(2,2)):
-        ctk.CTkLabel(parent, text=_strip_md(text), font=font,
-                     text_color=color, anchor="w", justify="left",
-                     wraplength=self._wrap_px).pack(fill="x", pady=pady)
+        """Texto seleccionable (headings) con altura sincrónica."""
+        # Convertir tamaño a píxeles negativos si viene en puntos positivos
+        px_font = (font[0], -abs(font[1])) + font[2:] if len(font) >= 2 else font
+        t = tk.Text(parent, bg=BG_CHAT, fg=color, font=px_font,
+                    wrap="word", bd=0, relief="flat", highlightthickness=0,
+                    state="normal", cursor="xterm", height=1, width=1,
+                    selectbackground=ACCENT_SOFT, selectforeground=TEXT_PRIMARY)
+        t.insert("1.0", _strip_md(text))
+        t.configure(state="disabled")
+        _pack_text(t, parent, pady)
 
     def _add_inline(self, parent, text: str):
         pat = re.compile(r'\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`')
         has_md = bool(pat.search(text))
 
         if not has_md:
-            # CTkLabel simple con wraplength → respeta saltos de línea
-            ctk.CTkLabel(parent, text=text, font=FONT_CHAT_MD,
-                         text_color=TEXT_AI, anchor="w", justify="left",
-                         wraplength=self._wrap_px).pack(fill="x", pady=(1,1))
+            t = tk.Text(parent, bg=BG_CHAT, fg=TEXT_AI, font=(_F, _TK_SIZE),
+                        wrap="word", bd=0, relief="flat", highlightthickness=0,
+                        state="normal", cursor="xterm", height=1, width=1,
+                        selectbackground=ACCENT_SOFT, selectforeground=TEXT_PRIMARY)
+            t.insert("1.0", text)
+            t.configure(state="disabled")
+            _pack_text(t, parent)
             return
 
-        # tk.Text para inline MD
+        # tk.Text con bold/italic/code_inline
         t = _make_inline_text(parent, text, self._wrap_px)
-        t.pack(fill="x", pady=(1,1))
-        self.after(20, lambda: _auto_height(t, self._wrap_px))
+        _pack_text(t, parent)
 
 
 # ─── LogRedirector ────────────────────────────────────────────────────────────
@@ -498,28 +590,98 @@ class OmniApp(ctk.CTk):
         sb.grid(row=0, column=0, rowspan=2, sticky="nsew")
         sb.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(sb, text="◆ Cortana", font=(_F,15,"bold"),
+        ctk.CTkLabel(sb, text="◆ Cortana", font=(_F, TAMANO_BASE, "bold"),
                      text_color=ACCENT).grid(row=0, column=0, padx=18, pady=(24,2), sticky="w")
-        ctk.CTkLabel(sb, text="Asistente local", font=FONT_UI_SM,
-                     text_color=TEXT_DIM).grid(row=1, column=0, padx=18, pady=(0,14), sticky="w")
+        
+        # --- NUEVA ETIQUETA DINÁMICA DE MODELO ---
+        self.lbl_modelo_activo = ctk.CTkLabel(sb, text="🧠 Modelo: Gemini Flash", font=FONT_UI_SM,
+                     text_color="#86efac")
+        self.lbl_modelo_activo.grid(row=1, column=0, padx=18, pady=(0,14), sticky="w")
 
         ctk.CTkFrame(sb, height=1, fg_color=SIDEBAR_LINE).grid(
             row=2, column=0, padx=0, sticky="ew")
 
+        # --- NUEVA LISTA DE BOTONES (Sin el botón manual de anclar) ---
+        self.modo_actual = "general"
+
         botones = [
-            ("＋  Nueva conversación", self._nueva_conversacion),
-            ("⚙   Configuración",      lambda: None),
-            ("◉   Anclar proyecto",    self._anclar_proyecto),
+            ("💬  Chat General",       lambda: self._cambiar_modo("general")),
+            ("📐  Modo Planificador",  lambda: self._cambiar_modo("planificador")),
+            ("💻  Modo Programador",   lambda: self._cambiar_modo("programador"))
         ]
+        
+        self.botones_ui = []
         for i, (txt, cmd) in enumerate(botones, start=3):
-            ctk.CTkButton(sb, text=txt, anchor="w", font=FONT_UI,
+            btn = ctk.CTkButton(sb, text=txt, anchor="w", font=FONT_UI,
                           fg_color="transparent", hover_color="#16162a",
                           text_color=TEXT_PRIMARY, corner_radius=6,
-                          command=cmd).grid(row=i, column=0, padx=10, pady=2, sticky="ew")
+                          command=cmd)
+            btn.grid(row=i, column=0, padx=10, pady=2, sticky="ew")
+            self.botones_ui.append(btn)
 
-        ctk.CTkLabel(sb, text="v0.1.0", font=FONT_UI_SM,
+        ctk.CTkLabel(sb, text="v0.2.0 - Multi-Modo", font=FONT_UI_SM,
                      text_color=TEXT_DIM).grid(row=10, column=0, padx=18, pady=16, sticky="sw")
         sb.grid_rowconfigure(10, weight=1)
+
+    # --- FUNCIÓN _CAMBIAR_MODO CON ANCLAJE AUTOMÁTICO ---
+    def _cambiar_modo(self, nuevo_modo):
+        # 1. Verificación automática de entorno para los modos avanzados
+        if nuevo_modo in ["planificador", "programador"]:
+            if not getattr(motor_ia, 'WORKSPACE_ACTUAL', None):
+                ruta = filedialog.askdirectory(title=f"Selecciona el proyecto para el Modo {nuevo_modo.capitalize()}")
+                if not ruta:
+                    return # Si el usuario cancela, no cambiamos de modo
+                
+                motor_ia.WORKSPACE_ACTUAL = ruta
+                nombre_proj = os.path.basename(ruta)
+                
+                # Generamos el árbol del proyecto de forma silenciosa
+                estructura = []
+                for raiz, carpetas, archivos in os.walk(ruta):
+                    carpetas[:] = [d for d in carpetas if d not in ['.git','__pycache__','venv','node_modules']]
+                    nivel = raiz.replace(ruta,'').count(os.sep)
+                    ind  = ' ' * 4 * nivel
+                    sind = ' ' * 4 * (nivel + 1)
+                    estructura.append(f"{ind}📂 {os.path.basename(raiz)}/")
+                    for f in archivos: estructura.append(f"{sind}📄 {f}")
+                arbol = f"Estructura del proyecto '{nombre_proj}':\n" + "\n".join(estructura)
+                
+                # Guardamos el snapshot en formato físico (.cortana/snapshot.json)
+                guardar_snapshot(ruta, arbol)
+                motor_ia.SNAPSHOT_ACTUAL = arbol
+
+        # 2. Aplicamos el cambio de modo
+        self.modo_actual = nuevo_modo
+        motor_ia.MODO_ACTUAL = nuevo_modo 
+        
+        # 3. Limpiamos la UI
+        for w in self.chat_scroll.winfo_children():
+            w.destroy()
+        self.burbuja_ia_actual = None
+        
+        # 4. Mensajes de bienvenida dinámicos (muestran el nombre del proyecto activo)
+        ruta_corta = os.path.basename(getattr(motor_ia, 'WORKSPACE_ACTUAL', '')) if getattr(motor_ia, 'WORKSPACE_ACTUAL', None) else ""
+        
+        mensajes_bienvenida = {
+            "general": "¿En qué puedo ayudarte hoy?",
+            "planificador": f"📐 Modo Planificador\n[ {ruta_corta} ]\n¿Qué vamos a diseñar?",
+            "programador": f"💻 Modo Programador\n[ {ruta_corta} ]\nListo para ejecutar."
+        }
+        
+        self._welcome_label = ctk.CTkLabel(
+            self.chat_scroll, text=mensajes_bienvenida[nuevo_modo],
+            font=(_F, TAMANO_BASE + 6, "bold"), text_color="#2a2a3e")
+        self._welcome_label.pack(expand=True, pady=(120,0))
+        
+        self._agregar_sistema(f"Modo cambiado a: {nuevo_modo.upper()}")
+        
+        # --- ACTUALIZAR ETIQUETA DE LA BARRA LATERAL ---
+        textos_modelos = {
+            "general": "🧠 Modelo: Gemini Flash",
+            "planificador": "🧠 Modelo: DeepSeek V4 (Thinking)",
+            "programador": "🧠 Modelo: DeepSeek V4 (Fast)"
+        }
+        self.lbl_modelo_activo.configure(text=textos_modelos[nuevo_modo])
 
     # ── Main area (tabs) ───────────────────────────────────────────────────────
     def _build_main_area(self):
@@ -554,7 +716,7 @@ class OmniApp(ctk.CTk):
 
         self._welcome_label = ctk.CTkLabel(
             self.chat_scroll, text="¿En qué puedo ayudarte hoy?",
-            font=(_F,26,"bold"), text_color="#2a2a3e")
+            font=(_F, TAMANO_BASE + 11, "bold"), text_color="#2a2a3e")
         self._welcome_label.pack(expand=True, pady=(120,0))
         self._build_input_bar()
 
@@ -568,21 +730,32 @@ class OmniApp(ctk.CTk):
                            border_width=1, border_color=BORDER_INPUT)
         bar.grid(row=0, column=0, padx=CHAT_PAD_X, pady=(12,4), sticky="ew")
         bar.grid_columnconfigure(0, weight=1)
+        bar.grid_columnconfigure(1, weight=0)
+        bar.grid_columnconfigure(2, weight=0)
 
         self.entry = ctk.CTkTextbox(bar, height=48, fg_color="transparent",
                                     font=FONT_CHAT, text_color=TEXT_PRIMARY,
                                     wrap="word", activate_scrollbars=False, border_width=0)
-        self.entry.grid(row=0, column=0, padx=(18,6), pady=6, sticky="ew")
+        self.entry.grid(row=0, column=0, padx=(8,4), pady=6, sticky="ew")
         self.entry.bind("<Return>",       self._on_enter)
         self.entry.bind("<Shift-Return>", self._on_shift_enter)
         self._set_placeholder()
 
+        # Botón adjuntar (📎)
+        self.btn_attach = ctk.CTkButton(
+            bar, text="📎", width=38, height=38,
+            corner_radius=8, fg_color="transparent",
+            hover_color=ACCENT_SOFT,
+            font=(_F, TAMANO_BASE + 1), text_color=TEXT_DIM,
+            command=self._adjuntar_archivo)
+        self.btn_attach.grid(row=0, column=1, padx=(0,2), pady=6)
+
         self.btn_send = ctk.CTkButton(bar, text="▲", width=42, height=42,
                                       corner_radius=10, fg_color=ACCENT,
                                       hover_color=ACCENT_HOVER,
-                                      font=(_F,14,"bold"), text_color="#f0f0f0",
+                                      font=(_F, TAMANO_BASE, "bold"), text_color="#f0f0f0",
                                       command=self.enviar_mensaje)
-        self.btn_send.grid(row=0, column=1, padx=(0,8), pady=6)
+        self.btn_send.grid(row=0, column=2, padx=(0,8), pady=6)
 
         ctk.CTkLabel(outer, text="Enter · enviar   Shift+Enter · nueva línea",
                      font=FONT_UI_SM, text_color=TEXT_DIM).grid(row=1, column=0, pady=(2,10))
@@ -606,6 +779,22 @@ class OmniApp(ctk.CTk):
             self.entry.insert("1.0","Escribí tu mensaje...")
             self.entry.configure(text_color=TEXT_DIM)
             self._placeholder_active = True
+
+    def _adjuntar_archivo(self):
+        """Abre diálogo para adjuntar archivo e inserta la ruta en el input."""
+        ruta = filedialog.askopenfilename(
+            title="Adjuntar archivo",
+            filetypes=[
+                ("Todos los archivos", "*.*"),
+                ("Python", "*.py"),
+                ("Texto", "*.txt"),
+                ("JSON", "*.json"),
+                ("Markdown", "*.md"),
+            ]
+        )
+        if ruta:
+            self._clear_placeholder()
+            self.entry.insert("end", f"[adjunto: {ruta}]")
 
     def _on_enter(self, event):
         self.enviar_mensaje(); return "break"
@@ -686,7 +875,7 @@ class OmniApp(ctk.CTk):
         lbl = ctk.CTkLabel(self.chat_scroll, text=f"⚙ {texto}",
                            font=FONT_UI_SM, text_color=TEXT_DIM,
                            anchor="w", justify="left", wraplength=0)
-        lbl.pack(fill="x", padx=CHAT_PAD_X + 20, pady=(1,1))
+        lbl.pack(fill="x", padx=CHAT_PAD_X + 20, pady=(2,2))
 
     def _agregar_usuario(self, texto: str):
         if hasattr(self,"_welcome_label") and self._welcome_label.winfo_exists():
@@ -705,32 +894,8 @@ class OmniApp(ctk.CTk):
         self.burbuja_ia_actual = None
         self._welcome_label = ctk.CTkLabel(
             self.chat_scroll, text="¿En qué puedo ayudarte hoy?",
-            font=(_F,26,"bold"), text_color="#2a2a3e")
+            font=(_F, TAMANO_BASE + 11, "bold"), text_color="#2a2a3e")
         self._welcome_label.pack(expand=True, pady=(120,0))
-
-    def _anclar_proyecto(self):
-        ruta = filedialog.askdirectory(title="Selecciona la carpeta del proyecto")
-        if not ruta: return
-        nombre = os.path.basename(ruta)
-        estructura = []
-        for raiz, carpetas, archivos in os.walk(ruta):
-            carpetas[:] = [d for d in carpetas if d not in ['.git','__pycache__','venv','node_modules']]
-            nivel = raiz.replace(ruta,'').count(os.sep)
-            ind  = ' ' * 4 * nivel
-            sind = ' ' * 4 * (nivel + 1)
-            estructura.append(f"{ind}📂 {os.path.basename(raiz)}/")
-            for f in archivos: estructura.append(f"{sind}📄 {f}")
-        arbol = f"Estructura del proyecto '{nombre}':\n" + "\n".join(estructura)
-        guardar_snapshot(nombre, arbol)
-        motor_ia.WORKSPACE_ACTUAL = ruta
-        motor_ia.SNAPSHOT_ACTUAL  = arbol
-        self._agregar_usuario(f"*(Sistema: Anclando workspace en {ruta})*")
-        if not self.burbuja_ia_actual:
-            self.burbuja_ia_actual = AIBubble(self.chat_scroll)
-            self.burbuja_ia_actual.pack(fill="x", padx=CHAT_PAD_X, pady=(2,6))
-        self.burbuja_ia_actual.append_text(f"⚓ Proyecto '{nombre}' anclado con éxito.")
-        self._scroll_abajo()
-
 
 if __name__ == "__main__":
     app = OmniApp()

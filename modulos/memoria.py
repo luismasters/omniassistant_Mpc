@@ -2,6 +2,8 @@ import os
 import chromadb
 import uuid
 import datetime
+import json 
+
 from chromadb.utils import embedding_functions
 
 # 1. Definimos dónde se va a guardar la bóveda físicamente
@@ -50,28 +52,33 @@ def buscar_contexto(pregunta_usuario, cantidad_resultados=3):
         print("🤷‍♂️ [MEMORIA] No hay recuerdos relacionados con esto.")
         return []
 
-# =====================================================================
-# NUEVO: GESTIÓN DE SNAPSHOTS DE PROYECTOS (LIVE WORKSPACE)
-# =====================================================================
-def guardar_snapshot(nombre_proyecto, texto_estado):
-    """Sobreescribe el estado actual de un proyecto para que siempre tenga el contexto fresco."""
-    etiqueta = f"Snapshot_{nombre_proyecto}"
+def guardar_snapshot(ruta_workspace, texto_estado):
+    """Guarda el estado del proyecto en un archivo JSON dentro del propio proyecto."""
     try:
-        # Borramos el snapshot anterior si existe (para no mezclar info vieja con nueva)
-        coleccion_principal.delete(where={"etiqueta": etiqueta})
-    except: pass
-    
-    guardar_recuerdo(texto_a_guardar=texto_estado, etiqueta_tema=etiqueta)
-    print(f"📸 [SNAPSHOT] Estado del proyecto '{nombre_proyecto}' actualizado en la bóveda.")
-    return True
+        # Creamos una carpeta oculta .cortana dentro del proyecto del usuario
+        ruta_cortana = os.path.join(ruta_workspace, ".cortana")
+        os.makedirs(ruta_cortana, exist_ok=True)
+        
+        ruta_archivo = os.path.join(ruta_cortana, "snapshot.json")
+        
+        with open(ruta_archivo, "w", encoding="utf-8") as f:
+            json.dump({"estado": texto_estado}, f, ensure_ascii=False, indent=4)
+            
+        print(f"📸 [SNAPSHOT] Estado físico guardado en: {ruta_archivo}")
+        return True
+    except Exception as e:
+        print(f"❌ Error al guardar snapshot local: {e}")
+        return False
 
-def cargar_snapshot(nombre_proyecto):
-    """Recupera la foto del estado del proyecto al anclarse."""
-    etiqueta = f"Snapshot_{nombre_proyecto}"
+def cargar_snapshot(ruta_workspace):
+    """Recupera la foto del estado del proyecto desde el archivo físico."""
     try:
-        resultados = coleccion_principal.get(where={"etiqueta": etiqueta})
-        if resultados and resultados['documents']:
-            print(f"📂 [SNAPSHOT] Contexto de '{nombre_proyecto}' recuperado de la bóveda.")
-            return " | ".join(resultados['documents'])
-    except: pass
+        ruta_archivo = os.path.join(ruta_workspace, ".cortana", "snapshot.json")
+        if os.path.exists(ruta_archivo):
+            with open(ruta_archivo, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            print(f"📂 [SNAPSHOT] Estado recuperado físicamente del proyecto.")
+            return data.get("estado", "")
+    except Exception as e:
+        print(f"❌ Error al cargar snapshot local: {e}")
     return ""
