@@ -52,6 +52,22 @@ lista_herramientas_mcp = [
 def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
     """Enrutador Universal: Llama a Gemini o a DeepSeek según el modo activo."""
     global CONTEXTO_CHAT, ARCHIVO_PENDIENTE_INYECCION, DOCUMENTO_VOLATIL, PENDIENTE_DE_BORRADO, PENDIENTE_DE_GIT, WORKSPACE_ACTUAL, SNAPSHOT_ACTUAL, MODO_ACTUAL
+    
+    # =================================================================
+    # 🩹 INTERCEPTOR DE ADJUNTOS DE LA INTERFAZ
+    # =================================================================
+    import re
+    if "[adjunto:" in texto_usuario.lower():
+        # Extraemos todas las rutas que estén entre los corchetes
+        rutas_extraidas = re.findall(r'\[adjunto:\s*(.*?)\]', texto_usuario, re.IGNORECASE)
+        if rutas_extraidas:
+            # Quitamos esa basura de texto para que no confunda a la IA
+            texto_usuario = re.sub(r'\[adjunto:\s*.*?\]', '', texto_usuario, flags=re.IGNORECASE).strip()
+            # Ejecutamos la función real que abre los archivos y los mete en la RAM
+            procesar_archivo_adjunto(rutas_extraidas, ui_callback)
+            # Detenemos la ejecución aquí para que respondas "CONFIRMADO" o "CANCELADO"
+            return
+
     texto_usuario_lower = texto_usuario.lower().strip()
 
     # =================================================================

@@ -782,8 +782,8 @@ class OmniApp(ctk.CTk):
 
     def _adjuntar_archivo(self):
         """Abre diálogo para adjuntar archivo e inserta la ruta en el input."""
-        ruta = filedialog.askopenfilename(
-            title="Adjuntar archivo",
+        rutas = filedialog.askopenfilenames(
+            title="Adjuntar archivos",
             filetypes=[
                 ("Todos los archivos", "*.*"),
                 ("Python", "*.py"),
@@ -792,9 +792,10 @@ class OmniApp(ctk.CTk):
                 ("Markdown", "*.md"),
             ]
         )
-        if ruta:
+        if rutas:
             self._clear_placeholder()
-            self.entry.insert("end", f"[adjunto: {ruta}]")
+            for ruta in rutas:
+                self.entry.insert("end", f"[adjunto: {ruta}]")
 
     def _on_enter(self, event):
         self.enviar_mensaje(); return "break"
