@@ -4,6 +4,7 @@ import winsound
 import re
 import google.generativeai as genai
 from openai import OpenAI # Cliente para DeepSeek
+import config # Importación global para el parche del Sandbox
 
 # Importación de llaves
 from config import GEMINI_API_KEY, DEEPSEEK_API_KEY
@@ -54,18 +55,18 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
     """Enrutador Universal: Llama a Gemini o a DeepSeek según el modo activo."""
     global CONTEXTO_CHAT, ARCHIVO_PENDIENTE_INYECCION, DOCUMENTO_VOLATIL, PENDIENTE_DE_BORRADO, PENDIENTE_DE_GIT, WORKSPACE_ACTUAL, SNAPSHOT_ACTUAL, MODO_ACTUAL
     
+    # --- PARCHE SANDBOX: Sincronizar ruta actual con la seguridad ---
+    config.RUTA_WORKSPACE_ACTUAL = WORKSPACE_ACTUAL
+    # -----------------------------------------------------------------
+
     # =================================================================
     # 🩹 INTERCEPTOR DE ADJUNTOS DE LA INTERFAZ
     # =================================================================
     if "[adjunto:" in texto_usuario.lower():
-        # Extraemos todas las rutas que estén entre los corchetes
         rutas_extraidas = re.findall(r'\[adjunto:\s*(.*?)\]', texto_usuario, re.IGNORECASE)
         if rutas_extraidas:
-            # Quitamos esa basura de texto para que no confunda a la IA
             texto_usuario = re.sub(r'\[adjunto:\s*.*?\]', '', texto_usuario, flags=re.IGNORECASE).strip()
-            # Ejecutamos la función real que abre los archivos y los mete en la RAM
             procesar_archivo_adjunto(rutas_extraidas, ui_callback)
-            # Detenemos la ejecución aquí para que respondas "CONFIRMADO" o "CANCELADO"
             return
 
     texto_usuario_lower = texto_usuario.lower().strip()
@@ -154,9 +155,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         texto_snapshot = f"[ESTADO DEL PROYECTO]:\n{SNAPSHOT_ACTUAL}\n\n" if SNAPSHOT_ACTUAL else ""
         texto_doc_volatil = f"[DOCUMENTOS EN MEMORIA]:\n{DOCUMENTO_VOLATIL}\n\n" if DOCUMENTO_VOLATIL else ""
 
-        # --- SELECCIÓN DEL ROL Y MODELO ---
-        thinking_config = None # Por defecto desactivado/nulo
-
         if MODO_ACTUAL == "planificador":
             contexto_sistema = (
                 "Eres el Arquitecto de Software Senior de Luis. Tu objetivo es analizar el código y diseñar soluciones.\n"
@@ -165,13 +163,13 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 "1. NO escribas código final de implementación.\n"
                 "2. Analiza riesgos, dependencias y estructura lógica paso a paso.\n"
                 "⚠️ REGLAS DE ACCIONES RÁPIDAS (SIEMPRE al inicio de línea):\n"
-                "- Para ACTUALIZAR EL PLAN: guardar_archivo: plan.md || contenido_del_plan\n"
-                "- Para ACTUALIZAR EL ESTADO REAL: guardar_archivo: PROJECT_STATE.md || contenido_del_estado\n"
+                "- Para ACTUALIZAR EL PLAN: guardar_archivo: plan.md ---CONTENIDO--- [contenido_del_plan]\n"
+                "- Para ACTUALIZAR EL ESTADO REAL: guardar_archivo: PROJECT_STATE.md ---CONTENIDO--- [contenido_del_estado]\n"
                 "- Para CREAR CARPETAS de doc: crear_carpeta: ruta\n"
                 "⚠️ IMPORTANTE: SIEMPRE usa 'guardar_archivo:' para generar el plan.md físico."
             )
-            modelo_activo = "deepseek-v4-flash"
-            thinking_config = {"type": "enabled"} # <-- ACTIVAMOS THINKING
+            # CORRECCIÓN: Nombre oficial del modelo de DeepSeek para razonamiento (Evita error 404)
+            modelo_activo = "deepseek-reasoner"
 
         elif MODO_ACTUAL == "programador":
             contexto_sistema = (
@@ -190,8 +188,8 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 "- Para comandos Git: git_comando: ruta || tu_comando\n"
                 "⚠️ IMPORTANTE: Usa rutas relativas al workspace actual."
             )
-            modelo_activo = "deepseek-v4-flash"
-            thinking_config = {"type": "disabled"} 
+            # CORRECCIÓN: Nombre oficial del modelo de DeepSeek normal (Evita error 404)
+            modelo_activo = "deepseek-chat"
 
         else: # MODO GENERAL (Gemini)
             contexto_sistema = (
@@ -219,6 +217,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         respuesta_ia = ""
         usaste_mcp = False
         resultado_mcp = ""
+        modelo_gemini = None # Inicialización segura
 
         print(f"\n🤖 Cortana dice:\n---")
         
@@ -230,7 +229,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             mensajes_para_gemini = list(CONTEXTO_CHAT)
             partes_usuario = [texto_usuario]
             
-            # Lógica de Visión (Solo Gemini)
+            # Lógica de Visión
             verbos_vision = ["captura", "capturá", "capturar", "mirar", "ves"]
             objetivos_vision = ["pantalla", "monitor", "1", "2", "uno", "dos", "la 1", "el 1", "la 2", "el 2"]
             if any(v in texto_usuario_lower for v in verbos_vision) and any(o in texto_usuario_lower for o in objetivos_vision):
@@ -265,7 +264,10 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                             if ui_callback: ui_callback("", part.text, "#E8EAED", nueva_linea=False)
                 except Exception: pass
 
-            if usaste_mcp:
+            if usaste_mcp and modelo_gemini:
+                # CORRECCIÓN CRÍTICA: Intercalamos un 'model' para evitar el Error 400 de Gemini 
+                # (Google prohíbe dos mensajes de 'user' seguidos).
+                mensajes_para_gemini.append({'role': 'model', 'parts': ['Analizando los datos del sistema...']})
                 mensajes_para_gemini.append({'role': 'user', 'parts': [f"[DATO DEL SISTEMA: {resultado_mcp}]. Responde naturalmente."]})
                 response_2 = modelo_gemini.generate_content(mensajes_para_gemini, stream=True)
                 for chunk_2 in response_2:
@@ -281,7 +283,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         # EJECUCIÓN DEEPSEEK (Modo Planificador / Programador)
         # =================================================================
         else:
-            # Formatear el historial de Gemini al formato de OpenAI/DeepSeek
             mensajes_ds = [{"role": "system", "content": contexto_sistema}]
             for msg in CONTEXTO_CHAT:
                 rol_ds = "assistant" if msg['role'] == "model" else "user"
@@ -292,26 +293,18 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
 
             if ui_callback: ui_callback("🤖 Cortana", "", "#A8C7FA", nueva_linea=False)
             
-            # --- NUEVA LÓGICA DE LLAMADA CON EXTRA_BODY ---
             parametros_api = {
                 "model": modelo_activo,
                 "messages": mensajes_ds,
                 "stream": True
             }
             
-            # Si el modo tiene configuración de thinking, la agregamos
-            if thinking_config:
-                parametros_api["extra_body"] = {"thinking": thinking_config}
-
-            # Llamamos a la API desempaquetando los parámetros
             response = cliente_deepseek.chat.completions.create(**parametros_api)
             
             for chunk in response:
                 delta = chunk.choices[0].delta
-                # Imprimir el razonamiento interno en la consola (si está enabled)
                 if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
                     print(delta.reasoning_content, end='', flush=True)
-                # Enviar el texto final a la UI
                 if getattr(delta, 'content', None):
                     texto_chunk = delta.content
                     print(texto_chunk, end='', flush=True)
@@ -329,17 +322,14 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
 
         if "guardar_archivo:" in respuesta_ia.lower():
             try:
-                # Usamos regex para atrapar todo lo que esté después de ---CONTENIDO---
                 match = re.search(r'guardar_archivo:\s*(.+?)\s*---CONTENIDO---\s*([\s\S]*)', respuesta_ia, re.IGNORECASE)
                 if match:
                     ruta_f = match.group(1).strip()
                     contenido_f = match.group(2).strip()
                     
-                    # Limpiamos los molestos backticks (```python ... ```)
                     contenido_f = re.sub(r'^```\w*\n?', '', contenido_f)
                     contenido_f = re.sub(r'\n?```$', '', contenido_f)
                         
-                    # Resolución inteligente de rutas
                     if WORKSPACE_ACTUAL and not os.path.isabs(ruta_f):
                         ruta_f_abs = os.path.join(WORKSPACE_ACTUAL, ruta_f)
                         if not os.path.exists(ruta_f_abs):
@@ -355,7 +345,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                     resultado_escritura = escribir_archivo(ruta_f, contenido_f.strip())
                     reportes_acciones.append(f"Archivo guardado: {resultado_escritura}")
                     
-                    # Feedback invisible para la memoria de la IA
                     if "ERROR" in resultado_escritura:
                         CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO ESCRITURA] Fallo al guardar {ruta_f}: {resultado_escritura}"]})
                     else:
@@ -370,45 +359,55 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         for linea in lineas:
             linea_limpia = linea.lower().replace("[", "").replace("]", "").replace("*", "").strip()
             
-            # Saltamos la línea si es parte del bloque de guardado nuevo
             if linea_limpia.startswith("guardar_archivo:") or "---contenido---" in linea_limpia: continue
             
-            # NUEVO: Lector de archivos
             elif linea_limpia.startswith("leer_archivo:"):
                 ruta_corta = linea[linea.lower().find("leer_archivo:") + 13:].strip()
                 ruta_real = os.path.join(WORKSPACE_ACTUAL, ruta_corta) if WORKSPACE_ACTUAL and not os.path.isabs(ruta_corta) else ruta_corta
                 contenido_leido = leer_contenido_archivo(ruta_real)
                 
-                # Truncamos si es gigante para no gastar todos los tokens de memoria
-                if len(contenido_leido) > 4000:
-                    contenido_leido = contenido_leido[:4000] + "\n... [CONTENIDO TRUNCADO POR TAMAÑO]"
+                if len(contenido_leido) > 8000:
+                    contenido_leido = contenido_leido[:8000] + "\n... [CONTENIDO TRUNCADO POR TAMAÑO]"
+                
+                CONTEXTO_CHAT = [msg for msg in CONTEXTO_CHAT if not (msg['role'] == 'user' and len(msg['parts']) > 0 and isinstance(msg['parts'][0], str) and msg['parts'][0].startswith("[CONTENIDO DE '"))]
                 
                 CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[CONTENIDO DE '{ruta_real}']:\n{contenido_leido}"]})
                 reportes_acciones.append(f"Archivo cargado en memoria: {ruta_corta}")
 
-            # NUEVO: Editor quirúrgico
+            # CORRECCIÓN: Parseo súper robusto para editar_archivo
             elif linea_limpia.startswith("editar_archivo:"):
-                partes = re.split(r'\s*\|\s*', linea, maxsplit=3)
+                partes = [p.strip() for p in linea.split('|')]
                 if len(partes) >= 3:
-                    ruta_edit = partes[0].split("editar_archivo:")[1].strip()
-                    buscar_edit = re.sub(r'^buscar:\s*', '', partes[1], flags=re.IGNORECASE).strip().strip('"\'')
-                    reemplazar_edit = re.sub(r'^reemplazar:\s*', '', partes[2], flags=re.IGNORECASE).strip().strip('"\'') if len(partes) > 2 else ""
-                    
-                    ruta_real_edit = os.path.join(WORKSPACE_ACTUAL, ruta_edit) if WORKSPACE_ACTUAL and not os.path.isabs(ruta_edit) else ruta_edit
-                    contenido_actual = leer_contenido_archivo(ruta_real_edit)
-                    
-                    if not contenido_actual.startswith("ERROR"):
-                        nuevo_contenido = contenido_actual.replace(buscar_edit, reemplazar_edit, 1)
-                        if nuevo_contenido != contenido_actual:
-                            escribir_archivo(ruta_real_edit, nuevo_contenido)
-                            reportes_acciones.append(f"Reemplazo exitoso en {ruta_edit}")
-                            CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Modificación exitosa en {ruta_edit}"]})
+                    match_ruta = re.search(r'editar_archivo:\s*(.+)', partes[0], re.IGNORECASE)
+                    if match_ruta:
+                        ruta_edit = match_ruta.group(1).strip()
+                        buscar_edit = re.sub(r'^buscar:\s*', '', partes[1], flags=re.IGNORECASE).strip().strip('"\'')
+                        reemplazar_edit = re.sub(r'^reemplazar:\s*', '', partes[2], flags=re.IGNORECASE).strip().strip('"\'') if len(partes) > 2 else ""
+                        
+                        ruta_real_edit = os.path.join(WORKSPACE_ACTUAL, ruta_edit) if WORKSPACE_ACTUAL and not os.path.isabs(ruta_edit) else ruta_edit
+                        contenido_actual = leer_contenido_archivo(ruta_real_edit)
+                        
+                        if not contenido_actual.startswith("ERROR"):
+                            buscar_norm = " ".join(buscar_edit.split())
+                            contenido_norm = " ".join(contenido_actual.split())
+                            
+                            if buscar_norm in contenido_norm:
+                                if buscar_edit in contenido_actual:
+                                    nuevo_contenido = contenido_actual.replace(buscar_edit, reemplazar_edit, 1)
+                                    if nuevo_contenido != contenido_actual:
+                                        escribir_archivo(ruta_real_edit, nuevo_contenido)
+                                        reportes_acciones.append(f"Reemplazo exitoso en {ruta_edit}")
+                                        CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Modificación exitosa en {ruta_edit}"]})
+                                else:
+                                    msg_fallo = "Texto encontrado, pero difiere en espacios/saltos de línea. Sé más preciso."
+                                    reportes_acciones.append(msg_fallo)
+                                    CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Fallo: {msg_fallo}"]})
+                            else:
+                                msg_fallo = f"No se encontró el texto a reemplazar en {ruta_edit}"
+                                reportes_acciones.append(msg_fallo)
+                                CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Fallo: {msg_fallo}"]})
                         else:
-                            msg_fallo = f"No se encontró el texto exacto a reemplazar en {ruta_edit}"
-                            reportes_acciones.append(msg_fallo)
-                            CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Fallo: {msg_fallo}"]})
-                    else:
-                        reportes_acciones.append(f"Fallo al leer archivo para edición: {ruta_edit}")
+                            reportes_acciones.append(f"Fallo al leer archivo para edición: {ruta_edit}")
 
             elif linea_limpia.startswith("snapshot:"):
                 if WORKSPACE_ACTUAL:
@@ -474,15 +473,12 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 ruta_corta = linea[linea.lower().find("crear_carpeta:") + 14:].replace("[", "").replace("]", "").replace("*", "").strip()
                 ruta_final = os.path.join(WORKSPACE_ACTUAL, ruta_corta) if WORKSPACE_ACTUAL and not os.path.isabs(ruta_corta) else ruta_corta
                 reportes_acciones.append(f"Carpeta: {crear_carpeta(ruta_final)}")
-            # ==========================================================
-            # INICIO DEL NUEVO BLOQUE DEL CRAWLER
-            # ==========================================================
+
             elif linea_limpia.startswith("escanear_proyecto:"):
                 if WORKSPACE_ACTUAL:
                     if ui_callback: ui_callback("⚙️ Sistema", "🔍 Iniciando Crawler... Extrayendo todo tu código base.", "#80868B")
                     
                     from modulos.crawler import extraer_codigo_proyecto
-                    
                     codigo_completo = extraer_codigo_proyecto(WORKSPACE_ACTUAL)
                     
                     prompt_analisis = f"""Actúa como el Arquitecto Principal del proyecto.
@@ -500,19 +496,17 @@ El documento DEBE contener estrictamente:
 Responde ÚNICAMENTE con el Markdown final estructurado. No uses saludos, ni confirmaciones."""
 
                     if ui_callback: ui_callback("⚙️ Sistema", "🧠 Analizando arquitectura global con DeepSeek (Thinking)...", "#80868B")
-                    print("\n[CRAWLER] Enviando mega-contexto a DeepSeek V4...")
+                    print("\n[CRAWLER] Enviando mega-contexto a DeepSeek...")
                     
                     try:
-                        # Llamada especial directa a DeepSeek para el mega-análisis
+                        # CORRECCIÓN: Nombre de modelo oficial para razonamiento
                         response = cliente_deepseek.chat.completions.create(
-                            model="deepseek-v4-flash",
-                            messages=[{"role": "user", "content": prompt_analisis}],
-                            extra_body={"thinking": {"type": "enabled"}}
+                            model="deepseek-reasoner",
+                            messages=[{"role": "user", "content": prompt_analisis}]
                         )
                         
                         estado_md = response.choices[0].message.content
                         
-                        # Limpiamos los backticks si la IA los pone
                         if estado_md.startswith("```markdown"):
                             estado_md = estado_md.split("```markdown")[1].rsplit("```", 1)[0].strip()
                         elif estado_md.startswith("```"):
@@ -529,10 +523,7 @@ Responde ÚNICAMENTE con el Markdown final estructurado. No uses saludos, ni con
                         if ui_callback: ui_callback("⚙️ Sistema", f"❌ Error en el Crawler: {e}", "#ff4500")
                 else:
                     if ui_callback: ui_callback("🤖 Cortana", "Necesito estar dentro del Modo Planificador o Programador para saber qué proyecto escanear.", "#FFA500")
-            # ==========================================================
-            # FIN DEL NUEVO BLOQUE DEL CRAWLER
-            # ==========================================================    
-            
+
             elif linea_limpia.startswith("abrir:") or linea_limpia.startswith("cerrar:") or linea_limpia.startswith("mover:"):
                 cmd_extraido = linea_limpia[linea_limpia.find(":")+1:].strip()
                 if "mover:" in linea_limpia: cmd_extraido = cmd_extraido.replace("@ 1", "@ 2") if "@ 1" in cmd_extraido else cmd_extraido.replace("@ 2", "@ 1")
@@ -561,7 +552,6 @@ Responde ÚNICAMENTE con el Markdown final estructurado. No uses saludos, ni con
 
         if modo_voz: hablar_no_bloqueante(respuesta_ia)
         
-        # Guardamos el historial usando el formato estándar de la aplicación
         CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [respuesta_ia]}])
         if len(CONTEXTO_CHAT) > 100: CONTEXTO_CHAT = CONTEXTO_CHAT[-100:]
             
