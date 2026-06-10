@@ -1,6 +1,7 @@
 import os
 import datetime
 import winsound
+import re
 import google.generativeai as genai
 from openai import OpenAI # Cliente para DeepSeek
 
@@ -56,7 +57,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
     # =================================================================
     # 🩹 INTERCEPTOR DE ADJUNTOS DE LA INTERFAZ
     # =================================================================
-    import re
     if "[adjunto:" in texto_usuario.lower():
         # Extraemos todas las rutas que estén entre los corchetes
         rutas_extraidas = re.findall(r'\[adjunto:\s*(.*?)\]', texto_usuario, re.IGNORECASE)
@@ -182,11 +182,13 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 "2. Mantén consistencia con la arquitectura.\n"
                 "⚠️ REGLAS DE ACCIONES RÁPIDAS (SIEMPRE al inicio de línea):\n"
                 "- Para CREAR CARPETAS: crear_carpeta: ruta\n"
-                "- Para CREAR/EDITAR ARCHIVOS: guardar_archivo: ruta || contenido\n"
+                "- Para LEER un archivo: leer_archivo: ruta\n"
+                "- Para EDITAR (reemplazar texto exacto): editar_archivo: ruta | buscar: texto | reemplazar: texto\n"
+                "- Para GUARDAR/CREAR ARCHIVOS: guardar_archivo: ruta ---CONTENIDO--- [tu_codigo_aqui]\n"
                 "- Para ELIMINAR obsoleto: eliminar: ruta\n"
                 "- Para PUSH a GitHub: github: ruta\n"
                 "- Para comandos Git: git_comando: ruta || tu_comando\n"
-                "⚠️ IMPORTANTE: NUNCA te limites a imprimir código en chat. USÁ 'guardar_archivo:' siempre."
+                "⚠️ IMPORTANTE: Usa rutas relativas al workspace actual."
             )
             modelo_activo = "deepseek-v4-flash"
             thinking_config = {"type": "disabled"} 
@@ -327,32 +329,37 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
 
         if "guardar_archivo:" in respuesta_ia.lower():
             try:
-                idx = respuesta_ia.lower().find("guardar_archivo:")
-                texto_comando = respuesta_ia[idx + 16:].strip()
-                if "||" in texto_comando:
-                    ruta_f, contenido_f = texto_comando.split("||", 1)
-                    ruta_f = ruta_f.strip()
-                    contenido_f = contenido_f.strip()
+                # Usamos regex para atrapar todo lo que esté después de ---CONTENIDO---
+                match = re.search(r'guardar_archivo:\s*(.+?)\s*---CONTENIDO---\s*([\s\S]*)', respuesta_ia, re.IGNORECASE)
+                if match:
+                    ruta_f = match.group(1).strip()
+                    contenido_f = match.group(2).strip()
                     
-                    if contenido_f.startswith("```"):
-                        partes = contenido_f.split("\n", 1)
-                        if len(partes) > 1: contenido_f = partes[1]
-                    if contenido_f.endswith("```"):
-                        contenido_f = contenido_f.rsplit("```", 1)[0].strip()
+                    # Limpiamos los molestos backticks (```python ... ```)
+                    contenido_f = re.sub(r'^```\w*\n?', '', contenido_f)
+                    contenido_f = re.sub(r'\n?```$', '', contenido_f)
                         
+                    # Resolución inteligente de rutas
                     if WORKSPACE_ACTUAL and not os.path.isabs(ruta_f):
-                        ruta_en_workspace = None
-                        nombre_archivo_buscado = os.path.basename(ruta_f).lower()
-                        for raiz, _, archivos in os.walk(WORKSPACE_ACTUAL):
-                            if nombre_archivo_buscado in [a.lower() for a in archivos]:
-                                ruta_en_workspace = os.path.join(raiz, os.path.basename(ruta_f))
-                                break
-                        ruta_f = ruta_en_workspace if ruta_en_workspace else os.path.join(WORKSPACE_ACTUAL, os.path.basename(ruta_f))
+                        ruta_f_abs = os.path.join(WORKSPACE_ACTUAL, ruta_f)
+                        if not os.path.exists(ruta_f_abs):
+                            for raiz, _, archivos in os.walk(WORKSPACE_ACTUAL):
+                                if os.path.basename(ruta_f).lower() in [a.lower() for a in archivos]:
+                                    ruta_f_abs = os.path.join(raiz, os.path.basename(ruta_f))
+                                    break
+                        ruta_f = ruta_f_abs
                     elif not os.path.isabs(ruta_f):
                         ruta_real = buscar_archivo_local(ruta_f)
                         ruta_f = ruta_real if ruta_real else os.path.join(os.path.expanduser("~"), "Desktop", ruta_f)
                     
-                    reportes_acciones.append(f"Archivo guardado: {escribir_archivo(ruta_f, contenido_f.strip())}")
+                    resultado_escritura = escribir_archivo(ruta_f, contenido_f.strip())
+                    reportes_acciones.append(f"Archivo guardado: {resultado_escritura}")
+                    
+                    # Feedback invisible para la memoria de la IA
+                    if "ERROR" in resultado_escritura:
+                        CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO ESCRITURA] Fallo al guardar {ruta_f}: {resultado_escritura}"]})
+                    else:
+                        CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO ESCRITURA] Archivo {ruta_f} guardado correctamente."] })
             except Exception as e:
                 msg_error = f"❌ Error local al guardar el archivo: {e}"
                 print(msg_error)
@@ -362,8 +369,47 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         
         for linea in lineas:
             linea_limpia = linea.lower().replace("[", "").replace("]", "").replace("*", "").strip()
-            if linea_limpia.startswith("guardar_archivo:"): continue
             
+            # Saltamos la línea si es parte del bloque de guardado nuevo
+            if linea_limpia.startswith("guardar_archivo:") or "---contenido---" in linea_limpia: continue
+            
+            # NUEVO: Lector de archivos
+            elif linea_limpia.startswith("leer_archivo:"):
+                ruta_corta = linea[linea.lower().find("leer_archivo:") + 13:].strip()
+                ruta_real = os.path.join(WORKSPACE_ACTUAL, ruta_corta) if WORKSPACE_ACTUAL and not os.path.isabs(ruta_corta) else ruta_corta
+                contenido_leido = leer_contenido_archivo(ruta_real)
+                
+                # Truncamos si es gigante para no gastar todos los tokens de memoria
+                if len(contenido_leido) > 4000:
+                    contenido_leido = contenido_leido[:4000] + "\n... [CONTENIDO TRUNCADO POR TAMAÑO]"
+                
+                CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[CONTENIDO DE '{ruta_real}']:\n{contenido_leido}"]})
+                reportes_acciones.append(f"Archivo cargado en memoria: {ruta_corta}")
+
+            # NUEVO: Editor quirúrgico
+            elif linea_limpia.startswith("editar_archivo:"):
+                partes = re.split(r'\s*\|\s*', linea, maxsplit=3)
+                if len(partes) >= 3:
+                    ruta_edit = partes[0].split("editar_archivo:")[1].strip()
+                    buscar_edit = re.sub(r'^buscar:\s*', '', partes[1], flags=re.IGNORECASE).strip().strip('"\'')
+                    reemplazar_edit = re.sub(r'^reemplazar:\s*', '', partes[2], flags=re.IGNORECASE).strip().strip('"\'') if len(partes) > 2 else ""
+                    
+                    ruta_real_edit = os.path.join(WORKSPACE_ACTUAL, ruta_edit) if WORKSPACE_ACTUAL and not os.path.isabs(ruta_edit) else ruta_edit
+                    contenido_actual = leer_contenido_archivo(ruta_real_edit)
+                    
+                    if not contenido_actual.startswith("ERROR"):
+                        nuevo_contenido = contenido_actual.replace(buscar_edit, reemplazar_edit, 1)
+                        if nuevo_contenido != contenido_actual:
+                            escribir_archivo(ruta_real_edit, nuevo_contenido)
+                            reportes_acciones.append(f"Reemplazo exitoso en {ruta_edit}")
+                            CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Modificación exitosa en {ruta_edit}"]})
+                        else:
+                            msg_fallo = f"No se encontró el texto exacto a reemplazar en {ruta_edit}"
+                            reportes_acciones.append(msg_fallo)
+                            CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Fallo: {msg_fallo}"]})
+                    else:
+                        reportes_acciones.append(f"Fallo al leer archivo para edición: {ruta_edit}")
+
             elif linea_limpia.startswith("snapshot:"):
                 if WORKSPACE_ACTUAL:
                     resumen_estado = linea[linea.lower().find("snapshot:") + 9:].strip()
@@ -436,7 +482,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                     if ui_callback: ui_callback("⚙️ Sistema", "🔍 Iniciando Crawler... Extrayendo todo tu código base.", "#80868B")
                     
                     from modulos.crawler import extraer_codigo_proyecto
-                    # ¡LÍNEA PROBLEMÁTICA BORRADA!
                     
                     codigo_completo = extraer_codigo_proyecto(WORKSPACE_ACTUAL)
                     
