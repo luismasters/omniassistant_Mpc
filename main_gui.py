@@ -358,27 +358,107 @@ class AIBubble(ctk.CTkFrame):
         if self._raw.strip():
             self._render_markdown(self._raw)
 
+
+
     # ── Parser de Markdown ────────────────────────────────────────────────────
     def _render_markdown(self, text: str):
-        # Detecta bloques ``` con o sin lenguaje, y también ` ` sin cerrar al final
-        CODE_RE = re.compile(
-            r'```(\w*)\n?([\s\S]*?)(?:```|$)',
-            re.MULTILINE
+        # Indicadores FUERTES de que una línea es código (nunca texto narrativo)
+        CODE_STRONG = re.compile(
+            r'^(import |from \w+ import |def |class |\s+def |\s+class |'
+            r'\s+return |\s+if |\s+elif |\s+else:|\s+for |\s+while |\s+try:'
+            r'|\s+except|\s+with |\s+raise |\s+yield |\s+self\.\w|'
+            r'var |const |let |function |#include|public |private |static )'
         )
+
+        def _is_code_context(block: str) -> bool:
+            """Devuelve True si el bloque contiene suficiente código real."""
+            strong = sum(1 for l in block.splitlines() if CODE_STRONG.match(l))
+            return strong >= 2
+
+        # Paso 1: extraer bloques con backticks explícitos
+        CODE_FENCE = re.compile(r'```(\w*)\n?([\s\S]*?)(?:```|$)', re.MULTILINE)
         segments, last = [], 0
-        for m in CODE_RE.finditer(text):
+        for m in CODE_FENCE.finditer(text):
             if m.start() > last:
                 segments.append(("text", text[last:m.start()]))
-            code_body = m.group(2).rstrip()
-            if code_body:   # ignorar matches vacíos
-                segments.append(("code", code_body, m.group(1)))
+            body = m.group(2).rstrip()
+            if body:
+                segments.append(("code", body, m.group(1)))
             last = m.end()
         if last < len(text):
             segments.append(("text", text[last:]))
 
+        # Paso 2: segmentos de texto que huelen a código → CodeBlock completo
+        # La clave: si el bloque tiene contexto de código lo mostramos entero,
+        # sin intentar separar las líneas de comentario/sección que hay dentro.
+        final = []
         for seg in segments:
             if seg[0] == "code":
-                CodeBlock(self._content, seg[1], lang=seg[2]).pack(fill="x", pady=(4,4))
+                final.append(seg)
+                continue
+            raw = seg[1]
+            # Separar intro narrativa (antes del primer indicador fuerte de código)
+            lines = raw.split("\n")
+            intro, rest = [], []
+            in_code = False
+            for line in lines:
+                if not in_code and CODE_STRONG.match(line):
+                    in_code = True
+                if in_code:
+                    rest.append(line)
+                else:
+                    intro.append(line)
+            intro_text = "\n".join(intro).strip()
+            rest_text  = "\n".join(rest).strip()
+            if intro_text:
+                final.append(("text", intro_text))
+            if rest_text:
+                if _is_code_context(rest_text):
+                    final.append(("code", rest_text, ""))
+                else:
+                    final.append(("text", rest_text))
+
+        # Paso 3: fusionar bloques de codigo consecutivos (ej: ```python\nimport os```
+        # seguido de mas codigo sin backticks — deben quedar en un solo CodeBlock)
+        merged = []
+        for seg in final:
+            if seg[0] == "text" and not seg[1].strip():
+                # texto vacio: ignorar si estamos entre dos bloques de codigo
+                merged.append(seg)
+                continue
+            merged.append(seg)
+
+        # Colapsar: code → (texto solo whitespace) → code = un solo code
+        final2 = []
+        i2 = 0
+        while i2 < len(merged):
+            seg = merged[i2]
+            if seg[0] == "code":
+                # mirar hacia adelante: ¿texto vacio + code?
+                j = i2 + 1
+                combined = seg[1]
+                lang = seg[2]
+                while j < len(merged):
+                    nxt = merged[j]
+                    if nxt[0] == "text" and not nxt[1].strip():
+                        j += 1
+                        continue
+                    if nxt[0] == "code":
+                        combined += "\n" + nxt[1]
+                        lang = lang or nxt[2]
+                        j += 1
+                        continue
+                    break
+                final2.append(("code", combined, lang))
+                i2 = j
+            else:
+                final2.append(seg)
+                i2 += 1
+
+        # Paso 4: renderizar
+        for seg in final2:
+            if seg[0] == "code":
+                CodeBlock(self._content, seg[1], lang=seg[2]).pack(fill="x", pady=(4, 4))
             else:
                 self._render_text_block(self._content, seg[1])
 
@@ -455,44 +535,12 @@ class AIBubble(ctk.CTkFrame):
                 self._add_text_block(parent, "\n".join(items))
                 continue
 
-            # ── Bloque de código heurístico (sin backticks) ─────────────────
-            # Detecta bloques de 3+ líneas con patrones de código Python/JS/etc.
-            CODE_HINTS = re.compile(
-                r'^(import |from |def |class |self\.|    |return |if |for |while |var |const |let |function |#include)'
-            )
-            if CODE_HINTS.match(line) or (line.startswith("    ") and len(line) > 8):
-                code_lines = []
-                while i < len(lines):
-                    l = lines[i]
-                    if not l.strip():
-                        # línea vacía: incluirla si la siguiente sigue siendo código
-                        if i+1 < len(lines) and (CODE_HINTS.match(lines[i+1]) or lines[i+1].startswith("    ")):
-                            code_lines.append(l)
-                            i += 1
-                            continue
-                        else:
-                            break
-                    if CODE_HINTS.match(l) or l.startswith("    ") or l.startswith("\t"):
-                        code_lines.append(l)
-                        i += 1
-                    else:
-                        break
-                if len(code_lines) >= 2:
-                    CodeBlock(parent, "\n".join(code_lines)).pack(fill="x", pady=(4,4))
-                    continue
-                else:
-                    # No era suficiente código, tratar como texto
-                    self._add_inline(parent, stripped)
-                    i += 1
-                    continue
-
             # ── Párrafo normal ──────────────────────────────────────────────
             para_lines = []
             while i < len(lines) and lines[i].strip() and \
                   not lines[i].strip().startswith(("#","- ","* ","• ","|")) and \
                   not re.match(r'^\d+\. ', lines[i].strip()) and \
-                  not re.match(r'^[-*_]{3,}$', lines[i].strip()) and \
-                  not CODE_HINTS.match(lines[i]):
+                  not re.match(r'^[-*_]{3,}$', lines[i].strip()):
                 para_lines.append(lines[i].strip())
                 i += 1
             if para_lines:
@@ -563,10 +611,23 @@ class AIBubble(ctk.CTkFrame):
 class LogRedirector:
     def __init__(self, target_widget):
         self.target = target_widget
+        self._buffer = ""
     def write(self, string):
-        if string.strip():
-            self.target.after(0, lambda: self._add_log(string.strip()))
-    def flush(self): pass
+        self._buffer += string
+        # Flush líneas completas al widget; retener el resto en buffer
+        if "\n" in self._buffer:
+            partes = self._buffer.split("\n")
+            for linea in partes[:-1]:
+                if linea.strip():
+                    texto = linea.strip()
+                    self.target.after(0, lambda t=texto: self._add_log(t))
+            self._buffer = partes[-1]  # lo que sobró sin \n
+    def flush(self):
+        # Al hacer flush manual, volcamos lo que quede en el buffer
+        if self._buffer.strip():
+            texto = self._buffer.strip()
+            self._buffer = ""
+            self.target.after(0, lambda t=texto: self._add_log(t))
     def _add_log(self, text):
         self.target.configure(state="normal")
         self.target.insert("end", text + "\n")
@@ -761,7 +822,8 @@ class OmniApp(ctk.CTk):
 
     def _build_log_area(self, parent):
         self.log_box = ctk.CTkTextbox(parent, fg_color=BG_SIDEBAR,
-                                      text_color="#7c7c9c", font=("Consolas", 12))
+                                      text_color="#7c7c9c", font=("Consolas", 12),
+                                      wrap="word")
         self.log_box.pack(fill="both", expand=True, padx=10, pady=10)
         self.log_box.configure(state="disabled")
         sys.stdout = LogRedirector(self.log_box)
