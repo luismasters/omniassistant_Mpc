@@ -288,6 +288,17 @@ class AIBubble(ctk.CTkFrame):
         ctk.CTkLabel(hdr, text=f"Cortana ({nombre_modelo})", font=(_F, TAMANO_BASE - 1, "bold"), text_color=TEXT_DIM
                      ).pack(side="left")
 
+        # Botón copiar respuesta completa (aparece a la derecha del header)
+        self._btn_copy = ctk.CTkButton(
+            hdr, text="⎘", width=28, height=28,
+            corner_radius=6,
+            fg_color="transparent",
+            hover_color=ACCENT_SOFT,
+            border_width=1, border_color="#2a2a3e",
+            font=(_F, TAMANO_BASE - 1), text_color=TEXT_DIM,
+            command=self._copiar_respuesta
+        )
+        self._btn_copy.pack(side="right", padx=(0, 4))
 
         # Contenedor de contenido
         self._content = ctk.CTkFrame(self, fg_color="transparent")
@@ -322,6 +333,16 @@ class AIBubble(ctk.CTkFrame):
                 height=max(LINE_HEIGHT_PX + 10, lineas * LINE_HEIGHT_PX + 10))
         except Exception:
             pass
+
+    def _copiar_respuesta(self):
+        """Copia el texto plano de la respuesta al portapapeles con feedback visual."""
+        if not self._raw.strip():
+            return
+        self.clipboard_clear()
+        self.clipboard_append(self._raw)
+        # Feedback: el ícono cambia brevemente a ✓
+        self._btn_copy.configure(text="✓", text_color="#86efac")
+        self.after(1500, lambda: self._btn_copy.configure(text="⎘", text_color=TEXT_DIM))
 
     # ── Finalizar: reemplazar stream por Markdown renderizado ─────────────────
     def finalizar(self):
@@ -577,6 +598,9 @@ class OmniApp(ctk.CTk):
         self._build_main_area()
 
         self.burbuja_ia_actual: AIBubble | None = None
+        self.texto_sin_enviar: str = ""      # Paso 2: guarda texto real al perder foco
+        self.historiales: dict = {}          # Paso 3: {modo: [(tipo, texto), ...]}
+        self.modo_actual = "general"         # se sobreescribe en _build_sidebar
         threading.Thread(target=self.motor_microfono, daemon=True).start()
 
     # ── Separador vertical sidebar/chat ───────────────────────────────────────
@@ -623,19 +647,19 @@ class OmniApp(ctk.CTk):
                      text_color=TEXT_DIM).grid(row=10, column=0, padx=18, pady=16, sticky="sw")
         sb.grid_rowconfigure(10, weight=1)
 
-    # --- FUNCIÓN _CAMBIAR_MODO CON ANCLAJE AUTOMÁTICO ---
+    # --- FUNCIÓN _CAMBIAR_MODO CON ANCLAJE AUTOMÁTICO + HISTORIAL (Paso 3) ---
     def _cambiar_modo(self, nuevo_modo):
+        if nuevo_modo == self.modo_actual:
+            return  # ya estamos en este modo, nada que hacer
+
         # 1. Verificación automática de entorno para los modos avanzados
         if nuevo_modo in ["planificador", "programador"]:
             if not getattr(motor_ia, 'WORKSPACE_ACTUAL', None):
                 ruta = filedialog.askdirectory(title=f"Selecciona el proyecto para el Modo {nuevo_modo.capitalize()}")
                 if not ruta:
-                    return # Si el usuario cancela, no cambiamos de modo
-                
+                    return
                 motor_ia.WORKSPACE_ACTUAL = ruta
                 nombre_proj = os.path.basename(ruta)
-                
-                # Generamos el árbol del proyecto de forma silenciosa
                 estructura = []
                 for raiz, carpetas, archivos in os.walk(ruta):
                     carpetas[:] = [d for d in carpetas if d not in ['.git','__pycache__','venv','node_modules']]
@@ -645,43 +669,81 @@ class OmniApp(ctk.CTk):
                     estructura.append(f"{ind}📂 {os.path.basename(raiz)}/")
                     for f in archivos: estructura.append(f"{sind}📄 {f}")
                 arbol = f"Estructura del proyecto '{nombre_proj}':\n" + "\n".join(estructura)
-                
-                # Guardamos el snapshot en formato físico (.cortana/snapshot.json)
                 guardar_snapshot(ruta, arbol)
                 motor_ia.SNAPSHOT_ACTUAL = arbol
 
-        # 2. Aplicamos el cambio de modo
+        # 2. PASO 3 — Guardar historial visual del modo ACTUAL antes de limpiar
+        snapshot_actual = []
+        for widget in self.chat_scroll.winfo_children():
+            if isinstance(widget, UserBubble):
+                # Extraer texto del CTkTextbox interno
+                try:
+                    txt = widget._tb.get("1.0", "end").strip()
+                    if txt:
+                        snapshot_actual.append(("usuario", txt))
+                except Exception:
+                    pass
+            elif isinstance(widget, AIBubble):
+                # Guardar el markdown crudo, que es la fuente de verdad
+                if widget._raw.strip():
+                    snapshot_actual.append(("ia", widget._raw))
+            elif isinstance(widget, ctk.CTkLabel):
+                # Capturar mensajes de sistema (⚙ ...)
+                try:
+                    txt = widget.cget("text")
+                    if txt and txt.startswith("⚙"):
+                        snapshot_actual.append(("sistema", txt[2:].strip()))
+                except Exception:
+                    pass
+        # Limitar a últimos 50 mensajes para no sobrecargar
+        self.historiales[self.modo_actual] = snapshot_actual[-50:]
+
+        # 3. Aplicamos el cambio de modo
         self.modo_actual = nuevo_modo
-        motor_ia.MODO_ACTUAL = nuevo_modo 
-        
-        # 3. Limpiamos la UI
+        motor_ia.MODO_ACTUAL = nuevo_modo
+
+        # 4. Limpiar UI
         for w in self.chat_scroll.winfo_children():
             w.destroy()
         self.burbuja_ia_actual = None
-        
-        # 4. Mensajes de bienvenida dinámicos (muestran el nombre del proyecto activo)
-        ruta_corta = os.path.basename(getattr(motor_ia, 'WORKSPACE_ACTUAL', '')) if getattr(motor_ia, 'WORKSPACE_ACTUAL', None) else ""
-        
-        mensajes_bienvenida = {
-            "general": "¿En qué puedo ayudarte hoy?",
-            "planificador": f"📐 Modo Planificador\n[ {ruta_corta} ]\n¿Qué vamos a diseñar?",
-            "programador": f"💻 Modo Programador\n[ {ruta_corta} ]\nListo para ejecutar."
-        }
-        
-        self._welcome_label = ctk.CTkLabel(
-            self.chat_scroll, text=mensajes_bienvenida[nuevo_modo],
-            font=(_F, TAMANO_BASE + 6, "bold"), text_color="#2a2a3e")
-        self._welcome_label.pack(expand=True, pady=(120,0))
-        
-        self._agregar_sistema(f"Modo cambiado a: {nuevo_modo.upper()}")
-        
-        # --- ACTUALIZAR ETIQUETA DE LA BARRA LATERAL ---
+
+        # 5. Restaurar historial del nuevo modo si existe
+        historial_previo = self.historiales.get(nuevo_modo, [])
+        if historial_previo:
+            for tipo, texto in historial_previo:
+                if tipo == "usuario":
+                    self._agregar_usuario(texto)
+                elif tipo == "ia":
+                    burbuja = AIBubble(self.chat_scroll)
+                    burbuja.pack(fill="x", padx=CHAT_PAD_X, pady=(2,6))
+                    burbuja._raw = texto
+                    burbuja._streaming = False
+                    burbuja._stream_box.destroy()
+                    burbuja._render_markdown(texto)
+                elif tipo == "sistema":
+                    self._agregar_sistema(texto)
+        else:
+            # Primera vez en este modo: mostrar bienvenida
+            ruta_corta = os.path.basename(getattr(motor_ia, 'WORKSPACE_ACTUAL', '')) if getattr(motor_ia, 'WORKSPACE_ACTUAL', None) else ""
+            mensajes_bienvenida = {
+                "general":      "¿En qué puedo ayudarte hoy?",
+                "planificador": f"📐 Modo Planificador\n[ {ruta_corta} ]\n¿Qué vamos a diseñar?",
+                "programador":  f"💻 Modo Programador\n[ {ruta_corta} ]\nListo para ejecutar."
+            }
+            self._welcome_label = ctk.CTkLabel(
+                self.chat_scroll, text=mensajes_bienvenida[nuevo_modo],
+                font=(_F, TAMANO_BASE + 6, "bold"), text_color="#2a2a3e")
+            self._welcome_label.pack(expand=True, pady=(120,0))
+            self._agregar_sistema(f"Modo cambiado a: {nuevo_modo.upper()}")
+
+        # 6. Actualizar etiqueta de modelo en sidebar
         textos_modelos = {
-            "general": "🧠 Modelo: Gemini Flash",
+            "general":      "🧠 Modelo: Gemini Flash",
             "planificador": "🧠 Modelo: DeepSeek V4 (Thinking)",
-            "programador": "🧠 Modelo: DeepSeek V4 (Fast)"
+            "programador":  "🧠 Modelo: DeepSeek V4 (Fast)"
         }
         self.lbl_modelo_activo.configure(text=textos_modelos[nuevo_modo])
+        self._scroll_abajo()
 
     # ── Main area (tabs) ───────────────────────────────────────────────────────
     def _build_main_area(self):
@@ -770,15 +832,24 @@ class OmniApp(ctk.CTk):
 
     def _clear_placeholder(self, event=None):
         if self._placeholder_active:
-            self.entry.delete("1.0","end")
+            # Solo borramos si el contenido ES el placeholder, no texto real
+            self.entry.delete("1.0", "end")
             self.entry.configure(text_color=TEXT_PRIMARY)
             self._placeholder_active = False
+            # Restaurar texto real que el usuario había escrito antes
+            if self.texto_sin_enviar:
+                self.entry.insert("1.0", self.texto_sin_enviar)
+                self.texto_sin_enviar = ""
 
     def _restore_placeholder(self, event=None):
-        if not self.entry.get("1.0","end").strip():
-            self.entry.insert("1.0","Escribí tu mensaje...")
+        contenido = self.entry.get("1.0", "end").strip()
+        if not contenido:
+            self.entry.insert("1.0", "Escribí tu mensaje...")
             self.entry.configure(text_color=TEXT_DIM)
             self._placeholder_active = True
+        else:
+            # Guardar el texto real antes de perder el foco
+            self.texto_sin_enviar = contenido
 
     def _adjuntar_archivo(self):
         """Abre diálogo para adjuntar archivo e inserta la ruta en el input."""

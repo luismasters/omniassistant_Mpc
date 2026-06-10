@@ -13,32 +13,33 @@ import config
 logger = logging.getLogger(__name__)
 
 # ==========================================================
-# FUNCIONES DE SEGURIDAD (Fase 1)
+# FUNCIONES DE SEGURIDAD (Fase 1 Mejorada)
 # ==========================================================
 
 def es_ruta_segura(ruta: str) -> bool:
-    """Verifica que la ruta esté dentro del sandbox (config.SANDBOX_BASE) y no contenga '..' malicioso."""
+    """Verifica que la ruta esté dentro del sandbox o en el Workspace anclado."""
     try:
-        abs_ruta = os.path.abspath(ruta)
-        sandbox = os.path.abspath(config.SANDBOX_BASE)
+        abs_ruta = str(Path(os.path.abspath(ruta)).resolve())
         
-        # Normalizar con Path para eliminar posibles dobles barras
-        abs_ruta = str(Path(abs_ruta).resolve())
-        sandbox = str(Path(sandbox).resolve())
-        
-        # Verificar que la ruta normalizada comience con el sandbox
-        if not abs_ruta.startswith(sandbox):
-            logger.error(f"Ruta insegura: {ruta} -> {abs_ruta} (fuera de sandbox: {sandbox})")
-            return False
+        # 1. Recopilamos todas las rutas permitidas dinámicamente
+        rutas_permitidas = list(config.RUTAS_SEGURAS)
+        if getattr(config, 'RUTA_WORKSPACE_ACTUAL', None):
+            rutas_permitidas.append(config.RUTA_WORKSPACE_ACTUAL)
             
-        # Verificar enlaces simbólicos (opcional, pero recomendado)
-        if os.path.islink(ruta):
-            destino = os.path.realpath(ruta)
-            if not destino.startswith(sandbox):
-                logger.error(f"Enlace simbólico apunta fuera del sandbox: {ruta} -> {destino}")
-                return False
+        # 2. Verificamos si la ruta cae dentro de ALGUNA de las rutas permitidas
+        for ruta_base in rutas_permitidas:
+            base_norm = str(Path(os.path.abspath(ruta_base)).resolve())
+            
+            if abs_ruta.startswith(base_norm):
+                # Verificar enlaces simbólicos (opcional, pero recomendado)
+                if os.path.islink(ruta):
+                    destino = os.path.realpath(ruta)
+                    if not destino.startswith(base_norm):
+                        continue # Falla esta base, revisa si hay otra
+                return True # ¡Ruta aprobada!
                 
-        return True
+        logger.error(f"Ruta insegura: {ruta} -> {abs_ruta} (Fuera de las permitidas)")
+        return False
     except Exception as e:
         logger.error(f"Error validando ruta {ruta}: {e}")
         return False
