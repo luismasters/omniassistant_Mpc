@@ -11,7 +11,8 @@
 | `config.py`                        | Configuración global: API keys, límites de seguridad, rutas del sandbox, modelo de audio. |
 | `main_gui.py`                      | Interfaz gráfica principal. Chat con burbujas (usuario/IA), entrada de texto, adjuntos, sidebar con cambio de modo, logs. |
 | `servidor_sistema_mcp.py`          | Servidor MCP que expone herramientas del sistema (estado PC, hardware, memoria, exploración de archivos). |
-| `modulos/ia.py`                    | Motor principal de IA. Enruta peticiones a Gemini o DeepSeek según el modo, gestiona el contexto de conversación, los semáforos de seguridad (borrado, Git), y parsea acciones de la respuesta (guardar_archivo, buscar, abrir, etc.). |
+| `gestor_boveda.py`                 | Script independiente para listar/borrar la memoria persistente (CLI). |
+| `modulos/ia.py`                    | Motor principal de IA. Enruta peticiones a Gemini o DeepSeek según el modo, gestiona el contexto de conversación, los semáforos de seguridad (borrado, Git), y parsea acciones de la respuesta (guardar_archivo, reemplazar, buscar, abrir, etc.). |
 | `modulos/audio.py`                 | Captura de voz con micrófono (Whisper) y síntesis de voz (pyttsx3). |
 | `modulos/archivos.py`              | Operaciones seguras de archivos: lectura, escritura, creación de carpetas, eliminación con validación de rutas dentro del sandbox/workspace. |
 | `modulos/sistema.py`               | Control de ventanas (buscar, mover, cerrar), búsqueda de programas/archivos en disco, ejecución de comandos del sistema, telemetría de hardware y CPU/RAM/GPU. |
@@ -23,7 +24,8 @@
 | `modulos/cliente_mcp.py`           | Cliente asíncrono para el servidor MCP, usado por `ia.py` para invocar herramientas del sistema. |
 | `modulos/limpiar.py`               | Utilidad para borrar toda la memoria de ChromaDB. |
 | `modulos/logger.py`                | Configuración de logging a archivo y consola. |
-| `gestor_boveda.py`                 | Script independiente para listar/borrar la memoria persistente (CLI). |
+| `modulos/servidor_sistema_mcp.py`  | **Duplicado** del servidor MCP en la raíz. Debe consolidarse. |
+| `pruebas/test_nuevo_parser.py`     | Archivo vacío. No hay pruebas unitarias implementadas. |
 
 ## Estado Actual
 

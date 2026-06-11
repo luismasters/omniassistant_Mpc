@@ -2,6 +2,9 @@ import sys
 import os
 import contextlib
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
 # =====================================================================
 # 1. FORZAMOS UTF-8 EN LA CONSOLA PRINCIPAL
 # =====================================================================

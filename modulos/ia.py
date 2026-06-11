@@ -148,7 +148,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
     # =================================================================
     print(f"\n🧠 PENSANDO ({MODO_ACTUAL.upper()})...")
     try:
-        fecha_hoy = datetime.datetime.now().strftime("%A, %d de %B de %Y") 
+        fecha_hoy = datetime.datetime.now().strftime("%A, %d de %B de %Y %H:%M") 
         ventanas_abiertas = obtener_ventanas_activas()
         
         texto_workspace = f"[WORKSPACE ANCLADO]: {WORKSPACE_ACTUAL}\n" if WORKSPACE_ACTUAL else ""
@@ -193,10 +193,14 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             modelo_activo = "deepseek-chat"
 
         else: # MODO GENERAL (Gemini)
+            # Detectamos automáticamente la ruta real del usuario en Windows
+            ruta_home = os.path.expanduser("~") 
+
             contexto_sistema = (
                 "tu nombre es: Cortana, un asistente de IA integrado a la PC de Luis. Hablále de forma súper natural y directa.\n"
                 "⚠️ REGLA DE PERSONALIDAD: Sé breve. NUNCA expliques tus procesos internos, solo da la respuesta final.\n\n"
                 f"[CONTEXTO OCULTO] Fecha: {fecha_hoy}\n"
+                f"[RUTA DEL SISTEMA]: Tu usuario de Windows está en '{ruta_home}'. Por lo tanto, el Escritorio es '{ruta_home}\\Desktop'.\n"
                 f"[VENTANAS ABIERTAS]: {ventanas_abiertas}\n\n"
                 f"{texto_workspace}\n{texto_snapshot}{texto_doc_volatil}"
                 "⚠️ REGLAS DE ACCIONES RÁPIDAS (Si debes hacer algo, escribe la orden exacta en una nueva línea):\n"
@@ -207,6 +211,9 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 "- Para GUARDAR RECUREDOS en memoria a largo plazo: mcp_guardar_en_boveda\n"
                 "- Para BUSCAR RECUERDOS: mcp_buscar_en_boveda\n"
                 "- SI LUIS PIDE ESCANEAR EL PROYECTO O ARQUITECTURA IMPRIME ESTO EXACTO: escanear_proyecto:\n"
+                "- Para CREAR CARPETAS en Windows: crear_carpeta: ruta_absoluta\n" 
+                "- Para LEER UN ARCHIVO: leer_archivo: ruta_absoluta\n" 
+                "- Para GUARDAR TEXTO O CÓDIGO NUEVO: guardar_archivo: ruta_absoluta ---CONTENIDO--- [texto_real_a_guardar]\n"
                 "- Si te piden mirar la pantalla 1 o 2, espera silenciosamente, el sistema te enviará la foto.\n"
             )
             modelo_activo = "gemini"
@@ -378,8 +385,8 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 ruta_real = os.path.join(WORKSPACE_ACTUAL, ruta_corta) if WORKSPACE_ACTUAL and not os.path.isabs(ruta_corta) else ruta_corta
                 contenido_leido = leer_contenido_archivo(ruta_real)
                 
-                if len(contenido_leido) > 8000:
-                    contenido_leido = contenido_leido[:8000] + "\n... [CONTENIDO TRUNCADO]"
+                if len(contenido_leido) > 80000:
+                    contenido_leido = contenido_leido[:80000] + "\n... [CONTENIDO TRUNCADO]"
                 
                 CONTEXTO_CHAT = [msg for msg in CONTEXTO_CHAT if not (msg['role'] == 'user' and len(msg['parts']) > 0 and isinstance(msg['parts'][0], str) and msg['parts'][0].startswith("[CONTENIDO DE '"))]
                 
