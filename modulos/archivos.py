@@ -19,6 +19,12 @@ logger = logging.getLogger(__name__)
 def es_ruta_segura(ruta: str) -> bool:
     """Verifica que la ruta esté dentro del sandbox o en el Workspace anclado."""
     try:
+        # --- NUEVO: SANDBOX INTELIGENTE (Libertad para Modo General) ---
+        modo = getattr(config, 'MODO_ACTUAL', 'general')
+        if modo == "general":
+            return True
+        # ---------------------------------------------------------------
+        
         abs_ruta = str(Path(os.path.abspath(ruta)).resolve())
         
         # 1. Recopilamos todas las rutas permitidas dinámicamente

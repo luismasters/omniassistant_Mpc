@@ -58,7 +58,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
     # --- PARCHE SANDBOX: Sincronizar ruta actual con la seguridad ---
     config.RUTA_WORKSPACE_ACTUAL = WORKSPACE_ACTUAL
     # -----------------------------------------------------------------
-
+    config.MODO_ACTUAL = MODO_ACTUAL # <-- ESTA LÍNEA ES CLAVE
     # =================================================================
     # 🩹 INTERCEPTOR DE ADJUNTOS DE LA INTERFAZ
     # =================================================================
@@ -164,11 +164,11 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 "2. Analiza riesgos, dependencias y estructura lógica paso a paso.\n"
                 "⚠️ REGLAS DE ACCIONES RÁPIDAS (SIEMPRE al inicio de línea):\n"
                 "- Para ACTUALIZAR EL PLAN: guardar_archivo: plan.md ---CONTENIDO--- [contenido_del_plan]\n"
+                "- Para ESCANEAR proyecto con Crawler: escanear_proyecto:\n"
                 "- Para ACTUALIZAR EL ESTADO REAL: guardar_archivo: PROJECT_STATE.md ---CONTENIDO--- [contenido_del_estado]\n"
                 "- Para CREAR CARPETAS de doc: crear_carpeta: ruta\n"
                 "⚠️ IMPORTANTE: SIEMPRE usa 'guardar_archivo:' para generar el plan.md físico."
             )
-            # CORRECCIÓN: Nombre oficial del modelo de DeepSeek para razonamiento (Evita error 404)
             modelo_activo = "deepseek-reasoner"
 
         elif MODO_ACTUAL == "programador":
@@ -177,47 +177,44 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 f"{texto_workspace}\n{texto_snapshot}{texto_doc_volatil}"
                 "REGLAS OBLIGATORIAS:\n"
                 "1. Escribe únicamente el código necesario según el plan.\n"
-                "2. Mantén consistencia con la arquitectura.\n"
-                "⚠️ REGLAS DE ACCIONES RÁPIDAS (SIEMPRE al inicio de línea):\n"
-                "- Para CREAR CARPETAS: crear_carpeta: ruta\n"
-                "- Para LEER un archivo: leer_archivo: ruta\n"
-                "- Para EDITAR (reemplazar texto exacto): editar_archivo: ruta | buscar: texto | reemplazar: texto\n"
-                "- Para GUARDAR/CREAR ARCHIVOS: guardar_archivo: ruta ---CONTENIDO--- [tu_codigo_aqui]\n"
-                "- Para ELIMINAR obsoleto: eliminar: ruta\n"
-                "- Para PUSH a GitHub: github: ruta\n"
-                "- Para comandos Git: git_comando: ruta || tu_comando\n"
-                "⚠️ IMPORTANTE: Usa rutas relativas al workspace actual."
+                "⚠️ REGLAS DE ACCIONES RÁPIDAS:\n"
+                "- Para LEER: leer_archivo: ruta\n"
+                "- Para GUARDAR NUEVO: guardar_archivo: ruta ---CONTENIDO--- [codigo]\n"
+                "- Para REEMPLAZAR BLOQUES LARGOS (Usa siempre esto para funciones):\n"
+                "reemplazar_bloque: ruta\n"
+                "---BUSCAR---\n"
+                "[codigo viejo exacto]\n"
+                "---REEMPLAZAR---\n"
+                "[codigo nuevo]\n"
+                "---FIN---\n"
+                "- Para EDICIÓN RÁPIDA (1 línea): editar_archivo: ruta | buscar: texto | reemplazar: texto\n"
+                "- Para PUSH: github: ruta\n"
             )
-            # CORRECCIÓN: Nombre oficial del modelo de DeepSeek normal (Evita error 404)
             modelo_activo = "deepseek-chat"
 
         else: # MODO GENERAL (Gemini)
             contexto_sistema = (
-                "tu nombre es: Cortana, un asistente de IA integrado a la PC de Luis. Hablále de forma súper natural.\n"
-                "⚠️ REGLA DE PERSONALIDAD: Sé breve. NUNCA expliques tus procesos.\n\n"
+                "tu nombre es: Cortana, un asistente de IA integrado a la PC de Luis. Hablále de forma súper natural y directa.\n"
+                "⚠️ REGLA DE PERSONALIDAD: Sé breve. NUNCA expliques tus procesos internos, solo da la respuesta final.\n\n"
                 f"[CONTEXTO OCULTO] Fecha: {fecha_hoy}\n"
                 f"[VENTANAS ABIERTAS]: {ventanas_abiertas}\n\n"
                 f"{texto_workspace}\n{texto_snapshot}{texto_doc_volatil}"
-                "⚠️ REGLAS DE ACCIONES RÁPIDAS (SIEMPRE al inicio de línea):\n"
-                "- Para GUARDAR ESTADO MANUAL: snapshot: resumen_tecnico\n"
-                "- Para ABRIR o MOSTRAR: abrir: nombre_app\n"
-                "- Para MOVER ventanas: abrir: nombre_app @ num\n"
-                "- Para CERRAR: cerrar: nombre_app\n"
-                "- Para ELIMINAR: eliminar: ruta\n"
-                "- Para buscar en INTERNET: buscar: tu consulta\n" 
-                "- Para CREAR CARPETAS: crear_carpeta: ruta\n"
-                "- Para GUARDAR ARCHIVOS: guardar_archivo: ruta || contenido\n"
-                "- Para GITHUB: github: ruta\n"
-                "- Para GITHUB RESET: github_reset: ruta || url\n"
-                "- Para GIT COMANDO: git_comando: ruta || comando\n"
-                "- Para ESCANEAR y analizar TODO el proyecto generando el PROJECT_STATE.md: escanear_proyecto:\n"
+                "⚠️ REGLAS DE ACCIONES RÁPIDAS (Si debes hacer algo, escribe la orden exacta en una nueva línea):\n"
+                "- Para ABRIR o MOSTRAR una app/web: abrir: nombre_app\n"
+                "- Para CERRAR una app: cerrar: nombre_app\n"
+                "- Para MOVER ventanas: mover: nombre_app @ [1 o 2] (Usa 1 para monitor ppal, 2 para secundario)\n"
+                "- Para buscar info en INTERNET: buscar: tu consulta (Espera los resultados invisibles y responde)\n"
+                "- Para GUARDAR RECUREDOS en memoria a largo plazo: mcp_guardar_en_boveda\n"
+                "- Para BUSCAR RECUERDOS: mcp_buscar_en_boveda\n"
+                "- SI LUIS PIDE ESCANEAR EL PROYECTO O ARQUITECTURA IMPRIME ESTO EXACTO: escanear_proyecto:\n"
+                "- Si te piden mirar la pantalla 1 o 2, espera silenciosamente, el sistema te enviará la foto.\n"
             )
             modelo_activo = "gemini"
 
         respuesta_ia = ""
         usaste_mcp = False
         resultado_mcp = ""
-        modelo_gemini = None # Inicialización segura
+        modelo_gemini = None
 
         print(f"\n🤖 Cortana dice:\n---")
         
@@ -229,7 +226,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             mensajes_para_gemini = list(CONTEXTO_CHAT)
             partes_usuario = [texto_usuario]
             
-            # Lógica de Visión
             verbos_vision = ["captura", "capturá", "capturar", "mirar", "ves"]
             objetivos_vision = ["pantalla", "monitor", "1", "2", "uno", "dos", "la 1", "el 1", "la 2", "el 2"]
             if any(v in texto_usuario_lower for v in verbos_vision) and any(o in texto_usuario_lower for o in objetivos_vision):
@@ -265,8 +261,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 except Exception: pass
 
             if usaste_mcp and modelo_gemini:
-                # CORRECCIÓN CRÍTICA: Intercalamos un 'model' para evitar el Error 400 de Gemini 
-                # (Google prohíbe dos mensajes de 'user' seguidos).
                 mensajes_para_gemini.append({'role': 'model', 'parts': ['Analizando los datos del sistema...']})
                 mensajes_para_gemini.append({'role': 'user', 'parts': [f"[DATO DEL SISTEMA: {resultado_mcp}]. Responde naturalmente."]})
                 response_2 = modelo_gemini.generate_content(mensajes_para_gemini, stream=True)
@@ -293,12 +287,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
 
             if ui_callback: ui_callback("🤖 Cortana", "", "#A8C7FA", nueva_linea=False)
             
-            parametros_api = {
-                "model": modelo_activo,
-                "messages": mensajes_ds,
-                "stream": True
-            }
-            
+            parametros_api = {"model": modelo_activo, "messages": mensajes_ds, "stream": True}
             response = cliente_deepseek.chat.completions.create(**parametros_api)
             
             for chunk in response:
@@ -315,127 +304,125 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         if ui_callback: ui_callback("", "", "#E8EAED", nueva_linea=True)
         
         # =================================================================
-        # INTERCEPTOR DE ACCIONES (Universal para todos los modelos)
+        # INTERCEPTOR DE ACCIONES (NUEVO PARSER ANTI-MARKDOWN)
         # =================================================================
         reportes_acciones = []
         comando_busqueda_detectado = None
 
+        # --- PROTECCIÓN: Si no hay workspace, bloqueamos la escritura silenciosa ---
+        if MODO_ACTUAL != "general" and not WORKSPACE_ACTUAL and any(cmd in respuesta_ia.lower() for cmd in ["guardar_archivo:", "editar_archivo:", "reemplazar_bloque:", "crear_carpeta:", "eliminar:"]):
+            msg_err = "⚠️ Error de seguridad: No se pueden modificar archivos sin un Workspace seleccionado."
+            print(f"[ERROR] {msg_err}")
+            if ui_callback: ui_callback("⚙️ Sistema", msg_err, "#ff4500")
+            CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[SISTEMA] {msg_err}"]})
+            return
+
+        # 1. GUARDAR ARCHIVO
         if "guardar_archivo:" in respuesta_ia.lower():
             try:
-                match = re.search(r'guardar_archivo:\s*(.+?)\s*---CONTENIDO---\s*([\s\S]*)', respuesta_ia, re.IGNORECASE)
+                # Tolerante a los backticks y a múltiples guiones en ---CONTENIDO---
+                match = re.search(r'guardar_archivo:\s*(.+?)\s*-{3,}CONTENIDO-{3,}\s*([\s\S]*)', respuesta_ia, re.IGNORECASE)
                 if match:
-                    ruta_f = match.group(1).strip()
+                    ruta_f = match.group(1).replace('`', '').replace('*', '').strip()
                     contenido_f = match.group(2).strip()
-                    
-                    contenido_f = re.sub(r'^```\w*\n?', '', contenido_f)
-                    contenido_f = re.sub(r'\n?```$', '', contenido_f)
+                    contenido_f = re.sub(r'^```\w*\n?|\n?```$', '', contenido_f).strip()
                         
-                    if WORKSPACE_ACTUAL and not os.path.isabs(ruta_f):
-                        ruta_f_abs = os.path.join(WORKSPACE_ACTUAL, ruta_f)
-                        if not os.path.exists(ruta_f_abs):
-                            for raiz, _, archivos in os.walk(WORKSPACE_ACTUAL):
-                                if os.path.basename(ruta_f).lower() in [a.lower() for a in archivos]:
-                                    ruta_f_abs = os.path.join(raiz, os.path.basename(ruta_f))
-                                    break
-                        ruta_f = ruta_f_abs
-                    elif not os.path.isabs(ruta_f):
-                        ruta_real = buscar_archivo_local(ruta_f)
-                        ruta_f = ruta_real if ruta_real else os.path.join(os.path.expanduser("~"), "Desktop", ruta_f)
-                    
-                    resultado_escritura = escribir_archivo(ruta_f, contenido_f.strip())
-                    reportes_acciones.append(f"Archivo guardado: {resultado_escritura}")
+                    ruta_f_abs = os.path.join(WORKSPACE_ACTUAL, ruta_f) if not os.path.isabs(ruta_f) else ruta_f
+                    resultado_escritura = escribir_archivo(ruta_f_abs, contenido_f)
                     
                     if "ERROR" in resultado_escritura:
                         CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO ESCRITURA] Fallo al guardar {ruta_f}: {resultado_escritura}"]})
+                        if ui_callback: ui_callback("⚙️ Sistema", f"❌ Error guardando {ruta_f}: {resultado_escritura}", "#ff4500")
                     else:
                         CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO ESCRITURA] Archivo {ruta_f} guardado correctamente."] })
+                        if ui_callback: ui_callback("⚙️ Sistema", f"✅ Archivo guardado: {ruta_f}", "#86efac")
             except Exception as e:
-                msg_error = f"❌ Error local al guardar el archivo: {e}"
-                print(msg_error)
-                if ui_callback: ui_callback("⚙️ Sistema", msg_error, "#ff4500")
+                print(f"❌ Error local al guardar el archivo: {e}")
 
+        # 2. REEMPLAZAR BLOQUE (NUEVO MOTOR QUIRÚRGICO MULTILÍNEA)
+        if "reemplazar_bloque:" in respuesta_ia.lower():
+            try:
+                matches_reemplazo = re.finditer(r'reemplazar_bloque:\s*(.+?)\s*-{3,}BUSCAR-{3,}\s*([\s\S]*?)\s*-{3,}REEMPLAZAR-{3,}\s*([\s\S]*?)\s*-{3,}FIN-{3,}', respuesta_ia, re.IGNORECASE)
+                for match in matches_reemplazo:
+                    ruta_edit = match.group(1).replace('`','').replace('*','').strip()
+                    buscar_edit = re.sub(r'^```\w*\n?|\n?```$', '', match.group(2).strip()).strip()
+                    reemplazar_edit = re.sub(r'^```\w*\n?|\n?```$', '', match.group(3).strip()).strip()
+                    
+                    ruta_real_edit = os.path.join(WORKSPACE_ACTUAL, ruta_edit) if not os.path.isabs(ruta_edit) else ruta_edit
+                    contenido_actual = leer_contenido_archivo(ruta_real_edit)
+                    
+                    if not contenido_actual.startswith("ERROR"):
+                        if buscar_edit in contenido_actual:
+                            nuevo_contenido = contenido_actual.replace(buscar_edit, reemplazar_edit, 1)
+                            res = escribir_archivo(ruta_real_edit, nuevo_contenido)
+                            CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Modificación exitosa en {ruta_edit}"]})
+                            if ui_callback: ui_callback("⚙️ Sistema", f"✅ Bloque actualizado en {ruta_edit}", "#86efac")
+                        else:
+                            msg_fallo = f"No se encontró el bloque exacto en {ruta_edit}."
+                            CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] {msg_fallo}"]})
+                            if ui_callback: ui_callback("⚙️ Sistema", f"❌ Fallo edición: {msg_fallo}", "#ff4500")
+            except Exception as e:
+                print(f"❌ Error en reemplazo de bloque: {e}")
+
+        # Análisis línea por línea para el resto de comandos cortos
         lineas = respuesta_ia.split('\n')
-        
         for linea in lineas:
-            linea_limpia = linea.lower().replace("[", "").replace("]", "").replace("*", "").strip()
+            linea_limpia = linea.lower().replace("[", "").replace("]", "").replace("*", "").replace("`", "").strip()
             
             if linea_limpia.startswith("guardar_archivo:") or "---contenido---" in linea_limpia: continue
+            if "reemplazar_bloque:" in linea_limpia or "---buscar---" in linea_limpia or "---reemplazar---" in linea_limpia or "---fin---" in linea_limpia: continue
             
             elif linea_limpia.startswith("leer_archivo:"):
-                ruta_corta = linea[linea.lower().find("leer_archivo:") + 13:].strip()
+                raw_path = linea[linea.lower().find("leer_archivo:") + 13:].strip()
+                ruta_corta = raw_path.split('|')[0].replace('*', '').replace('`', '').strip()
                 ruta_real = os.path.join(WORKSPACE_ACTUAL, ruta_corta) if WORKSPACE_ACTUAL and not os.path.isabs(ruta_corta) else ruta_corta
                 contenido_leido = leer_contenido_archivo(ruta_real)
                 
                 if len(contenido_leido) > 8000:
-                    contenido_leido = contenido_leido[:8000] + "\n... [CONTENIDO TRUNCADO POR TAMAÑO]"
+                    contenido_leido = contenido_leido[:8000] + "\n... [CONTENIDO TRUNCADO]"
                 
                 CONTEXTO_CHAT = [msg for msg in CONTEXTO_CHAT if not (msg['role'] == 'user' and len(msg['parts']) > 0 and isinstance(msg['parts'][0], str) and msg['parts'][0].startswith("[CONTENIDO DE '"))]
                 
                 CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[CONTENIDO DE '{ruta_real}']:\n{contenido_leido}"]})
-                reportes_acciones.append(f"Archivo cargado en memoria: {ruta_corta}")
+                if ui_callback: ui_callback("⚙️ Sistema", f"📄 Archivo cargado en memoria: {ruta_corta}", "#80868B")
 
-            # CORRECCIÓN: Parseo súper robusto para editar_archivo
+            # 3. EDITOR QUIRÚRGICO DE 1 LÍNEA (Tolerante a Markdown)
             elif linea_limpia.startswith("editar_archivo:"):
-                partes = [p.strip() for p in linea.split('|')]
-                if len(partes) >= 3:
-                    match_ruta = re.search(r'editar_archivo:\s*(.+)', partes[0], re.IGNORECASE)
-                    if match_ruta:
-                        ruta_edit = match_ruta.group(1).strip()
-                        buscar_edit = re.sub(r'^buscar:\s*', '', partes[1], flags=re.IGNORECASE).strip().strip('"\'')
-                        reemplazar_edit = re.sub(r'^reemplazar:\s*', '', partes[2], flags=re.IGNORECASE).strip().strip('"\'') if len(partes) > 2 else ""
+                match = re.search(r'editar_archivo:\s*(.+?)\s*\*?\|\*?\s*buscar:\s*(.+?)\s*\*?\|\*?\s*reemplazar:\s*(.+)', linea, re.IGNORECASE)
+                if match:
+                    ruta_edit = match.group(1).replace('`','').replace('*','').strip()
+                    buscar_edit = match.group(2).strip().strip('"\'`')
+                    reemplazar_edit = match.group(3).strip().strip('"\'`')
+                    
+                    ruta_real_edit = os.path.join(WORKSPACE_ACTUAL, ruta_edit) if WORKSPACE_ACTUAL and not os.path.isabs(ruta_edit) else ruta_edit
+                    contenido_actual = leer_contenido_archivo(ruta_real_edit)
+                    
+                    if not contenido_actual.startswith("ERROR"):
+                        buscar_norm = " ".join(buscar_edit.split())
+                        contenido_norm = " ".join(contenido_actual.split())
                         
-                        ruta_real_edit = os.path.join(WORKSPACE_ACTUAL, ruta_edit) if WORKSPACE_ACTUAL and not os.path.isabs(ruta_edit) else ruta_edit
-                        contenido_actual = leer_contenido_archivo(ruta_real_edit)
-                        
-                        if not contenido_actual.startswith("ERROR"):
-                            buscar_norm = " ".join(buscar_edit.split())
-                            contenido_norm = " ".join(contenido_actual.split())
-                            
-                            if buscar_norm in contenido_norm:
-                                if buscar_edit in contenido_actual:
-                                    nuevo_contenido = contenido_actual.replace(buscar_edit, reemplazar_edit, 1)
-                                    if nuevo_contenido != contenido_actual:
-                                        escribir_archivo(ruta_real_edit, nuevo_contenido)
-                                        reportes_acciones.append(f"Reemplazo exitoso en {ruta_edit}")
-                                        CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Modificación exitosa en {ruta_edit}"]})
-                                else:
-                                    msg_fallo = "Texto encontrado, pero difiere en espacios/saltos de línea. Sé más preciso."
-                                    reportes_acciones.append(msg_fallo)
-                                    CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Fallo: {msg_fallo}"]})
+                        if buscar_norm in contenido_norm:
+                            if buscar_edit in contenido_actual:
+                                nuevo_contenido = contenido_actual.replace(buscar_edit, reemplazar_edit, 1)
+                                if nuevo_contenido != contenido_actual:
+                                    escribir_archivo(ruta_real_edit, nuevo_contenido)
+                                    CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Modificación exitosa en {ruta_edit}"]})
+                                    if ui_callback: ui_callback("⚙️ Sistema", f"✅ Edición rápida en {ruta_edit}", "#86efac")
                             else:
-                                msg_fallo = f"No se encontró el texto a reemplazar en {ruta_edit}"
-                                reportes_acciones.append(msg_fallo)
-                                CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Fallo: {msg_fallo}"]})
+                                CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Difiere en espacios. Sé más preciso."]})
                         else:
-                            reportes_acciones.append(f"Fallo al leer archivo para edición: {ruta_edit}")
+                            CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Fallo: Texto no encontrado."]})
+                            if ui_callback: ui_callback("⚙️ Sistema", f"❌ Texto no encontrado en {ruta_edit}", "#ff4500")
 
             elif linea_limpia.startswith("snapshot:"):
                 if WORKSPACE_ACTUAL:
                     resumen_estado = linea[linea.lower().find("snapshot:") + 9:].strip()
                     guardar_snapshot(WORKSPACE_ACTUAL, resumen_estado)
                     SNAPSHOT_ACTUAL = cargar_snapshot(WORKSPACE_ACTUAL)
-                    msg = f"📸 Snapshot físico guardado."
-                    print(msg)
-                    if ui_callback: ui_callback("⚙️ Sistema", msg, "#FFA500")
-                    reportes_acciones.append("Snapshot guardado exitosamente.")
+                    if ui_callback: ui_callback("⚙️ Sistema", "📸 Snapshot guardado", "#FFA500")
 
             elif linea_limpia.startswith("buscar:"): 
                 comando_busqueda_detectado = linea_limpia[7:].strip()
-                
-            elif linea_limpia.startswith("eliminar:"):
-                ruta_corta = linea_limpia[9:].strip()
-                if WORKSPACE_ACTUAL and not os.path.isabs(ruta_corta):
-                    ruta_real = os.path.join(WORKSPACE_ACTUAL, os.path.basename(ruta_corta))
-                    if not os.path.exists(ruta_real): ruta_real = buscar_archivo_o_carpeta(ruta_corta) or ruta_corta
-                else:
-                    ruta_real = ruta_corta if os.path.exists(ruta_corta) else (buscar_archivo_o_carpeta(ruta_corta) or ruta_corta)
-                
-                PENDIENTE_DE_BORRADO = ruta_real
-                msg_alerta = f"⚠️ ALERTA: Vas a eliminar:\n'{ruta_real}'\n\n¿Seguro? Respondé SÍ para proceder o NO."
-                if ui_callback: ui_callback("🤖 Cortana", msg_alerta, "#FF4500")
-                if modo_voz: hablar_no_bloqueante("Alerta de seguridad. ¿Confirmás el borrado?")
-                CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg_alerta]}])
-                return 
                 
             elif linea_limpia.startswith("github:"):
                 ruta_corta = linea_limpia[7:].strip()
@@ -472,12 +459,12 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             elif linea_limpia.startswith("crear_carpeta:"):
                 ruta_corta = linea[linea.lower().find("crear_carpeta:") + 14:].replace("[", "").replace("]", "").replace("*", "").strip()
                 ruta_final = os.path.join(WORKSPACE_ACTUAL, ruta_corta) if WORKSPACE_ACTUAL and not os.path.isabs(ruta_corta) else ruta_corta
-                reportes_acciones.append(f"Carpeta: {crear_carpeta(ruta_final)}")
+                res_carp = crear_carpeta(ruta_final)
+                if ui_callback: ui_callback("⚙️ Sistema", f"📁 {res_carp}", "#80868B")
 
             elif linea_limpia.startswith("escanear_proyecto:"):
                 if WORKSPACE_ACTUAL:
-                    if ui_callback: ui_callback("⚙️ Sistema", "🔍 Iniciando Crawler... Extrayendo todo tu código base.", "#80868B")
-                    
+                    if ui_callback: ui_callback("⚙️ Sistema", "🔍 Iniciando Crawler...", "#80868B")
                     from modulos.crawler import extraer_codigo_proyecto
                     codigo_completo = extraer_codigo_proyecto(WORKSPACE_ACTUAL)
                     

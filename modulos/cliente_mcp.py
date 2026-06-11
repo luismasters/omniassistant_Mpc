@@ -4,7 +4,8 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 class GestorMCP:
-    def __init__(self, ruta_servidor="servidor_sistema_mcp.py"):
+    def __init__(self, ruta_servidor="modulos/servidor_sistema_mcp.py"):
+
         self.ruta_servidor = ruta_servidor
 
     async def _solicitar_herramienta(self, nombre_herramienta, argumentos):

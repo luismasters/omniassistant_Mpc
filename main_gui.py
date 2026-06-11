@@ -239,7 +239,6 @@ class UserBubble(ctk.CTkFrame):
 
         self._tb = ctk.CTkTextbox(self._pill, fg_color="transparent", font=FONT_CHAT,
                                   text_color=TEXT_USER, wrap="word", border_width=0,
-                                  activate_scrollbars=False,
                                   height=LINE_HEIGHT_PX + 20, width=300)
         self._tb.pack(padx=16, pady=(12, 12))
         self._tb.insert("1.0", texto)
@@ -256,9 +255,9 @@ class UserBubble(ctk.CTkFrame):
         except Exception:
             lineas = 1
         if lineas <= MAX_USER_LINES:
-            self._tb.configure(height=lineas * LINE_HEIGHT_PX + 24, activate_scrollbars=False)
+            self._tb.configure(height=lineas * LINE_HEIGHT_PX + 24)
         else:
-            self._tb.configure(height=USER_BUBBLE_MAX_H, activate_scrollbars=True)
+            self._tb.configure(height=USER_BUBBLE_MAX_H)
             self._tb._textbox.yview_moveto(1.0)
 
 
@@ -308,7 +307,7 @@ class AIBubble(ctk.CTkFrame):
         self._stream_box = ctk.CTkTextbox(
             self._content, fg_color="transparent",
             font=FONT_CHAT_MD, text_color=TEXT_AI,
-            wrap="word", activate_scrollbars=False,
+            wrap="word", 
             border_width=0, height=LINE_HEIGHT_PX + 10)
         self._stream_box.pack(fill="x")
         self._stream_box.configure(state="disabled")
@@ -859,7 +858,7 @@ class OmniApp(ctk.CTk):
 
         self.entry = ctk.CTkTextbox(bar, height=48, fg_color="transparent",
                                     font=FONT_CHAT, text_color=TEXT_PRIMARY,
-                                    wrap="word", activate_scrollbars=False, border_width=0)
+                                    wrap="word", border_width=0)
         self.entry.grid(row=0, column=0, padx=(8,4), pady=6, sticky="ew")
         self.entry.bind("<Return>",       self._on_enter)
         self.entry.bind("<Shift-Return>", self._on_shift_enter)
@@ -1002,7 +1001,7 @@ class OmniApp(ctk.CTk):
             if texto:
                 self.burbuja_ia_actual.append_text(texto)
 
-            self._scroll_abajo()
+            self.after(50, self._scroll_abajo) # <--- CAMBIO AQUÍ
         self.after(0, _update)
 
     def _agregar_sistema(self, texto: str):
@@ -1020,7 +1019,12 @@ class OmniApp(ctk.CTk):
         self._scroll_abajo()
 
     def _scroll_abajo(self):
-        self.chat_scroll._parent_canvas.yview_moveto(1.0)
+        self.update_idletasks() # Fuerza el renderizado primero
+        try:
+            if hasattr(self.chat_scroll, "_parent_canvas"):
+                self.chat_scroll._parent_canvas.yview_moveto(1.0)
+        except Exception:
+            pass
 
     def _nueva_conversacion(self):
         for w in self.chat_scroll.winfo_children():

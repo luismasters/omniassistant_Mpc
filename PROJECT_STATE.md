@@ -1,154 +1,57 @@
-# PROJECT_STATE.md
+# PROJECT_STATE.md — Fuente de la Verdad
 
-## 1. Resumen Ejecutivo
+## Resumen Ejecutivo
 
-OmniAssistant es un asistente de escritorio inteligente con interfaz gráfica (CustomTkinter) que integra múltiples modelos de IA (Gemini Flash, DeepSeek V4) para proporcionar capacidades de chat, planificación de software, programación asistida, control del sistema operativo (apertura/cierre de programas, gestión de ventanas, monitorización de hardware), búsqueda web, visión por captura de pantalla, gestión de memoria vectorial híbrida (ChromaDB) y sincronización con GitHub. El sistema opera en tres modos (General, Planificador, Programador) y ofrece interacción por voz (Whisper + TTS) y texto. Está diseñado como un asistente personal "pair programmer" y administrador del sistema.
+**OmniAssistant (Cortana)** es un asistente de IA multimodal integrado en la PC del usuario. Combina modelos de lenguaje (Gemini Flash para el modo general, DeepSeek V4 para planificación/programación) con herramientas locales: control de ventanas, sistema de archivos con sandbox, memoria vectorial persistente (ChromaDB), captura de pantalla, voz (Whisper + pyttsx3), búsqueda web (DuckDuckGo), sincronización Git y un sistema MCP para consultas de hardware/estado del sistema. La interfaz gráfica está construida con CustomTkinter y ofrece un chat enriquecido con renderizado de Markdown (tablas, código, listas). El asistente opera en tres modos con sistemas de prompt y modelos diferenciados, y permite anclar un workspace de proyecto para operaciones de archivos y Git.
 
-## 2. Arquitectura
+## Arquitectura
 
-### 2.1. Estructura de directorios
+| Módulo / Archivo                   | Propósito                                                                 |
+|------------------------------------|---------------------------------------------------------------------------|
+| `config.py`                        | Configuración global: API keys, límites de seguridad, rutas del sandbox, modelo de audio. |
+| `main_gui.py`                      | Interfaz gráfica principal. Chat con burbujas (usuario/IA), entrada de texto, adjuntos, sidebar con cambio de modo, logs. |
+| `servidor_sistema_mcp.py`          | Servidor MCP que expone herramientas del sistema (estado PC, hardware, memoria, exploración de archivos). |
+| `modulos/ia.py`                    | Motor principal de IA. Enruta peticiones a Gemini o DeepSeek según el modo, gestiona el contexto de conversación, los semáforos de seguridad (borrado, Git), y parsea acciones de la respuesta (guardar_archivo, buscar, abrir, etc.). |
+| `modulos/audio.py`                 | Captura de voz con micrófono (Whisper) y síntesis de voz (pyttsx3). |
+| `modulos/archivos.py`              | Operaciones seguras de archivos: lectura, escritura, creación de carpetas, eliminación con validación de rutas dentro del sandbox/workspace. |
+| `modulos/sistema.py`               | Control de ventanas (buscar, mover, cerrar), búsqueda de programas/archivos en disco, ejecución de comandos del sistema, telemetría de hardware y CPU/RAM/GPU. |
+| `modulos/busqueda.py`              | Búsqueda web en DuckDuckGo (usando la librería `ddgs`). |
+| `modulos/vision.py`                | Captura de pantalla (PIL + screeninfo) para enviar imágenes a Gemini. |
+| `modulos/memoria.py`               | Memoria a largo plazo con ChromaDB: guardar, buscar y gestionar recuerdos persistidos. También maneja snapshots de proyectos (`.cortana/snapshot.json`). |
+| `modulos/crawler.py`               | Escanea un proyecto local, filtra carpetas innecesarias y concatena el código en un solo texto para análisis. |
+| `modulos/git_bot.py`               | Sincronización con GitHub: inicializar repos, commit, push, y ejecución de comandos Git libres. |
+| `modulos/cliente_mcp.py`           | Cliente asíncrono para el servidor MCP, usado por `ia.py` para invocar herramientas del sistema. |
+| `modulos/limpiar.py`               | Utilidad para borrar toda la memoria de ChromaDB. |
+| `modulos/logger.py`                | Configuración de logging a archivo y consola. |
+| `gestor_boveda.py`                 | Script independiente para listar/borrar la memoria persistente (CLI). |
 
-```
-OmniAssistant/
-├── config.py                    # Configuración global, API keys, límites, constantes
-├── main_gui.py                  # Interfaz gráfica principal (CustomTkinter)
-├── servidor_sistema_mcp.py      # Servidor MCP (Model Context Protocol) para herramientas de sistema
-├── gestor_boveda.py             # Gestor independiente de la base de datos vectorial (ChromaDB)
-├── README.md                    # Documentación del proyecto
-├── logs/                        # Directorio de logs (generado automáticamente)
-├── modulos/
-│   ├── ia.py                    # Orquestador principal de IA (Gemini + DeepSeek), enrutador de modos
-│   ├── audio.py                 # Captura de voz (Whisper) y síntesis de voz (TTS con pyttsx3)
-│   ├── sistema.py               # Control del SO: apertura/cierre de programas, gestión de ventanas, monitorización
-│   ├── archivos.py              # Operaciones seguras de archivos (lectura, escritura, creación, eliminación, búsqueda)
-│   ├── busqueda.py              # Búsqueda web mediante DuckDuckGo
-│   ├── vision.py                # Captura de pantalla (PIL + screeninfo)
-│   ├── git_bot.py               # Integración con Git/GitHub (commit, push, reset)
-│   ├── memoria.py               # Motor de memoria vectorial (ChromaDB, embeddings, snapshots)
-│   ├── cliente_mcp.py           # Cliente MCP para conectar con servidores de herramientas
-│   ├── crawler.py               # Extractor de código de proyectos (para análisis arquitectónico)
-│   ├── logger.py                # Configuración de logging (archivo + consola)
-│   └── limpiar.py               # Script para vaciar la base de memoria
-├── boveda_memoria/              # Base de datos ChromaDB persistente (generada automáticamente)
-└── pruebas/
-    └── test_seguridad.txt       # Archivo de prueba
-```
+## Estado Actual
 
-### 2.2. Descripción funcional de cada módulo
+- ✅ **Interfaz gráfica funcional** con sidebar de modos, entrada de texto, adjuntos, burbujas de usuario y IA, y renderizado de Markdown (tablas, listas, código, negrita/cursiva).
+- ✅ **Tres modos de IA operativos**: General (Gemini Flash), Planificador (DeepSeek V4 Thinking), Programador (DeepSeek V4 Fast).
+- ✅ **Cambio entre modos** preserva el historial visual y restaura conversaciones anteriores.
+- ✅ **Anclaje de workspace** con escaneo de estructura de proyecto y snapshot persistente.
+- ✅ **Control de ventanas completo**: abrir programas, cerrar procesos, mover ventanas entre monitores (apoyo multi-monitor).
+- ✅ **Búsqueda inteligente de archivos/programas** en disco con fuzzy matching.
+- ✅ **Editor de archivos seguro**: creación, escritura, reemplazo de bloques, edición quirúrgica de una línea, con sandbox y límites de tamaño.
+- ✅ **Memoria a largo plazo** (ChromaDB) con búsqueda semántica vía MCP.
+- ✅ **Captura de pantalla** y envío a Gemini en modo general.
+- ✅ **Entrada por voz** con Whisper (modelo medium) y salida de voz con pyttsx3 (español).
+- ✅ **Sincronización Git** con confirmación de seguridad (semáforo).
+- ✅ **Crawler de proyectos** y generación de `PROJECT_STATE.md` usando DeepSeek.
+- ✅ **Servidor MCP** con herramientas de sistema, hardware y exploración de archivos.
+- ✅ **Protecciones de seguridad**: rutas permitidas, verificación de espacio, límites de tamaño de contenido, semáforos de confirmación para acciones peligrosas (borrado, Git).
 
-- **config.py**: Punto central de configuración. Almacena API keys (Gemini, DeepSeek, GitHub), límites de tamaño de archivos, rutas seguras, parámetros de Whisper, modos de operación.
-- **main_gui.py**: Interfaz de usuario basada en CustomTkinter. Implementa:
-  - Panel lateral con cambio de modo (General/Planificador/Programador)
-  - Área de chat con burbujas de usuario e IA (soporte Markdown: negrita, cursiva, código, tablas, listas)
-  - Barra de entrada de texto con botón de adjuntar archivos
-  - Pestaña de logs en tiempo real
-  - Integración con tecla rápida para entrada de voz (F8)
-  - Historial por modo preservado al cambiar de modo
-  - Animación streaming de respuestas
-- **servidor_sistema_mcp.py**: Servidor FastMCP que expone herramientas de sistema (estado PC, hardware, búsqueda en bóveda, guardado en bóveda, exploración de rutas, lectura de documentos) como servicios MCP consumibles por el cliente MCP.
-- **gestor_boveda.py**: Herramienta CLI independiente para administrar la bóveda de memoria: listar etiquetas, eliminar documentos, formatear base de datos.
-- **modulos/ia.py**: Cerebro del asistente. Contiene:
-  - Inicialización de clientes Gemini y DeepSeek
-  - Enrutador `enviar_a_gemini()` que redirige según `MODO_ACTUAL`
-  - Construcción de contexto de sistema según modo
-  - Integración con herramientas MCP
-  - Interceptor de acciones rápidas (guardar_archivo, snapshot, buscar, eliminar, github, etc.)
-  - Procesamiento de archivos adjuntos (carga en memoria volátil o permanente)
-- **modulos/audio.py**: Módulo de audio que utiliza Faster-Whisper para transcripción y pyttsx3 para síntesis de voz. Implementa captura de micrófono con tecla de activación y detección de voz.
-- **modulos/sistema.py**: Control del sistema operativo Windows. Incluye:
-  - Radar inteligente para encontrar programas y juegos (usa thefuzz para coincidencias difusas)
-  - Gestión de ventanas (multimonitor, mover, forzar cierre)
-  - Exploración de directorios con atajos
-  - Monitoreo de hardware (CPU, RAM, GPU, VRAM)
-- **modulos/archivos.py**: Operaciones de archivos con validación de seguridad (sandbox, espacio en disco, tamaño de contenido). Funciones: leer, escribir, crear carpetas, eliminar (con confirmación), listar, buscar local.
-- **modulos/busqueda.py**: Búsqueda web simple usando la librería `ddgs` (DuckDuckGo).
-- **modulos/vision.py**: Captura de pantalla con soporte multimonitor usando PIL y screeninfo.
-- **modulos/git_bot.py**: Automatización de Git: inicializar repos, añadir remoto, commit, push, ejecutar comandos libres (con validación de seguridad).
-- **modulos/memoria.py**: Capa de persistencia vectorial con ChromaDB. Almacena recuerdos con embeddings (all-MiniLM-L6-v2), busca por similitud semántica, gestiona snapshots de proyectos en JSON.
-- **modulos/cliente_mcp.py**: Cliente asíncrono MCP que permite a `ia.py` llamar herramientas del servidor MCP de forma síncrona (usando asyncio.run).
-- **modulos/crawler.py**: Extractor de código de proyectos: recorre todo el árbol, ignora carpetas no deseadas, concatena archivos de código para análisis masivo.
-- **modulos/logger.py**: Configura logging dual (archivo + consola) con formato estándar.
-- **modulos/limpiar.py**: Script simple para vaciar la base de datos de memoria.
+## Deuda Técnica / Próximos Pasos
 
-## 3. Estado Actual
-
-### 3.1. Funcionalidades completamente operativas
-
-- **Interfaz gráfica oscura** con cambio de modos, historial persistente por modo, streaming de respuestas, renderizado Markdown (negrita, cursiva, código, tablas, listas, encabezados).
-- **Entrada de voz** con tecla F8: captura, transcripción con Whisper, envío a IA.
-- **Síntesis de voz**: respuestas leídas en español con pyttsx3.
-- **Modo General (Gemini Flash)**: Chat conversacional con herramientas MCP (estado PC, hardware, bóveda), visión por captura de pantalla, búsqueda web.
-- **Modo Planificador (DeepSeek V4 con Thinking)**: Análisis arquitectónico de proyectos, generación de planes (plan.md), generación de PROJECT_STATE.md mediante crawler.
-- **Modo Programador (DeepSeek V4 Fast)**: Escritura de archivos en workspace, creación de carpetas, ejecución de comandos Git, sincronización GitHub.
-- **Control del sistema operativo**: Abrir programas/archivos/carpetas, cerrar procesos, mover ventanas entre monitores, explorar directorios, ejecutar comandos de sistema.
-- **Operaciones de archivos seguras**: Lectura/escritura dentro del sandbox, creación/eliminación con confirmación, búsqueda local.
-- **Memoria vectorial (ChromaDB)**: Guardado y búsqueda semántica de recuerdos, persistencia en disco.
-- **Snapshots de proyectos**: Guardado/carga del estado del proyecto en archivo JSON dentro de `.cortana/`.
-- **Adjuntar archivos desde GUI**: Subida de archivos con opción de guardar en bóveda permanente o mantener en contexto volátil.
-- **Git automático**: Commit, push, reset remoto, comandos libres (con validación de seguridad).
-- **Servidor MCP**: Herramientas de sistema expuestas como servicios MCP y consumidas por el cliente MCP.
-- **Logging**: Registro en archivo y consola con niveles DEBUG/INFO.
-- **Gestor de bóveda CLI**: Listar, eliminar documentos y formatear base de datos.
-- **Crawler de proyectos**: Extracción completa del código para análisis arquitectónico por DeepSeek.
-
-### 3.2. Funcionalidades parciales o en desarrollo
-
-- **Visión por cámara web**: No implementada (solo captura de pantalla).
-- **Integración con otras APIs**: Solo Gemini y DeepSeek (no hay soporte para otros modelos).
-- **Soporte macOS/Linux**: El código está fuertemente acoplado a Windows (win32gui, nvidia-smi, etc.).
-- **Manejo de errores en streaming**: Algunos fallos en chunks pueden interrumpir la respuesta sin recuperación.
-- **Auto-actualización de snapshots**: El snapshot no se actualiza automáticamente al cambiar archivos; requiere comando manual.
-
-## 4. Deuda Técnica / Próximos Pasos
-
-### 4.1. Bugs identificados
-
-1. **`modulos/ia.py` línea ~212**: `mcp_explorar_ruta` y `mcp_leer_documento` están registradas como funciones pero el mapeo de nombres en el interceptor de function_call no coincide exactamente: las herramientas MCP se llaman `explorar_ruta` y `leer_documento` en el servidor, pero en el cliente se llaman `mcp_explorar_ruta` y `mcp_leer_documento`. Gemini podría llamar a `explorar_ruta` y no encontrar el handler.
-
-2. **`modulos/ia.py` línea ~274**: En el bloque de `if usaste_mcp:`, se reutiliza `mensajes_para_gemini` que ya incluye el mensaje del usuario y la respuesta parcial. Al agregar `{'role': 'user', 'parts': [f"[DATO DEL SISTEMA: ...]"]}` se inserta un segundo mensaje de usuario, lo que puede confundir al modelo (estructura de conversación incorrecta). Además, `modelo_gemini` no está definido en ese ámbito (se definió dentro del bloque `if modelo_activo == "gemini"`).
-
-3. **`modulos/audio.py` línea ~2**: Importa `sounddevice` pero no está listado en requirements (puede faltar dependencia). Además usa `scipy.io.wavfile` que también debe estar instalado.
-
-4. **`main_gui.py` línea ~740**: En `motor_microfono`, el uso de `audio_modulo.hablando_actualmente` puede causar race conditions porque se modifica desde otro hilo.
-
-5. **`main_gui.py`**: El método `_agregar_sistema` no elimina el `_welcome_label` si existe, puede quedar superpuesto.
-
-6. **`modulos/sistema.py`**: `obtener_ruta_dinamica` se ejecuta en cada llamada, creando overhead innecesario. Las rutas podrían cachearse.
-
-### 4.2. Mejoras de arquitectura
-
-1. **Separar la lógica de enrutamiento de `ia.py`**: Actualmente `enviar_a_gemini` es un monolito de ~500 líneas. Debería dividirse en:
-   - Un manejador de comandos/acciones
-   - Un gestor de contexto
-   - Un enrutador de modelos
-   - Un serializador de respuestas
-
-2. **Estandarizar el formato de mensajes**: Mezcla el formato de Gemini (`parts`) con el de OpenAI (`content`). Crear un adaptador para unificar.
-
-3. **Mover la lógica de MCP a un módulo separado**: El servidor MCP está duplicado en `servidor_sistema_mcp.py` y `modulos/servidor_sistema_mcp.py`. Consolidar.
-
-4. **Implementar caché de embeddings**: Las consultas repetitivas a ChromaDB podrían cachearse en memoria para reducir latencia.
-
-5. **Mejorar la gestión de errores en streaming**: Si un chunk falla, no hay reintento ni notificación al usuario.
-
-6. **Desacoplar la interfaz de la lógica de negocio**: `main_gui.py` contiene referencias directas a `modulos.ia` y `modulos.audio`. Usar un patrón observador o signals.
-
-### 4.3. Deuda técnica
-
-1. **Código duplicado**: `servidor_sistema_mcp.py` y `modulos/servidor_sistema_mcp.py` son idénticos.
-2. **Módulo `limpiar.py` usa `coleccion_principal` que no está definida**: `from memoria import coleccion_principal` no funciona porque en `memoria.py` la variable se llama `coleccion_principal` (con `_`).
-3. **Uso de variables globales mutables**: `CONTEXTO_CHAT`, `ARCHIVO_PENDIENTE_INYECCION`, `DOCUMENTO_VOLATIL`, etc. modificadas desde múltiples hilos sin locks.
-4. **Falta de typing**: La mayoría de funciones carecen de type hints.
-5. **Dependencias no declaradas**: No hay `requirements.txt` ni `pyproject.toml`. Se asume instalación manual.
-6. **Falta de tests**: No hay tests unitarios ni de integración.
-7. **Documentación desactualizada**: El README.md menciona características que no están implementadas (cámara web, telemetría en vivo con alertas).
-
-### 4.4. Próximos pasos recomendados
-
-1. **Refactor urgente**: Arreglar los bugs 1, 2 y 3 para evitar fallos en producción.
-2. **Agregar `requirements.txt`** con todas las dependencias exactas.
-3. **Crear sistema de logging más robusto** con rotación de archivos.
-4. **Implementar tests unitarios** para `modulos/archivos.py`, `modulos/sistema.py` y el enrutador de `ia.py`.
-5. **Migrar a async en `ia.py`**: Actualmente usa `asyncio.run()` dentro de una función síncrona, lo que puede causar problemas en entornos con event loop ya corriendo.
-6. **Mejorar el manejo de memoria**: El contexto de chat se acumula sin límite de tokens; implementar ventana deslizante basada en tokens.
-7. **Agregar soporte para más modelos**: Permitir configuración dinámica de modelos mediante archivo YAML o JSON.
+1. **Duplicación de código**: `servidor_sistema_mcp.py` aparece tanto en la raíz como dentro de `modulos/`. Debe consolidarse en un solo lugar.
+2. **Manejo de errores en la GUI**: Algunas excepciones no se capturan en `main_gui.py`, especialmente en `callback_ia` y el motor de micrófono. Falta una estrategia de reconexión del servidor MCP.
+3. **Rendimiento**: La inicialización de Whisper (modelo medium) puede ser lenta. Considerar lazy loading o un modelo más pequeño.
+4. **Seguridad en la edición de archivos**: El reemplazo de bloques usa `replace(buscar, reemplazar, 1)`, que puede corromper el código si el bloque buscado aparece múltiples veces. Usar `re.sub` con límites de líneas específicas.
+5. **Consistencia del historial**: Al cambiar de modo, se guardan los últimos 50 mensajes como historial, pero no se preserva el contexto de sistema (prompts internos). Podría perderse información relevante.
+6. **Dependencias externas**: `pywin32`, `screeninfo`, `psutil`, `thefuzz`, `chromadb`, `faster-whisper`, `pyttsx3`, `ddgs`. Algunas tienen requisitos específicos de versión. Falta un `requirements.txt` congelado.
+7. **Logs**: El archivo `modulos/logger.py` configura logging, pero no se usa consistentemente en todos los módulos. Muchas funciones aún usan `print()` en lugar de `logger`.
+8. **MCP asíncrono**: El cliente MCP se ejecuta con `asyncio.run()` cada vez, lo que puede causar bloqueos de la UI en llamadas frecuentes. Se recomienda un pool persistente de conexiones.
+9. **Snapshot**: El archivo `.cortana/snapshot.json` se guarda y carga, pero el contenido puede quedar desactualizado si el usuario edita archivos fuera de Cortana. Falta un mecanismo de detección de cambios.
+10. **Internacionalización**: La interfaz está en español, pero los prompts de sistema contienen mezcla de español e inglés. Unificar todo el lenguaje.
+11. **Pruebas**: Existe una carpeta `pruebas/` con `test_nuevo_parser.py` vacío. No hay pruebas unitarias para los módulos críticos (`ia.py`, `archivos.py`, `sistema.py`).
