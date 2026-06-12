@@ -84,27 +84,32 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
     texto_usuario_lower = texto_usuario.lower().strip()
 
     # =================================================================
-    # 🛡️ ESCUDOS DE SEGURIDAD
+    # 🛡️ ESCUDOS DE SEGURIDAD (Con Parche Anti-Hilos / Race Condition)
     # =================================================================
     if PENDIENTE_DE_BORRADO:
+        tarea_borrado = PENDIENTE_DE_BORRADO
+        PENDIENTE_DE_BORRADO = ""
+        
         print("🧠 [SEMÁFORO DE BORRADO] Evaluando...")
         evaluador = genai.GenerativeModel("gemini-flash-lite-latest")
-        prompt_juez = f"El usuario debe confirmar borrar: '{PENDIENTE_DE_BORRADO}'. Su respuesta: '{texto_usuario}'. Responde CONFIRMADO o CANCELADO."
+        prompt_juez = f"El usuario debe confirmar borrar: '{tarea_borrado}'. Su respuesta: '{texto_usuario}'. Responde CONFIRMADO o CANCELADO."
         try: decision_borrado = evaluador.generate_content(prompt_juez).text.strip().upper()
         except: decision_borrado = "CANCELADO"
         
         if "CONFIRMADO" in decision_borrado:
-            resultado = eliminar_elemento(PENDIENTE_DE_BORRADO)
+            resultado = eliminar_elemento(tarea_borrado)
             msg = f"Protocolo autorizado. {resultado}"
         else: msg = "Protocolo abortado. Archivos a salvo."
             
-        PENDIENTE_DE_BORRADO = ""
         if ui_callback: ui_callback("🤖 Cortana", msg, "#FF4500" if "abortado" in msg else "#00E5FF")
         if modo_voz: hablar_no_bloqueante(msg)
         CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg]}])
         return
 
     if PENDIENTE_DE_GIT:
+        tarea_git = PENDIENTE_DE_GIT
+        PENDIENTE_DE_GIT = None
+        
         print("🧠 [SEMÁFORO DE GIT] Evaluando...")
         evaluador = genai.GenerativeModel("gemini-flash-lite-latest")
         prompt_juez = f"El usuario debe confirmar una operación de GitHub. Su respuesta: '{texto_usuario}'. Responde CONFIRMADO o CANCELADO."
@@ -113,9 +118,9 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         
         if "CONFIRMADO" in decision_git:
             if ui_callback: ui_callback("⚙️ Sistema", "Iniciando operación en GitHub. Esto puede tardar unos segundos...", "#80868B")
-            accion = PENDIENTE_DE_GIT.get("accion")
-            ruta = PENDIENTE_DE_GIT.get("ruta")
-            url_custom = PENDIENTE_DE_GIT.get("url_custom")
+            accion = tarea_git.get("accion")
+            ruta = tarea_git.get("ruta")
+            url_custom = tarea_git.get("url_custom")
             
             if accion == "github_reset":
                 resultado = sincronizar_proyecto_git(ruta, reset_remote=True, url_custom=url_custom)
@@ -127,20 +132,22 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         else: 
             msg = "Operación en GitHub cancelada de forma segura."
             
-        PENDIENTE_DE_GIT = None
         if ui_callback: ui_callback("🤖 Cortana", msg, "#FF4500" if "cancelada" in msg else "#00E5FF")
         if modo_voz: hablar_no_bloqueante("Operación finalizada." if "completada" in msg else "Operación cancelada.")
         CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg]}])
         return
 
     if ARCHIVO_PENDIENTE_INYECCION:
+        tarea_inyeccion = ARCHIVO_PENDIENTE_INYECCION
+        ARCHIVO_PENDIENTE_INYECCION = None
+        
         evaluador = genai.GenerativeModel("gemini-flash-lite-latest")
         prompt_juez = f"El usuario debe confirmar guardar adjuntos. Su respuesta: '{texto_usuario}'. Responde CONFIRMADO o CANCELADO."
         try: decision = evaluador.generate_content(prompt_juez).text.strip().upper()
         except: decision = "CANCELADO"
         
         if "CONFIRMADO" in decision:
-            for archivo_dict in ARCHIVO_PENDIENTE_INYECCION:
+            for archivo_dict in tarea_inyeccion:
                 nombre = archivo_dict["nombre"]
                 contenido = archivo_dict["contenido"]
                 chunks = [contenido[i:i+1500] for i in range(0, len(contenido), 1500)]
@@ -149,12 +156,10 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             DOCUMENTO_VOLATIL = "" 
         else: msg = "Entendido. Dejé los archivos en mi memoria a corto plazo."
             
-        ARCHIVO_PENDIENTE_INYECCION = None
         if ui_callback: ui_callback("🤖 Cortana", msg, "#A8C7FA")
         if modo_voz: hablar_no_bloqueante("Listo, decisión aplicada.")
         CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg]}])
         return 
-
     # =================================================================
     # FLUJO PRINCIPAL: ENRUTADOR Y CONSTRUCCIÓN DE CONTEXTO
     # =================================================================
