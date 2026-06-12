@@ -190,10 +190,10 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 "2. OPERACIÓN QUIRÚRGICA: Para cambiar código, usa ÚNICAMENTE 'reemplazar_bloque:'.\n"
                 "3. MINIMALISMO: En la sección ---BUSCAR--- pon SOLO las 3 o 4 líneas exactas que van a cambiar, más 1 línea de contexto. NUNCA incluyas la función entera si solo cambian 2 líneas.\n"
                 "4. INSPECCIÓN PREVIA: Si dudas del código exacto, usa 'leer_archivo:' primero y espera la respuesta antes de editar.\n"
-                "⚠️ REGLAS DE ACCIONES RÁPIDAS (PROHIBIDO usar XML, usa estrictamente este formato):\n"
+                "⚠️ REGLAS DE ACCIONES RÁPIDAS (PROHIBIDO usar etiquetas XML como <reemplazar_bloque> o <replace_block>. Usa ESTRICTAMENTE los guiones ---):\n"
                 "- Para LEER: leer_archivo: ruta\n"
                 "- Para CREAR NUEVO (solo si no existe): guardar_archivo: ruta ---CONTENIDO--- [codigo]\n"
-                "- Para MODIFICAR CÓDIGO (Usa siempre esto):\n"
+                "- Para MODIFICAR CÓDIGO (Usa siempre este formato markdown):\n"
                 "reemplazar_bloque: ruta\n"
                 "---BUSCAR---\n"
                 "[3-4 líneas de código viejo exacto]\n"
@@ -322,7 +322,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         if ui_callback: ui_callback("", "", "#E8EAED", nueva_linea=True)
         
         # =================================================================
-        # INTERCEPTOR DE ACCIONES (PARSER BILINGÜE: MARKDOWN + XML + FUZZY)
+        # INTERCEPTOR DE ACCIONES (PARSER TRILINGÜE Y ACTUALIZACIÓN EN MEMORIA)
         # =================================================================
         reportes_acciones = []
         comando_busqueda_detectado = None
@@ -338,7 +338,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         # 0. LECTURAS EN FORMATO XML (DeepSeek V4 Fallback)
         if "<read_file>" in respuesta_ia.lower():
             for m in re.finditer(r'<read_file>\s*<path>\s*(.+?)\s*</path>\s*</read_file>', respuesta_ia, re.IGNORECASE):
-                # LIMPIEZA DE RUTAS: quitamos < > por si la IA se confundió
                 ruta_corta = m.group(1).replace('<', '').replace('>', '').strip()
                 ruta_real = os.path.join(WORKSPACE_ACTUAL, ruta_corta) if WORKSPACE_ACTUAL and not os.path.isabs(ruta_corta) else ruta_corta
                 
@@ -364,7 +363,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                     operaciones_guardar.append((m.group(1), m.group(2)))
 
                 for ruta_f, contenido_f in operaciones_guardar:
-                    # Limpiamos todos los posibles errores de sintaxis en la ruta
                     ruta_f = ruta_f.replace('`', '').replace('*', '').replace('<', '').replace('>', '').strip()
                     contenido_f = contenido_f.strip()
                     contenido_f = re.sub(r'^```\w*\n?|\n?```$', '', contenido_f).strip()
@@ -376,22 +374,31 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                         CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO ESCRITURA] Fallo al guardar {ruta_f}: {resultado_escritura}"]})
                         if ui_callback: ui_callback("⚙️ Sistema", f"❌ Error guardando {ruta_f}: {resultado_escritura}", "#ff4500")
                     else:
+                        # FASE 1.4: Actualizar caché
+                        if ruta_f_abs in ARCHIVOS_EN_MEMORIA:
+                            for msg in CONTEXTO_CHAT:
+                                if isinstance(msg.get('parts', [''])[0], str) and f"[CONTENIDO DE '{ruta_f_abs}']:" in msg['parts'][0]:
+                                    msg['parts'][0] = f"[CONTENIDO DE '{ruta_f_abs}']:\n{contenido_f}"
                         CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO ESCRITURA] Archivo {ruta_f} guardado correctamente."] })
                         if ui_callback: ui_callback("⚙️ Sistema", f"✅ Archivo guardado: {ruta_f}", "#86efac")
             except Exception as e:
                 print(f"❌ Error local al guardar el archivo: {e}")
 
-        # 2. REEMPLAZAR BLOQUE (MOTOR BILINGÜE Y QUIRÚRGICO CON FUZZY MATCH)
-        if "reemplazar_bloque:" in respuesta_ia.lower() or "<replace_block>" in respuesta_ia.lower():
+        # 2. REEMPLAZAR BLOQUE (MOTOR TRILINGÜE Y QUIRÚRGICO CON FUZZY MATCH)
+        if "reemplazar_bloque:" in respuesta_ia.lower() or "<replace_block>" in respuesta_ia.lower() or "<reemplazar_bloque>" in respuesta_ia.lower():
             try:
                 operaciones_reemplazo = []
+                # Formato Markdown Original
                 for m in re.finditer(r'reemplazar_bloque:\s*(.+?)\s*-{3,}BUSCAR-{3,}\s*([\s\S]*?)\s*-{3,}REEMPLAZAR-{3,}\s*([\s\S]*?)\s*-{3,}FIN-{3,}', respuesta_ia, re.IGNORECASE):
                     operaciones_reemplazo.append((m.group(1), m.group(2), m.group(3)))
+                # Formato XML Inglés
                 for m in re.finditer(r'<replace_block>\s*<path>\s*(.+?)\s*</path>\s*<search>\s*([\s\S]*?)\s*</search>\s*<replace>\s*([\s\S]*?)\s*</replace>\s*</replace_block>', respuesta_ia, re.IGNORECASE):
+                    operaciones_reemplazo.append((m.group(1), m.group(2), m.group(3)))
+                # Formato XML ESPAÑOL
+                for m in re.finditer(r'<reemplazar_bloque>\s*<ruta>\s*(.+?)\s*</ruta>\s*<buscar>\s*([\s\S]*?)\s*</buscar>\s*<reemplazar>\s*([\s\S]*?)\s*</reemplazar>\s*</reemplazar_bloque>', respuesta_ia, re.IGNORECASE):
                     operaciones_reemplazo.append((m.group(1), m.group(2), m.group(3)))
 
                 for ruta_edit, buscar_edit, reemplazar_edit in operaciones_reemplazo:
-                    # Limpiamos todos los posibles errores de sintaxis en la ruta
                     ruta_edit = ruta_edit.replace('`','').replace('*','').replace('<', '').replace('>', '').strip()
                     buscar_edit = re.sub(r'^```\w*\n?|\n?```$', '', buscar_edit.strip()).strip('\n')
                     reemplazar_edit = re.sub(r'^```\w*\n?|\n?```$', '', reemplazar_edit.strip()).strip('\n')
@@ -400,19 +407,24 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                     contenido_actual = leer_contenido_archivo(ruta_real_edit)
                     
                     if not contenido_actual.startswith("ERROR"):
+                        # Intento 1: Reemplazo Exacto
                         if buscar_edit in contenido_actual:
                             nuevo_contenido = contenido_actual.replace(buscar_edit, reemplazar_edit, 1)
                             escribir_archivo(ruta_real_edit, nuevo_contenido)
+                            
+                            # FASE 1.4: Actualizamos el archivo en la memoria oculta de la IA
+                            for msg in CONTEXTO_CHAT:
+                                if isinstance(msg.get('parts', [''])[0], str) and f"[CONTENIDO DE '{ruta_real_edit}']:" in msg['parts'][0]:
+                                    msg['parts'][0] = f"[CONTENIDO DE '{ruta_real_edit}']:\n{nuevo_contenido}"
+                                    
                             CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Modificación exitosa y exacta en {ruta_edit}"]})
                             if ui_callback: ui_callback("⚙️ Sistema", f"✅ Bloque actualizado con precisión en {ruta_edit}", "#86efac")
+                        
+                        # Intento 2: FUZZY MATCHING
                         else:
                             source_lines = contenido_actual.splitlines()
                             search_lines = buscar_edit.splitlines()
-                            
-                            mejor_ratio = 0
-                            mejor_idx = -1
-                            len_encontrado = 0
-                            bloque_encontrado = ""
+                            mejor_ratio = 0; mejor_idx = -1; len_encontrado = 0; bloque_encontrado = ""
                             
                             if search_lines and source_lines:
                                 window_size = len(search_lines)
@@ -421,17 +433,19 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                         window = '\n'.join(source_lines[i:i+w_size])
                                         ratio = difflib.SequenceMatcher(None, buscar_edit, window).ratio()
                                         if ratio > mejor_ratio:
-                                            mejor_ratio = ratio
-                                            mejor_idx = i
-                                            len_encontrado = w_size
-                                            bloque_encontrado = window
+                                            mejor_ratio = ratio; mejor_idx = i; len_encontrado = w_size; bloque_encontrado = window
                             
                             if mejor_ratio >= 0.80: 
                                 before = '\n'.join(source_lines[:mejor_idx])
                                 after = '\n'.join(source_lines[mejor_idx+len_encontrado:])
                                 nuevo_contenido = (before + '\n' if before else '') + reemplazar_edit + ('\n' + after if after else '')
-                                
                                 escribir_archivo(ruta_real_edit, nuevo_contenido)
+                                
+                                # FASE 1.4: Actualizamos caché en fuzzy
+                                for msg in CONTEXTO_CHAT:
+                                    if isinstance(msg.get('parts', [''])[0], str) and f"[CONTENIDO DE '{ruta_real_edit}']:" in msg['parts'][0]:
+                                        msg['parts'][0] = f"[CONTENIDO DE '{ruta_real_edit}']:\n{nuevo_contenido}"
+                                        
                                 CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Modificación fuzzy exitosa en {ruta_edit} (Similitud: {mejor_ratio:.2f})"]})
                                 if ui_callback: ui_callback("⚙️ Sistema", f"✅ Bloque ajustado ({(mejor_ratio*100):.1f}%) en {ruta_edit}", "#86efac")
                             else:
@@ -439,7 +453,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                 CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Fallo. Lo más parecido fue:\n{bloque_encontrado}"]})
                                 if ui_callback: ui_callback("⚙️ Sistema", f"❌ Fallo edición en {ruta_edit}. Similitud {(mejor_ratio*100):.1f}%", "#ff4500")
                     else:
-                        # ESTO EVITA EL FALLO SILENCIOSO: Informamos a UI que falló la lectura
                         msg_fallo = f"❌ Error leyendo '{ruta_edit}' para editar: {contenido_actual}"
                         print(msg_fallo)
                         if ui_callback: ui_callback("⚙️ Sistema", msg_fallo, "#ff4500")
@@ -454,10 +467,12 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             linea_limpia = linea.lower().replace("[", "").replace("]", "").replace("*", "").replace("`", "").strip()
             
             if "guardar_archivo:" in linea_limpia or "---contenido---" in linea_limpia or "<write_file>" in linea_limpia: continue
-            if "reemplazar_bloque:" in linea_limpia or "---buscar---" in linea_limpia or "---reemplazar---" in linea_limpia or "---fin---" in linea_limpia or "<replace_block>" in linea_limpia: continue
+            
+            # PARCHE: Ignorar etiquetas de bloques en español/inglés
+            if any(t in linea_limpia for t in ["reemplazar_bloque:", "---buscar---", "---reemplazar---", "---fin---", "<replace_block>", "<reemplazar_bloque>", "<buscar>", "<reemplazar>"]): continue
+            
             if "<read_file>" in linea_limpia: continue
             
-            # Cambiamos startswith por un 'in' por si viene envuelto en XML como <leer_archivo: ruta>
             if "leer_archivo:" in linea_limpia:
                 idx = linea_limpia.find("leer_archivo:") + 13
                 raw_path = linea[idx:].strip()
@@ -495,6 +510,12 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                 nuevo_contenido = contenido_actual.replace(buscar_edit, reemplazar_edit, 1)
                                 if nuevo_contenido != contenido_actual:
                                     escribir_archivo(ruta_real_edit, nuevo_contenido)
+                                    
+                                    # FASE 1.4: Actualizar caché 1 línea
+                                    for msg in CONTEXTO_CHAT:
+                                        if isinstance(msg.get('parts', [''])[0], str) and f"[CONTENIDO DE '{ruta_real_edit}']:" in msg['parts'][0]:
+                                            msg['parts'][0] = f"[CONTENIDO DE '{ruta_real_edit}']:\n{nuevo_contenido}"
+                                            
                                     CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Modificación exitosa en {ruta_edit}"]})
                                     if ui_callback: ui_callback("⚙️ Sistema", f"✅ Edición rápida en {ruta_edit}", "#86efac")
                             else:
@@ -602,7 +623,6 @@ Responde ÚNICAMENTE con el Markdown final estructurado. No uses saludos, ni con
                     if ui_callback: ui_callback("🤖 Cortana", "Necesito estar dentro del Modo Planificador o Programador para saber qué proyecto escanear.", "#FFA500")
 
             elif "abrir:" in linea_limpia or "cerrar:" in linea_limpia or "mover:" in linea_limpia:
-                # Esto es para comandos de sistema puro
                 cmd_idx = max(linea_limpia.find("abrir:"), linea_limpia.find("cerrar:"), linea_limpia.find("mover:"))
                 if cmd_idx != -1:
                     verbo = linea_limpia[cmd_idx:linea_limpia.find(":", cmd_idx)]
