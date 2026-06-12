@@ -275,7 +275,7 @@ class AIBubble(ctk.CTkFrame):
         ctk.CTkLabel(hdr, text="◆", font=(_F, TAMANO_BASE), text_color=ACCENT, width=20
                      ).pack(side="left", padx=(0, 6))
         
-        # --- NUEVO: LEER EL MODELO ACTIVO PARA EL TÍTULO ---
+        # --- LEER EL MODELO ACTIVO PARA EL TÍTULO ---
         nombres_modelos = {
             "general": "Gemini Flash",
             "planificador": "DeepSeek V4 (Thinking)",
@@ -287,7 +287,7 @@ class AIBubble(ctk.CTkFrame):
         ctk.CTkLabel(hdr, text=f"Cortana ({nombre_modelo})", font=(_F, TAMANO_BASE - 1, "bold"), text_color=TEXT_DIM
                      ).pack(side="left")
 
-        # Botón copiar respuesta completa (aparece a la derecha del header)
+        # Botón copiar respuesta completa
         self._btn_copy = ctk.CTkButton(
             hdr, text="⎘", width=28, height=28,
             corner_radius=6,
@@ -307,8 +307,7 @@ class AIBubble(ctk.CTkFrame):
         self._stream_box = ctk.CTkTextbox(
             self._content, fg_color="transparent",
             font=FONT_CHAT_MD, text_color=TEXT_AI,
-            wrap="word", 
-            border_width=0, height=LINE_HEIGHT_PX + 10)
+            wrap="word", border_width=0, height=LINE_HEIGHT_PX + 10)
         self._stream_box.pack(fill="x")
         self._stream_box.configure(state="disabled")
 
@@ -334,12 +333,10 @@ class AIBubble(ctk.CTkFrame):
             pass
 
     def _copiar_respuesta(self):
-        """Copia el texto plano de la respuesta al portapapeles con feedback visual."""
         if not self._raw.strip():
             return
         self.clipboard_clear()
         self.clipboard_append(self._raw)
-        # Feedback: el ícono cambia brevemente a ✓
         self._btn_copy.configure(text="✓", text_color="#86efac")
         self.after(1500, lambda: self._btn_copy.configure(text="⎘", text_color=TEXT_DIM))
 
@@ -350,7 +347,6 @@ class AIBubble(ctk.CTkFrame):
         self._streaming = False
         self._stream_box.destroy()
 
-        # Estimar wrap_px a partir del ancho del widget
         self.update_idletasks()
         self._wrap_px = max(300, self.winfo_width() - 60)
 
@@ -361,7 +357,6 @@ class AIBubble(ctk.CTkFrame):
 
     # ── Parser de Markdown ────────────────────────────────────────────────────
     def _render_markdown(self, text: str):
-        # Indicadores FUERTES de que una línea es código (nunca texto narrativo)
         CODE_STRONG = re.compile(
             r'^(import |from \w+ import |def |class |\s+def |\s+class |'
             r'\s+return |\s+if |\s+elif |\s+else:|\s+for |\s+while |\s+try:'
@@ -370,11 +365,9 @@ class AIBubble(ctk.CTkFrame):
         )
 
         def _is_code_context(block: str) -> bool:
-            """Devuelve True si el bloque contiene suficiente código real."""
             strong = sum(1 for l in block.splitlines() if CODE_STRONG.match(l))
             return strong >= 2
 
-        # Paso 1: extraer bloques con backticks explícitos
         CODE_FENCE = re.compile(r'```(\w*)\n?([\s\S]*?)(?:```|$)', re.MULTILINE)
         segments, last = [], 0
         for m in CODE_FENCE.finditer(text):
@@ -387,16 +380,12 @@ class AIBubble(ctk.CTkFrame):
         if last < len(text):
             segments.append(("text", text[last:]))
 
-        # Paso 2: segmentos de texto que huelen a código → CodeBlock completo
-        # La clave: si el bloque tiene contexto de código lo mostramos entero,
-        # sin intentar separar las líneas de comentario/sección que hay dentro.
         final = []
         for seg in segments:
             if seg[0] == "code":
                 final.append(seg)
                 continue
             raw = seg[1]
-            # Separar intro narrativa (antes del primer indicador fuerte de código)
             lines = raw.split("\n")
             intro, rest = [], []
             in_code = False
@@ -417,23 +406,18 @@ class AIBubble(ctk.CTkFrame):
                 else:
                     final.append(("text", rest_text))
 
-        # Paso 3: fusionar bloques de codigo consecutivos (ej: ```python\nimport os```
-        # seguido de mas codigo sin backticks — deben quedar en un solo CodeBlock)
         merged = []
         for seg in final:
             if seg[0] == "text" and not seg[1].strip():
-                # texto vacio: ignorar si estamos entre dos bloques de codigo
                 merged.append(seg)
                 continue
             merged.append(seg)
 
-        # Colapsar: code → (texto solo whitespace) → code = un solo code
         final2 = []
         i2 = 0
         while i2 < len(merged):
             seg = merged[i2]
             if seg[0] == "code":
-                # mirar hacia adelante: ¿texto vacio + code?
                 j = i2 + 1
                 combined = seg[1]
                 lang = seg[2]
@@ -454,7 +438,6 @@ class AIBubble(ctk.CTkFrame):
                 final2.append(seg)
                 i2 += 1
 
-        # Paso 4: renderizar
         for seg in final2:
             if seg[0] == "code":
                 CodeBlock(self._content, seg[1], lang=seg[2]).pack(fill="x", pady=(4, 4))
@@ -472,7 +455,6 @@ class AIBubble(ctk.CTkFrame):
                 i += 1
                 continue
 
-            # ── Encabezados ─────────────────────────────────────────────────
             if stripped.startswith("### "):
                 self._add_label(parent, stripped[4:], (_F,15,"bold"), TEXT_PRIMARY, (8,2))
                 i += 1; continue
@@ -483,14 +465,11 @@ class AIBubble(ctk.CTkFrame):
                 self._add_label(parent, stripped[2:], (_F,18,"bold"), TEXT_PRIMARY, (12,2))
                 i += 1; continue
 
-            # ── Separador ───────────────────────────────────────────────────
             if re.match(r'^[-*_]{3,}$', stripped):
                 ctk.CTkFrame(parent, height=1, fg_color=BORDER_COLOR).pack(fill="x", pady=8)
                 i += 1; continue
 
-            # ── Tabla Markdown ───────────────────────────────────────────────
             if stripped.startswith("|"):
-                # Recolectar todas las líneas de la tabla
                 table_lines = []
                 while i < len(lines) and lines[i].strip().startswith("|"):
                     table_lines.append(lines[i])
@@ -500,7 +479,6 @@ class AIBubble(ctk.CTkFrame):
                     TableBlock(parent, rows).pack(fill="x", pady=(6,6))
                 continue
 
-            # ── Lista no ordenada — recolectar todos los ítems en un bloque ──
             if stripped.startswith(("- ","* ","• ")):
                 items = []
                 while i < len(lines):
@@ -511,13 +489,12 @@ class AIBubble(ctk.CTkFrame):
                     elif s2 and not s2.startswith(("- ","* ","• ")) and not re.match(r'^\d+\. ', s2):
                         break
                     elif not s2:
-                        i += 1  # línea vacía entre ítems: ignorar
+                        i += 1 
                     else:
                         break
                 self._add_text_block(parent, "\n".join(items))
                 continue
 
-            # ── Lista ordenada — recolectar todos los ítems en un bloque ────
             if re.match(r'^\d+\. ', stripped):
                 items = []
                 while i < len(lines):
@@ -534,7 +511,6 @@ class AIBubble(ctk.CTkFrame):
                 self._add_text_block(parent, "\n".join(items))
                 continue
 
-            # ── Párrafo normal ──────────────────────────────────────────────
             para_lines = []
             while i < len(lines) and lines[i].strip() and \
                   not lines[i].strip().startswith(("#","- ","* ","• ","|")) and \
@@ -545,15 +521,12 @@ class AIBubble(ctk.CTkFrame):
             if para_lines:
                 self._add_text_block(parent, " ".join(para_lines))
 
-        # fin while
 
     def _add_text_block(self, parent, text: str, pady=(1, 1)):
-        """Un solo tk.Text seleccionable para bloques de varias líneas (listas, párrafos)."""
         t = tk.Text(parent, bg=BG_CHAT, fg=TEXT_AI, font=(_F, _TK_SIZE),
                     wrap="word", bd=0, relief="flat", highlightthickness=0,
                     state="normal", cursor="xterm", height=1, width=1,
                     selectbackground=ACCENT_SOFT, selectforeground=TEXT_PRIMARY)
-        # Insertar con soporte básico de bold/italic por línea
         pat = re.compile(r'\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`')
         t.tag_configure("bold",        font=(_F, _TK_SIZE, "bold"))
         t.tag_configure("italic",      font=(_F, _TK_SIZE, "italic"))
@@ -576,8 +549,6 @@ class AIBubble(ctk.CTkFrame):
         _pack_text(t, parent, pady)
 
     def _add_label(self, parent, text, font, color, pady=(2,2)):
-        """Texto seleccionable (headings) con altura sincrónica."""
-        # Convertir tamaño a píxeles negativos si viene en puntos positivos
         px_font = (font[0], -abs(font[1])) + font[2:] if len(font) >= 2 else font
         t = tk.Text(parent, bg=BG_CHAT, fg=color, font=px_font,
                     wrap="word", bd=0, relief="flat", highlightthickness=0,
@@ -601,7 +572,6 @@ class AIBubble(ctk.CTkFrame):
             _pack_text(t, parent)
             return
 
-        # tk.Text con bold/italic/code_inline
         t = _make_inline_text(parent, text, self._wrap_px)
         _pack_text(t, parent)
 
@@ -613,16 +583,14 @@ class LogRedirector:
         self._buffer = ""
     def write(self, string):
         self._buffer += string
-        # Flush líneas completas al widget; retener el resto en buffer
         if "\n" in self._buffer:
             partes = self._buffer.split("\n")
             for linea in partes[:-1]:
                 if linea.strip():
                     texto = linea.strip()
                     self.target.after(0, lambda t=texto: self._add_log(t))
-            self._buffer = partes[-1]  # lo que sobró sin \n
+            self._buffer = partes[-1]
     def flush(self):
-        # Al hacer flush manual, volcamos lo que quede en el buffer
         if self._buffer.strip():
             texto = self._buffer.strip()
             self._buffer = ""
@@ -658,9 +626,9 @@ class OmniApp(ctk.CTk):
         self._build_main_area()
 
         self.burbuja_ia_actual: AIBubble | None = None
-        self.texto_sin_enviar: str = ""      # Paso 2: guarda texto real al perder foco
-        self.historiales: dict = {}          # Paso 3: {modo: [(tipo, texto), ...]}
-        self.modo_actual = "general"         # se sobreescribe en _build_sidebar
+        self.texto_sin_enviar: str = ""      
+        self.historiales: dict = {}          
+        self.modo_actual = "general"         
         threading.Thread(target=self.motor_microfono, daemon=True).start()
 
     # ── Separador vertical sidebar/chat ───────────────────────────────────────
@@ -677,7 +645,6 @@ class OmniApp(ctk.CTk):
         ctk.CTkLabel(sb, text="◆ Cortana", font=(_F, TAMANO_BASE, "bold"),
                      text_color=ACCENT).grid(row=0, column=0, padx=18, pady=(24,2), sticky="w")
         
-        # --- NUEVA ETIQUETA DINÁMICA DE MODELO ---
         self.lbl_modelo_activo = ctk.CTkLabel(sb, text="🧠 Modelo: Gemini Flash", font=FONT_UI_SM,
                      text_color="#86efac")
         self.lbl_modelo_activo.grid(row=1, column=0, padx=18, pady=(0,14), sticky="w")
@@ -685,7 +652,6 @@ class OmniApp(ctk.CTk):
         ctk.CTkFrame(sb, height=1, fg_color=SIDEBAR_LINE).grid(
             row=2, column=0, padx=0, sticky="ew")
 
-        # --- NUEVA LISTA DE BOTONES (Sin el botón manual de anclar) ---
         self.modo_actual = "general"
 
         botones = [
@@ -707,10 +673,10 @@ class OmniApp(ctk.CTk):
                      text_color=TEXT_DIM).grid(row=10, column=0, padx=18, pady=16, sticky="sw")
         sb.grid_rowconfigure(10, weight=1)
 
-    # --- FUNCIÓN _CAMBIAR_MODO CON ANCLAJE AUTOMÁTICO + HISTORIAL (Paso 3) ---
+    # --- FUNCIÓN _CAMBIAR_MODO (CON FASE 1.3: PRESERVACIÓN DE CONTEXTO) ---
     def _cambiar_modo(self, nuevo_modo):
         if nuevo_modo == self.modo_actual:
-            return  # ya estamos en este modo, nada que hacer
+            return
 
         # 1. Verificación automática de entorno para los modos avanzados
         if nuevo_modo in ["planificador", "programador"]:
@@ -732,11 +698,10 @@ class OmniApp(ctk.CTk):
                 guardar_snapshot(ruta, arbol)
                 motor_ia.SNAPSHOT_ACTUAL = arbol
 
-        # 2. PASO 3 — Guardar historial visual del modo ACTUAL antes de limpiar
+        # 2. PASO 3 / FASE 1.3 — Guardar historial visual Y CONTEXTO DEL MOTOR IA
         snapshot_actual = []
         for widget in self.chat_scroll.winfo_children():
             if isinstance(widget, UserBubble):
-                # Extraer texto del CTkTextbox interno
                 try:
                     txt = widget._tb.get("1.0", "end").strip()
                     if txt:
@@ -744,33 +709,51 @@ class OmniApp(ctk.CTk):
                 except Exception:
                     pass
             elif isinstance(widget, AIBubble):
-                # Guardar el markdown crudo, que es la fuente de verdad
                 if widget._raw.strip():
                     snapshot_actual.append(("ia", widget._raw))
             elif isinstance(widget, ctk.CTkLabel):
-                # Capturar mensajes de sistema (⚙ ...)
                 try:
                     txt = widget.cget("text")
                     if txt and txt.startswith("⚙"):
                         snapshot_actual.append(("sistema", txt[2:].strip()))
                 except Exception:
                     pass
-        # Limitar a últimos 50 mensajes para no sobrecargar
-        self.historiales[self.modo_actual] = snapshot_actual[-50:]
+                    
+        # Guardamos todo en un diccionario para este modo
+        self.historiales[self.modo_actual] = {
+            "visual": snapshot_actual[-50:], # Limitar a 50 mensajes visuales
+            "contexto": list(getattr(motor_ia, 'CONTEXTO_CHAT', []))
+        }
 
         # 3. Aplicamos el cambio de modo
         self.modo_actual = nuevo_modo
         motor_ia.MODO_ACTUAL = nuevo_modo
 
-        # 4. Limpiar UI
+        # 4. Limpiar UI y Limpiar Contexto de la IA (Para que empiece fresco)
         for w in self.chat_scroll.winfo_children():
             w.destroy()
         self.burbuja_ia_actual = None
+        
+        if hasattr(motor_ia, 'CONTEXTO_CHAT'):
+            motor_ia.CONTEXTO_CHAT.clear()
 
         # 5. Restaurar historial del nuevo modo si existe
-        historial_previo = self.historiales.get(nuevo_modo, [])
-        if historial_previo:
-            for tipo, texto in historial_previo:
+        datos_historial = self.historiales.get(nuevo_modo, {})
+        
+        # Manejo de retrocompatibilidad (por si antes era una lista simple)
+        if isinstance(datos_historial, list):
+            historial_visual = datos_historial
+            historial_contexto = []
+        else:
+            historial_visual = datos_historial.get("visual", [])
+            historial_contexto = datos_historial.get("contexto", [])
+
+        # Restauramos la memoria interna de la IA
+        if hasattr(motor_ia, 'CONTEXTO_CHAT') and historial_contexto:
+            motor_ia.CONTEXTO_CHAT.extend(historial_contexto)
+
+        if historial_visual:
+            for tipo, texto in historial_visual:
                 if tipo == "usuario":
                     self._agregar_usuario(texto)
                 elif tipo == "ia":
@@ -1001,7 +984,7 @@ class OmniApp(ctk.CTk):
             if texto:
                 self.burbuja_ia_actual.append_text(texto)
 
-            self.after(50, self._scroll_abajo) # <--- CAMBIO AQUÍ
+            self.after(50, self._scroll_abajo) # Fase 1.2: Scroll suave activado
         self.after(0, _update)
 
     def _agregar_sistema(self, texto: str):
@@ -1019,7 +1002,7 @@ class OmniApp(ctk.CTk):
         self._scroll_abajo()
 
     def _scroll_abajo(self):
-        self.update_idletasks() # Fuerza el renderizado primero
+        self.update_idletasks() # Fase 1.2: Parche para evitar crasheos visuales
         try:
             if hasattr(self.chat_scroll, "_parent_canvas"):
                 self.chat_scroll._parent_canvas.yview_moveto(1.0)
