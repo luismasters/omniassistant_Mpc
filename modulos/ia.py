@@ -2,10 +2,10 @@ import os
 import datetime
 import winsound
 import re
-import difflib # FASE 1.4: Importamos difflib para búsqueda difusa
+import difflib 
 import google.generativeai as genai
-from openai import OpenAI # Cliente para DeepSeek
-import config # Importación global para el parche del Sandbox
+from openai import OpenAI 
+import config 
 
 # Importación de llaves
 from config import GEMINI_API_KEY, DEEPSEEK_API_KEY
@@ -18,6 +18,9 @@ from modulos.vision import capturar_pantalla
 from modulos.git_bot import sincronizar_proyecto_git, ejecutar_comando_git_libre
 from modulos.memoria import guardar_recuerdo, guardar_snapshot, cargar_snapshot 
 from modulos.cliente_mcp import cliente_sistema 
+
+# FASE 2: IMPORTACIÓN DE PROMPTS SEPARADOS
+from modulos.prompts import obtener_prompt_planificador, obtener_prompt_programador, obtener_prompt_general
 
 # =====================================================================
 # INICIALIZACIÓN DE CLIENTES IA
@@ -36,7 +39,7 @@ PENDIENTE_DE_GIT = None
 WORKSPACE_ACTUAL = None 
 SNAPSHOT_ACTUAL = "" 
 MODO_ACTUAL = "general"
-ARCHIVOS_EN_MEMORIA = set() # FASE 1.4: Caché para evitar recargar contexto
+ARCHIVOS_EN_MEMORIA = set() 
 
 # =====================================================================
 # HERRAMIENTAS NATIVAS MCP (GEMINI)
@@ -62,7 +65,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
     config.MODO_ACTUAL = MODO_ACTUAL
     # -----------------------------------------------------------------
 
-    # Limpiar caché de memoria si cambiamos de proyecto o explícitamente lo pedimos
     if texto_usuario.lower() in ["limpiar memoria", "olvidar contexto"]:
         ARCHIVOS_EN_MEMORIA.clear()
         CONTEXTO_CHAT.clear()
@@ -165,68 +167,18 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         texto_snapshot = f"[ESTADO DEL PROYECTO]:\n{SNAPSHOT_ACTUAL}\n\n" if SNAPSHOT_ACTUAL else ""
         texto_doc_volatil = f"[DOCUMENTOS EN MEMORIA]:\n{DOCUMENTO_VOLATIL}\n\n" if DOCUMENTO_VOLATIL else ""
 
+        # AQUI ES DONDE SE USAN LOS PROMPTS EXTERNOS
         if MODO_ACTUAL == "planificador":
-            contexto_sistema = (
-                "Eres el Arquitecto de Software Senior de Luis. Tu objetivo es analizar el código y diseñar soluciones.\n"
-                f"{texto_workspace}\n{texto_snapshot}{texto_doc_volatil}"
-                "REGLAS OBLIGATORIAS:\n"
-                "1. NO escribas código final de implementación.\n"
-                "2. Analiza riesgos, dependencias y estructura lógica paso a paso.\n"
-                "⚠️ REGLAS DE ACCIONES RÁPIDAS (SIEMPRE al inicio de línea):\n"
-                "- Para ACTUALIZAR EL PLAN: guardar_archivo: plan.md ---CONTENIDO--- [contenido_del_plan]\n"
-                "- Para ACTUALIZAR EL ESTADO REAL: guardar_archivo: PROJECT_STATE.md ---CONTENIDO--- [contenido_del_estado]\n"
-                "- CUANDO LUIS PIDA ESCANEAR EL PROYECTO, DEBES IMPRIMIR EXACTAMENTE ESTO: escanear_proyecto:\n"
-                "- Para CREAR CARPETAS de doc: crear_carpeta: ruta\n"
-                "⚠️ IMPORTANTE: SIEMPRE usa 'guardar_archivo:' para generar el plan.md físico."
-            )
+            contexto_sistema = obtener_prompt_planificador(texto_workspace, texto_snapshot, texto_doc_volatil)
             modelo_activo = "deepseek-reasoner"
 
         elif MODO_ACTUAL == "programador":
-            contexto_sistema = (
-                "Eres el Ingeniero de Mantenimiento de Software de Luis. Tu objetivo es editar código de forma QUIRÚRGICA y minimalista.\n"
-                f"{texto_workspace}\n{texto_snapshot}{texto_doc_volatil}"
-                "⚠️ REGLAS DE ORO (SKILL DE EDICIÓN SENIOR):\n"
-                "1. PROHIBIDO REESCRIBIR ARCHIVOS GRANDES. NUNCA uses 'guardar_archivo:' para modificar un archivo que ya existe.\n"
-                "2. OPERACIÓN QUIRÚRGICA: Para cambiar código, usa ÚNICAMENTE 'reemplazar_bloque:'.\n"
-                "3. MINIMALISMO: En la sección ---BUSCAR--- pon SOLO las 3 o 4 líneas exactas que van a cambiar, más 1 línea de contexto. NUNCA incluyas la función entera si solo cambian 2 líneas.\n"
-                "4. INSPECCIÓN PREVIA: Si dudas del código exacto, usa 'leer_archivo:' primero y espera la respuesta antes de editar.\n"
-                "⚠️ REGLAS DE ACCIONES RÁPIDAS (PROHIBIDO usar etiquetas XML como <reemplazar_bloque> o <replace_block>. Usa ESTRICTAMENTE los guiones ---):\n"
-                "- Para LEER: leer_archivo: ruta\n"
-                "- Para CREAR NUEVO (solo si no existe): guardar_archivo: ruta ---CONTENIDO--- [codigo]\n"
-                "- Para MODIFICAR CÓDIGO (Usa siempre este formato markdown):\n"
-                "reemplazar_bloque: ruta\n"
-                "---BUSCAR---\n"
-                "[3-4 líneas de código viejo exacto]\n"
-                "---REEMPLAZAR---\n"
-                "[3-4 líneas de código nuevo]\n"
-                "---FIN---\n"
-                "- Para EDICIÓN DE 1 LÍNEA: editar_archivo: ruta | buscar: texto | reemplazar: texto\n"
-                "- Para PUSH: github: ruta\n"
-            )
+            contexto_sistema = obtener_prompt_programador(texto_workspace, texto_snapshot, texto_doc_volatil)
             modelo_activo = "deepseek-chat"
 
         else: # MODO GENERAL (Gemini)
             ruta_home = os.path.expanduser("~") 
-            contexto_sistema = (
-                "tu nombre es: Cortana, un asistente de IA integrado a la PC de Luis. Hablále de forma súper natural y directa.\n"
-                "⚠️ REGLA DE PERSONALIDAD: Sé breve. NUNCA expliques tus procesos internos, solo da la respuesta final.\n\n"
-                f"[CONTEXTO OCULTO] Fecha: {fecha_hoy}\n"
-                f"[RUTA DEL SISTEMA]: Tu usuario de Windows está en '{ruta_home}'. Por lo tanto, el Escritorio es '{ruta_home}\\Desktop'.\n"
-                f"[VENTANAS ABIERTAS]: {ventanas_abiertas}\n\n"
-                f"{texto_workspace}\n{texto_snapshot}{texto_doc_volatil}"
-                "⚠️ REGLAS DE ACCIONES RÁPIDAS (CRÍTICO: Si debes ejecutar una acción, escribe la orden exacta sola en una nueva línea):\n"
-                "- Para ABRIR o MOSTRAR una app/web: abrir: nombre_app\n"
-                "- Para CERRAR una app: cerrar: nombre_app\n"
-                "- Para MOVER ventanas: mover: nombre_app @ [1 o 2]\n"
-                "- Para buscar info en INTERNET: buscar: tu consulta\n"
-                "- Para GUARDAR RECUREDOS en memoria a largo plazo: mcp_guardar_en_boveda\n"
-                "- Para BUSCAR RECUERDOS: mcp_buscar_en_boveda\n"
-                "- SI LUIS PIDE ESCANEAR EL PROYECTO O ARQUITECTURA IMPRIME ESTO EXACTO: escanear_proyecto:\n"
-                "- Para CREAR CARPETAS en Windows: crear_carpeta: ruta_absoluta\n" 
-                "- Para LEER UN ARCHIVO: leer_archivo: ruta_absoluta\n" 
-                "- Para GUARDAR TEXTO O CÓDIGO NUEVO: guardar_archivo: ruta_absoluta ---CONTENIDO--- [texto_real_a_guardar]\n"
-                "- Si te piden mirar la pantalla 1 o 2, espera silenciosamente, el sistema te enviará la foto.\n"
-            )
+            contexto_sistema = obtener_prompt_general(fecha_hoy, ruta_home, ventanas_abiertas, texto_workspace, texto_snapshot, texto_doc_volatil)
             modelo_activo = "gemini"
 
         respuesta_ia = ""
@@ -374,7 +326,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                         CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO ESCRITURA] Fallo al guardar {ruta_f}: {resultado_escritura}"]})
                         if ui_callback: ui_callback("⚙️ Sistema", f"❌ Error guardando {ruta_f}: {resultado_escritura}", "#ff4500")
                     else:
-                        # FASE 1.4: Actualizar caché
                         if ruta_f_abs in ARCHIVOS_EN_MEMORIA:
                             for msg in CONTEXTO_CHAT:
                                 if isinstance(msg.get('parts', [''])[0], str) and f"[CONTENIDO DE '{ruta_f_abs}']:" in msg['parts'][0]:
@@ -388,13 +339,10 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         if "reemplazar_bloque:" in respuesta_ia.lower() or "<replace_block>" in respuesta_ia.lower() or "<reemplazar_bloque>" in respuesta_ia.lower():
             try:
                 operaciones_reemplazo = []
-                # Formato Markdown Original
                 for m in re.finditer(r'reemplazar_bloque:\s*(.+?)\s*-{3,}BUSCAR-{3,}\s*([\s\S]*?)\s*-{3,}REEMPLAZAR-{3,}\s*([\s\S]*?)\s*-{3,}FIN-{3,}', respuesta_ia, re.IGNORECASE):
                     operaciones_reemplazo.append((m.group(1), m.group(2), m.group(3)))
-                # Formato XML Inglés
                 for m in re.finditer(r'<replace_block>\s*<path>\s*(.+?)\s*</path>\s*<search>\s*([\s\S]*?)\s*</search>\s*<replace>\s*([\s\S]*?)\s*</replace>\s*</replace_block>', respuesta_ia, re.IGNORECASE):
                     operaciones_reemplazo.append((m.group(1), m.group(2), m.group(3)))
-                # Formato XML ESPAÑOL
                 for m in re.finditer(r'<reemplazar_bloque>\s*<ruta>\s*(.+?)\s*</ruta>\s*<buscar>\s*([\s\S]*?)\s*</buscar>\s*<reemplazar>\s*([\s\S]*?)\s*</reemplazar>\s*</reemplazar_bloque>', respuesta_ia, re.IGNORECASE):
                     operaciones_reemplazo.append((m.group(1), m.group(2), m.group(3)))
 
@@ -407,12 +355,10 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                     contenido_actual = leer_contenido_archivo(ruta_real_edit)
                     
                     if not contenido_actual.startswith("ERROR"):
-                        # Intento 1: Reemplazo Exacto
                         if buscar_edit in contenido_actual:
                             nuevo_contenido = contenido_actual.replace(buscar_edit, reemplazar_edit, 1)
                             escribir_archivo(ruta_real_edit, nuevo_contenido)
                             
-                            # FASE 1.4: Actualizamos el archivo en la memoria oculta de la IA
                             for msg in CONTEXTO_CHAT:
                                 if isinstance(msg.get('parts', [''])[0], str) and f"[CONTENIDO DE '{ruta_real_edit}']:" in msg['parts'][0]:
                                     msg['parts'][0] = f"[CONTENIDO DE '{ruta_real_edit}']:\n{nuevo_contenido}"
@@ -420,7 +366,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                             CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Modificación exitosa y exacta en {ruta_edit}"]})
                             if ui_callback: ui_callback("⚙️ Sistema", f"✅ Bloque actualizado con precisión en {ruta_edit}", "#86efac")
                         
-                        # Intento 2: FUZZY MATCHING
                         else:
                             source_lines = contenido_actual.splitlines()
                             search_lines = buscar_edit.splitlines()
@@ -441,7 +386,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                 nuevo_contenido = (before + '\n' if before else '') + reemplazar_edit + ('\n' + after if after else '')
                                 escribir_archivo(ruta_real_edit, nuevo_contenido)
                                 
-                                # FASE 1.4: Actualizamos caché en fuzzy
                                 for msg in CONTEXTO_CHAT:
                                     if isinstance(msg.get('parts', [''])[0], str) and f"[CONTENIDO DE '{ruta_real_edit}']:" in msg['parts'][0]:
                                         msg['parts'][0] = f"[CONTENIDO DE '{ruta_real_edit}']:\n{nuevo_contenido}"
@@ -467,10 +411,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             linea_limpia = linea.lower().replace("[", "").replace("]", "").replace("*", "").replace("`", "").strip()
             
             if "guardar_archivo:" in linea_limpia or "---contenido---" in linea_limpia or "<write_file>" in linea_limpia: continue
-            
-            # PARCHE: Ignorar etiquetas de bloques en español/inglés
             if any(t in linea_limpia for t in ["reemplazar_bloque:", "---buscar---", "---reemplazar---", "---fin---", "<replace_block>", "<reemplazar_bloque>", "<buscar>", "<reemplazar>"]): continue
-            
             if "<read_file>" in linea_limpia: continue
             
             if "leer_archivo:" in linea_limpia:
@@ -511,7 +452,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                 if nuevo_contenido != contenido_actual:
                                     escribir_archivo(ruta_real_edit, nuevo_contenido)
                                     
-                                    # FASE 1.4: Actualizar caché 1 línea
                                     for msg in CONTEXTO_CHAT:
                                         if isinstance(msg.get('parts', [''])[0], str) and f"[CONTENIDO DE '{ruta_real_edit}']:" in msg['parts'][0]:
                                             msg['parts'][0] = f"[CONTENIDO DE '{ruta_real_edit}']:\n{nuevo_contenido}"
