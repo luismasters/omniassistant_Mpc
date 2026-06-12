@@ -477,8 +477,17 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             elif "buscar:" in linea_limpia and not "editar_archivo:" in linea_limpia: 
                 comando_busqueda_detectado = linea[linea.lower().find("buscar:") + 7:].replace('<', '').replace('>', '').strip()
                 
-            elif "github:" in linea_limpia:
-                ruta_corta = linea[linea.lower().find("github:") + 7:].replace('<', '').replace('>', '').strip()
+            elif "github:" in linea_limpia or "<github>" in linea_limpia:
+                # Buscamos dónde empieza la ruta y limpiamos las etiquetas inventadas de la IA
+                idx = linea_limpia.find("github:") + 7 if "github:" in linea_limpia else linea_limpia.find("<github>") + 8
+                ruta_sucia = linea[idx:].replace('<', '').replace('>', '').replace('</github', '').strip()
+                
+                # Si la IA inventó comandos adicionales (---COMMANDS---), los cortamos
+                if "---" in ruta_sucia:
+                    ruta_corta = ruta_sucia.split("---")[0].strip()
+                else:
+                    ruta_corta = ruta_sucia.strip()
+
                 ruta_real = WORKSPACE_ACTUAL if WORKSPACE_ACTUAL else buscar_archivo_o_carpeta(ruta_corta) 
                 if ruta_real:
                     PENDIENTE_DE_GIT = {"accion": "github", "ruta": ruta_real, "url_custom": None}
