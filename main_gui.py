@@ -696,7 +696,11 @@ class OmniApp(ctk.CTk):
                     for f in archivos: estructura.append(f"{sind}📄 {f}")
                 arbol = f"Estructura del proyecto '{nombre_proj}':\n" + "\n".join(estructura)
                 guardar_snapshot(ruta, arbol)
-                motor_ia.SNAPSHOT_ACTUAL = arbol
+                motor_ia.SNAPSHOT_ACTUAL = arbol 
+            
+            # FASE 3.2: Encendemos el radar Watchdog conectado a la UI
+            from modulos.memoria import iniciar_radar_proyecto
+            iniciar_radar_proyecto(motor_ia.WORKSPACE_ACTUAL, ui_callback=self.callback_ia)
 
         # 2. PASO 3 / FASE 1.3 — Guardar historial visual Y CONTEXTO DEL MOTOR IA
         snapshot_actual = []

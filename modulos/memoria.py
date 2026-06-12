@@ -3,6 +3,9 @@ import chromadb
 import uuid
 import datetime
 import json 
+import threading
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 
 from chromadb.utils import embedding_functions
 
@@ -12,13 +15,9 @@ ruta_db = os.path.join(ruta_actual, "boveda_memoria")
 
 print(f"🧠 [MEMORIA] Inicializando bóveda en: {ruta_db}")
 
-# 2. Arrancamos el cliente de ChromaDB
 cliente = chromadb.PersistentClient(path=ruta_db)
-
-# 3. Configuramos el Traductor
 modelo_traductor = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
 
-# 4. Creamos la Colección
 coleccion_principal = cliente.get_or_create_collection(
     name="contexto_general",
     embedding_function=modelo_traductor
@@ -53,12 +52,9 @@ def buscar_contexto(pregunta_usuario, cantidad_resultados=3):
         return []
 
 def guardar_snapshot(ruta_workspace, texto_estado):
-    """Guarda el estado del proyecto en un archivo JSON dentro del propio proyecto."""
     try:
-        # Creamos una carpeta oculta .cortana dentro del proyecto del usuario
         ruta_cortana = os.path.join(ruta_workspace, ".cortana")
         os.makedirs(ruta_cortana, exist_ok=True)
-        
         ruta_archivo = os.path.join(ruta_cortana, "snapshot.json")
         
         with open(ruta_archivo, "w", encoding="utf-8") as f:
@@ -71,7 +67,6 @@ def guardar_snapshot(ruta_workspace, texto_estado):
         return False
 
 def cargar_snapshot(ruta_workspace):
-    """Recupera la foto del estado del proyecto desde el archivo físico."""
     try:
         ruta_archivo = os.path.join(ruta_workspace, ".cortana", "snapshot.json")
         if os.path.exists(ruta_archivo):
@@ -82,3 +77,55 @@ def cargar_snapshot(ruta_workspace):
     except Exception as e:
         print(f"❌ Error al cargar snapshot local: {e}")
     return ""
+
+# =====================================================================
+# MOTOR WATCHDOG (Fase 3.2 - Radar de Cambios en Tiempo Real)
+# =====================================================================
+_observador_global = None
+
+class ManejadorCambiosProyecto(FileSystemEventHandler):
+    """Manejador que reacciona cuando modificas un archivo en tu editor."""
+    def __init__(self, ruta_workspace, ui_callback=None):
+        self.ruta_workspace = ruta_workspace
+        self.ui_callback = ui_callback
+
+    def on_modified(self, event):
+        # Ignoramos si cambian carpetas o archivos ocultos de Git/Cortana
+        if event.is_directory or any(x in event.src_path for x in ['.git', '.cortana', '__pycache__', 'venv']):
+            return
+            
+        nombre_archivo = os.path.basename(event.src_path)
+        print(f"👁️ [RADAR] Se detectó un cambio manual en: {nombre_archivo}")
+        
+        # Importamos motor_ia de forma local para evitar importaciones circulares en Python
+        import modulos.ia as motor_ia
+        
+        # Si el archivo modificado estaba en la memoria de la IA, lo limpiamos de la caché 
+        # para obligar a Cortana a leer la nueva versión real del disco en el siguiente turno.
+        ruta_abs = os.path.abspath(event.src_path)
+        if ruta_abs in motor_ia.ARCHIVOS_EN_MEMORIA:
+            motor_ia.ARCHIVOS_EN_MEMORIA.remove(ruta_abs)
+            # Removemos la versión vieja del historial del chat para que no se confunda
+            motor_ia.CONTEXTO_CHAT = [
+                msg for msg in motor_ia.CONTEXTO_CHAT 
+                if not (isinstance(msg.get('parts', [''])[0], str) and f"[CONTENIDO DE '{ruta_abs}']:" in msg['parts'][0])
+            ]
+            msg_log = f"Caché desactualizada limpia para: {nombre_archivo}. Cortana leerá los cambios nuevos."
+            print(f"💡 [RADAR] {msg_log}")
+            if self.ui_callback:
+                self.ui_callback("⚙️ Sistema", f"🔄 Radar: Detectado cambio manual en '{nombre_archivo}'. Memoria sincronizada.", "#80868B")
+
+def iniciar_radar_proyecto(ruta_workspace, ui_callback=None):
+    """Arranca el hilo espía que vigila tu carpeta de desarrollo."""
+    global _observador_global
+    
+    # Si ya había un radar corriendo para otro proyecto, lo apagamos primero
+    if _observador_global:
+        _observador_global.stop()
+        _observador_global.join()
+        
+    print(f"👁️ [RADAR] Activando vigilancia en tiempo real para: {ruta_workspace}")
+    manejador = ManejadorCambiosProyecto(ruta_workspace, ui_callback)
+    _observador_global = Observer()
+    _observador_global.schedule(manejador, path=ruta_workspace, recursive=True)
+    _observador_global.start()
