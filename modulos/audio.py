@@ -6,7 +6,6 @@ import numpy as np
 import sounddevice as sd
 import scipy.io.wavfile as wav
 import pyttsx3
-from faster_whisper import WhisperModel # <-- ¡Guion bajo corregido!
 
 # Importamos la configuración limpia y desacoplada
 from config import WHISPER_MODEL_SIZE, WHISPER_DEVICE, WHISPER_COMPUTE_TYPE
@@ -15,15 +14,25 @@ from config import TECLA_HABLAR, FS_AUDIO
 engine_voceando = None
 hablando_actualmente = False
 
-print(f"🧠 [AUDIO REAL] Cargando Whisper '{WHISPER_MODEL_SIZE}' en {WHISPER_DEVICE.upper()} ({WHISPER_COMPUTE_TYPE})... Esperá un momento.")
+# =====================================================================
+# FASE 2.2: LAZY LOADING DE WHISPER
+# =====================================================================
+_modelo_whisper = None  # Variable oculta que inicia vacía
 
-# Inicializamos el modelo optimizado con las variables del entorno
-model = WhisperModel(
-    WHISPER_MODEL_SIZE, 
-    device=WHISPER_DEVICE, 
-    compute_type=WHISPER_COMPUTE_TYPE
-)
-print("✅ Modelo de voz cargado.")
+def _cargar_whisper_si_necesario():
+    global _modelo_whisper
+    if _modelo_whisper is None:
+        print(f"\n⚙️ [AUDIO REAL] Cargando Whisper '{WHISPER_MODEL_SIZE}' en {WHISPER_DEVICE.upper()} ({WHISPER_COMPUTE_TYPE})... Esto solo pasa una vez.")
+        # Importamos la librería pesada SOLO cuando se llama a la función
+        from faster_whisper import WhisperModel
+        _modelo_whisper = WhisperModel(
+            WHISPER_MODEL_SIZE, 
+            device=WHISPER_DEVICE, 
+            compute_type=WHISPER_COMPUTE_TYPE
+        )
+        print("✅ Modelo de voz cargado en memoria (Listo para escuchar).")
+    return _modelo_whisper
+# =====================================================================
 
 def limpiar_texto_para_voz(texto):
     lineas = texto.split('\n')
@@ -111,8 +120,9 @@ def capturar_voz_micro():
     grabacion = np.concatenate(audio_data, axis=0)
     wav.write(archivo_temporal, FS_AUDIO, grabacion)
     
-    # --- NUEVA TRANSCRIPCIÓN CON FASTER-WHISPER ---
-    segmentos, info = model.transcribe(archivo_temporal, beam_size=5, language="es")
+    # --- TRANSCRIPCIÓN CON LAZY LOADING ---
+    modelo_activo = _cargar_whisper_si_necesario() # <--- Pide el modelo aquí
+    segmentos, info = modelo_activo.transcribe(archivo_temporal, beam_size=5, language="es")
     
     texto_completo = ""
     for segmento in segmentos:
