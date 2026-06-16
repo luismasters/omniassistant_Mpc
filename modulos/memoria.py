@@ -4,6 +4,7 @@ import uuid
 import datetime
 import json 
 import threading
+import config
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -97,17 +98,17 @@ class ManejadorCambiosProyecto(FileSystemEventHandler):
         nombre_archivo = os.path.basename(event.src_path)
         print(f"👁️ [RADAR] Se detectó un cambio manual en: {nombre_archivo}")
         
-        # Importamos motor_ia de forma local para evitar importaciones circulares en Python
-        import modulos.ia as motor_ia
+        # Importamos config de forma local para acceder a la Pizarra Central
+        import config
         
         # Si el archivo modificado estaba en la memoria de la IA, lo limpiamos de la caché 
         # para obligar a Cortana a leer la nueva versión real del disco en el siguiente turno.
         ruta_abs = os.path.abspath(event.src_path)
-        if ruta_abs in motor_ia.ARCHIVOS_EN_MEMORIA:
-            motor_ia.ARCHIVOS_EN_MEMORIA.remove(ruta_abs)
+        if ruta_abs in config.estado.archivos_en_memoria:
+            config.estado.archivos_en_memoria.remove(ruta_abs)
             # Removemos la versión vieja del historial del chat para que no se confunda
-            motor_ia.CONTEXTO_CHAT = [
-                msg for msg in motor_ia.CONTEXTO_CHAT 
+            config.estado.contexto_chat = [
+                msg for msg in config.estado.contexto_chat 
                 if not (isinstance(msg.get('parts', [''])[0], str) and f"[CONTENIDO DE '{ruta_abs}']:" in msg['parts'][0])
             ]
             msg_log = f"Caché desactualizada limpia para: {nombre_archivo}. Cortana leerá los cambios nuevos."
