@@ -685,6 +685,8 @@ class OmniApp(ctk.CTk):
                 if not ruta:
                     return
                 motor_ia.WORKSPACE_ACTUAL = ruta
+                import config
+                config.estado.workspace_actual = ruta
                 nombre_proj = os.path.basename(ruta)
                 estructura = []
                 for raiz, carpetas, archivos in os.walk(ruta):

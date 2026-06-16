@@ -40,6 +40,23 @@ TECLA_HABLAR = 'f8'
 FS_AUDIO = 16000
 
 # =========================================================
-# ESTADOS DEL SISTEMA
+# ESTADOS DEL SISTEMA GLOBAL (CENTRALIZADO)
 # =========================================================
-MODO_PROGRAMADOR = True
+class EstadoGlobal:
+    def __init__(self):
+        self.modo_actual = "general"
+        self.workspace_actual = None
+        self.snapshot_actual = ""
+        self.contexto_chat = []
+        self.archivos_en_memoria = set()
+        self.documento_volatil = ""
+        self.pendiente_de_borrado = ""
+        self.pendiente_de_git = None
+        self.archivo_pendiente_inyeccion = None
+
+    def limpiar_memoria(self):
+        self.contexto_chat.clear()
+        self.archivos_en_memoria.clear()
+        self.documento_volatil = ""
+
+estado = EstadoGlobal()

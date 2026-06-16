@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 def sincronizar_proyecto_git(ruta_workspace, reset_remote=False, url_custom=None):
     """
-    Fase 2 del Plan: Secuencia segura (Init -> Pull -> Add -> Commit -> Push)
+    Fase 2 del Plan: Secuencia segura (Init -> Add -> Commit -> Pull -> Push)
     """
     if git is None:
         return "❌ Error: La librería 'gitpython' no está instalada. Ejecuta 'pip install gitpython'."
@@ -40,7 +40,13 @@ def sincronizar_proyecto_git(ruta_workspace, reset_remote=False, url_custom=None
 
         origin = repo.remote(name='origin')
 
-        # Tarea 5: Pull antes de Push (Para evitar conflictos)
+        # Tarea 5: Asegurar cambios locales ANTES del pull (Add y Commit)
+        hay_cambios_locales = repo.is_dirty(untracked_files=True)
+        if hay_cambios_locales:
+            repo.git.add(all=True)
+            repo.index.commit("Auto-commit: Actualización generada vía OmniAssistant (Cortana)")
+
+        # Tarea 6: Pull con rebase AHORA que el árbol está limpio
         try:
             repo.git.pull('origin', repo.active_branch.name, '--rebase')
         except Exception as e:
@@ -51,14 +57,6 @@ def sincronizar_proyecto_git(ruta_workspace, reset_remote=False, url_custom=None
             else:
                 return f"⚠️ Advertencia o conflicto al hacer pull: {e}"
 
-        # Tarea 6: Verificar si realmente hay cambios antes del commit
-        if not repo.is_dirty(untracked_files=True):
-            return "ℹ️ No hay cambios nuevos que subir. El proyecto ya está al día en GitHub."
-
-        # Tarea 5/6: Secuencia Add y Commit
-        repo.git.add(all=True)
-        repo.index.commit("Auto-commit: Actualización generada vía OmniAssistant (Cortana)")
-
         # Push Final
         push_info = origin.push()
         
@@ -67,7 +65,10 @@ def sincronizar_proyecto_git(ruta_workspace, reset_remote=False, url_custom=None
             if info.flags & git.remote.PushInfo.ERROR:
                 return f"❌ Error al hacer push: {info.summary}"
 
-        return "✅ Proyecto sincronizado con GitHub exitosamente (Pull -> Add -> Commit -> Push)."
+        if not hay_cambios_locales:
+            return "ℹ️ El proyecto ya estaba al día (no había cambios locales), sincronización verificada."
+
+        return "✅ Proyecto sincronizado con GitHub exitosamente (Add -> Commit -> Pull -> Push)."
 
     except Exception as e:
         logger.error(f"Error en sincronización Git: {e}")

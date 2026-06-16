@@ -29,19 +29,6 @@ genai.configure(api_key=GEMINI_API_KEY)
 cliente_deepseek = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
 
 # =====================================================================
-# VARIABLES GLOBALES DE ESTADO
-# =====================================================================
-CONTEXTO_CHAT = []
-ARCHIVO_PENDIENTE_INYECCION = None
-DOCUMENTO_VOLATIL = ""
-PENDIENTE_DE_BORRADO = "" 
-PENDIENTE_DE_GIT = None 
-WORKSPACE_ACTUAL = None 
-SNAPSHOT_ACTUAL = "" 
-MODO_ACTUAL = "general"
-ARCHIVOS_EN_MEMORIA = set() 
-
-# =====================================================================
 # HERRAMIENTAS NATIVAS MCP (GEMINI)
 # =====================================================================
 def mcp_estado_pc(): return cliente_sistema.ejecutar("reporte_estado_pc")
@@ -57,22 +44,29 @@ lista_herramientas_mcp = [
 ]
 
 def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
-    """Enrutador Universal: Llama a Gemini o a DeepSeek según el modo activo."""
-    global CONTEXTO_CHAT, ARCHIVO_PENDIENTE_INYECCION, DOCUMENTO_VOLATIL, PENDIENTE_DE_BORRADO, PENDIENTE_DE_GIT, WORKSPACE_ACTUAL, SNAPSHOT_ACTUAL, MODO_ACTUAL, ARCHIVOS_EN_MEMORIA
+    """Enrutador Universal y traductor de acciones."""
+    import config
+    CONTEXTO_CHAT = config.estado.contexto_chat
+    ARCHIVO_PENDIENTE_INYECCION = config.estado.archivo_pendiente_inyeccion
+    DOCUMENTO_VOLATIL = config.estado.documento_volatil
+    PENDIENTE_DE_BORRADO = config.estado.pendiente_de_borrado
+    PENDIENTE_DE_GIT = config.estado.pendiente_de_git
+    WORKSPACE_ACTUAL = config.estado.workspace_actual
+    SNAPSHOT_ACTUAL = config.estado.snapshot_actual
+    MODO_ACTUAL = config.estado.modo_actual
+    ARCHIVOS_EN_MEMORIA = config.estado.archivos_en_memoria
     
-    # --- PARCHE SANDBOX: Sincronizar ruta actual con la seguridad ---
     config.RUTA_WORKSPACE_ACTUAL = WORKSPACE_ACTUAL
-    config.MODO_ACTUAL = MODO_ACTUAL
-    # -----------------------------------------------------------------
+    texto_usuario_lower = texto_usuario.lower().strip()
 
-    if texto_usuario.lower() in ["limpiar memoria", "olvidar contexto"]:
+    if texto_usuario_lower in ["limpiar memoria", "olvidar contexto"]:
         ARCHIVOS_EN_MEMORIA.clear()
         CONTEXTO_CHAT.clear()
         if ui_callback: ui_callback("⚙️ Sistema", "🧹 Contexto y caché limpiados.", "#80868B")
         return
 
     # =================================================================
-    # 🩹 INTERCEPTOR DE ADJUNTOS DE LA INTERFAZ
+    # 🩹 INTERCEPTOR DE ADJUNTOS
     # =================================================================
     if "[adjunto:" in texto_usuario.lower():
         rutas_extraidas = re.findall(r'\[adjunto:\s*(.*?)\]', texto_usuario, re.IGNORECASE)
@@ -81,14 +75,12 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             procesar_archivo_adjunto(rutas_extraidas, ui_callback)
             return
 
-    texto_usuario_lower = texto_usuario.lower().strip()
-
     # =================================================================
-    # 🛡️ ESCUDOS DE SEGURIDAD (Con Parche Anti-Hilos / Race Condition)
+    # 🛡️ ESCUDOS DE SEGURIDAD (Confirmaciones de UI)
     # =================================================================
     if PENDIENTE_DE_BORRADO:
         tarea_borrado = PENDIENTE_DE_BORRADO
-        PENDIENTE_DE_BORRADO = ""
+        config.estado.pendiente_de_borrado = ""
         
         print("🧠 [SEMÁFORO DE BORRADO] Evaluando...")
         evaluador = genai.GenerativeModel("gemini-flash-lite-latest")
@@ -108,7 +100,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
 
     if PENDIENTE_DE_GIT:
         tarea_git = PENDIENTE_DE_GIT
-        PENDIENTE_DE_GIT = None
+        config.estado.pendiente_de_git = None
         
         print("🧠 [SEMÁFORO DE GIT] Evaluando...")
         evaluador = genai.GenerativeModel("gemini-flash-lite-latest")
@@ -139,7 +131,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
 
     if ARCHIVO_PENDIENTE_INYECCION:
         tarea_inyeccion = ARCHIVO_PENDIENTE_INYECCION
-        ARCHIVO_PENDIENTE_INYECCION = None
+        config.estado.archivo_pendiente_inyeccion = None
         
         evaluador = genai.GenerativeModel("gemini-flash-lite-latest")
         prompt_juez = f"El usuario debe confirmar guardar adjuntos. Su respuesta: '{texto_usuario}'. Responde CONFIRMADO o CANCELADO."
@@ -153,167 +145,183 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 chunks = [contenido[i:i+1500] for i in range(0, len(contenido), 1500)]
                 for chunk in chunks: guardar_recuerdo(texto_a_guardar=chunk, etiqueta_tema=f"Doc: {nombre}")
             msg = f"¡Perfecto! Inyecté los archivos en la bóveda permanente."
-            DOCUMENTO_VOLATIL = "" 
+            config.estado.documento_volatil = "" 
         else: msg = "Entendido. Dejé los archivos en mi memoria a corto plazo."
             
         if ui_callback: ui_callback("🤖 Cortana", msg, "#A8C7FA")
         if modo_voz: hablar_no_bloqueante("Listo, decisión aplicada.")
         CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg]}])
         return 
-        
+
     # =================================================================
-    # FLUJO PRINCIPAL: ENRUTADOR Y CONSTRUCCIÓN DE CONTEXTO
+    # 🧠 TRADUCTOR INSTANTÁNEO DE INTENCIONES NATURALES
     # =================================================================
-    print(f"\n🧠 PENSANDO ({MODO_ACTUAL.upper()})...")
-    try:
-        fecha_hoy = datetime.datetime.now().strftime("%A, %d de %B de %Y") 
-        ventanas_abiertas = obtener_ventanas_activas()
-        
-        texto_workspace = f"[WORKSPACE ANCLADO]: {WORKSPACE_ACTUAL}\n" if WORKSPACE_ACTUAL else ""
-        texto_snapshot = f"[ESTADO DEL PROYECTO]:\n{SNAPSHOT_ACTUAL}\n\n" if SNAPSHOT_ACTUAL else ""
-        texto_doc_volatil = f"[DOCUMENTOS EN MEMORIA]:\n{DOCUMENTO_VOLATIL}\n\n" if DOCUMENTO_VOLATIL else ""
+    intentos_naturales = {
+        "subir cambios": "github: .",
+        "sube los cambios": "github: .",
+        "sincronizar proyecto": "github: .",
+        "sincroniza": "github: .",
+        "escanear proyecto": "escanear_proyecto:"
+    }
+    
+    comando_directo = None
+    for frase, comando in intentos_naturales.items():
+        if frase in texto_usuario_lower:
+            comando_directo = comando
+            break
 
-        if MODO_ACTUAL == "planificador":
-            contexto_sistema = obtener_prompt_planificador(texto_workspace, texto_snapshot, texto_doc_volatil)
-            modelo_activo = "deepseek-reasoner"
-        elif MODO_ACTUAL == "programador":
-            contexto_sistema = obtener_prompt_programador(texto_workspace, texto_snapshot, texto_doc_volatil)
-            modelo_activo = "deepseek-chat"
-        else:
-            ruta_home = os.path.expanduser("~") 
-            contexto_sistema = obtener_prompt_general(fecha_hoy, ruta_home, ventanas_abiertas, texto_workspace, texto_snapshot, texto_doc_volatil)
-            modelo_activo = "gemini"
+    respuesta_ia = ""
+    usaste_mcp = False
+    resultado_mcp = ""
+    modelo_gemini = None
 
-        respuesta_ia = ""
-        usaste_mcp = False
-        resultado_mcp = ""
-        modelo_gemini = None
+    # SI HAY UN COMANDO DIRECTO (Ej: "sube los cambios"), SALTAMOS LA API
+    if comando_directo:
+        respuesta_ia = comando_directo
+        if ui_callback: ui_callback("🤖 Cortana", f"Entendido, ejecutando acción solicitada...", "#A8C7FA", nueva_linea=True)
+        if modo_voz: hablar_no_bloqueante("Entendido, ejecutando acción.")
 
-        print(f"\n🤖 Cortana dice:\n---")
-        
-        # =================================================================
-        # EJECUCIÓN GEMINI (Modo General)
-        # =================================================================
-        if modelo_activo == "gemini":
-            modelo_gemini = genai.GenerativeModel("gemini-flash-lite-latest", system_instruction=contexto_sistema, tools=lista_herramientas_mcp)
-            mensajes_para_gemini = list(CONTEXTO_CHAT)
-            partes_usuario = [texto_usuario]
+    # SI NO HAY COMANDO DIRECTO, DEJAMOS QUE LA IA PIENSE NORMALMENTE
+    else:
+        print(f"\n🧠 PENSANDO ({MODO_ACTUAL.upper()})...")
+        try:
+            fecha_hoy = datetime.datetime.now().strftime("%A, %d de %B de %Y") 
+            ventanas_abiertas = obtener_ventanas_activas()
             
-            verbos_vision = ["captura", "capturá", "capturar", "mirar", "ves"]
-            objetivos_vision = ["pantalla", "monitor", "1", "2", "uno", "dos", "la 1", "el 1", "la 2", "el 2"]
-            if any(v in texto_usuario_lower for v in verbos_vision) and any(o in texto_usuario_lower for o in objetivos_vision):
-                if ui_callback: ui_callback("⚙️ Sistema", "📸 Capturando pantalla...", "#80868B")
-                winsound.Beep(1500, 100)
-                num_pantalla = 2 if any(p in texto_usuario_lower for p in ["1", "uno", "la 1", "el 1"]) else 1
-                img = capturar_pantalla(num_pantalla)
-                if img: partes_usuario.append(img) 
-                    
-            mensajes_para_gemini.append({'role': 'user', 'parts': partes_usuario})
-            response = modelo_gemini.generate_content(mensajes_para_gemini, stream=True, generation_config=genai.GenerationConfig(temperature=0.1))
-            
-            if ui_callback: ui_callback("🤖 Cortana", "", "#A8C7FA", nueva_linea=False)
-            
-            for chunk in response:
-                try:
-                    for part in chunk.parts:
-                        if getattr(part, "function_call", None):
-                            usaste_mcp = True
-                            n_func = part.function_call.name
-                            if ui_callback: ui_callback("⚙️ Sistema", f"Consultando servidor: {n_func}...", "#80868B")
-                            args = {k: v for k, v in part.function_call.args.items()}
-                            if n_func == "mcp_estado_pc": resultado_mcp = mcp_estado_pc()
-                            elif n_func == "mcp_hardware_pc": resultado_mcp = mcp_hardware_pc()
-                            elif n_func == "mcp_buscar_en_boveda": resultado_mcp = mcp_buscar_en_boveda(args.get("consulta", ""))
-                            elif n_func == "mcp_guardar_en_boveda": resultado_mcp = mcp_guardar_en_boveda(args.get("dato", ""))
-                            elif n_func == "mcp_explorar_ruta": resultado_mcp = mcp_explorar_ruta(args.get("ruta", ""))
-                            elif n_func == "mcp_leer_documento": resultado_mcp = mcp_leer_documento(args.get("ruta", ""))
-                        elif getattr(part, "text", None):
-                            print(part.text, end='', flush=True) 
-                            respuesta_ia += part.text
-                            if ui_callback: ui_callback("", part.text, "#E8EAED", nueva_linea=False)
-                except Exception: pass
+            texto_workspace = f"[WORKSPACE ANCLADO]: {WORKSPACE_ACTUAL}\n" if WORKSPACE_ACTUAL else ""
+            texto_snapshot = f"[ESTADO DEL PROYECTO]:\n{SNAPSHOT_ACTUAL}\n\n" if SNAPSHOT_ACTUAL else ""
+            texto_doc_volatil = f"[DOCUMENTOS EN MEMORIA]:\n{DOCUMENTO_VOLATIL}\n\n" if DOCUMENTO_VOLATIL else ""
 
-            if usaste_mcp and modelo_gemini:
-                mensajes_para_gemini.append({'role': 'model', 'parts': ['Analizando los datos del sistema...']})
-                mensajes_para_gemini.append({'role': 'user', 'parts': [f"[DATO DEL SISTEMA: {resultado_mcp}]. Responde naturalmente."]})
-                response_2 = modelo_gemini.generate_content(mensajes_para_gemini, stream=True)
-                for chunk_2 in response_2:
+            if MODO_ACTUAL == "planificador":
+                contexto_sistema = obtener_prompt_planificador(texto_workspace, texto_snapshot, texto_doc_volatil)
+                modelo_activo = "deepseek-reasoner"
+            elif MODO_ACTUAL == "programador":
+                contexto_sistema = obtener_prompt_programador(texto_workspace, texto_snapshot, texto_doc_volatil)
+                modelo_activo = "deepseek-chat"
+            else:
+                ruta_home = os.path.expanduser("~") 
+                contexto_sistema = obtener_prompt_general(fecha_hoy, ruta_home, ventanas_abiertas, texto_workspace, texto_snapshot, texto_doc_volatil)
+                modelo_activo = "gemini"
+
+            print(f"\n🤖 Cortana dice:\n---")
+            
+            if modelo_activo == "gemini":
+                modelo_gemini = genai.GenerativeModel("gemini-flash-lite-latest", system_instruction=contexto_sistema, tools=lista_herramientas_mcp)
+                mensajes_para_gemini = list(CONTEXTO_CHAT)
+                partes_usuario = [texto_usuario]
+                
+                verbos_vision = ["captura", "capturá", "capturar", "mirar", "ves"]
+                objetivos_vision = ["pantalla", "monitor", "1", "2", "uno", "dos", "la 1", "el 1", "la 2", "el 2"]
+                if any(v in texto_usuario_lower for v in verbos_vision) and any(o in texto_usuario_lower for o in objetivos_vision):
+                    if ui_callback: ui_callback("⚙️ Sistema", "📸 Capturando pantalla...", "#80868B")
+                    winsound.Beep(1500, 100)
+                    num_pantalla = 2 if any(p in texto_usuario_lower for p in ["1", "uno", "la 1", "el 1"]) else 1
+                    img = capturar_pantalla(num_pantalla)
+                    if img: partes_usuario.append(img) 
+                        
+                mensajes_para_gemini.append({'role': 'user', 'parts': partes_usuario})
+                response = modelo_gemini.generate_content(mensajes_para_gemini, stream=True, generation_config=genai.GenerationConfig(temperature=0.1))
+                
+                if ui_callback: ui_callback("🤖 Cortana", "", "#A8C7FA", nueva_linea=False)
+                
+                for chunk in response:
                     try:
-                        for part in chunk_2.parts:
-                            if getattr(part, "text", None):
-                                print(part.text, end='', flush=True)
+                        for part in chunk.parts:
+                            if getattr(part, "function_call", None):
+                                usaste_mcp = True
+                                n_func = part.function_call.name
+                                if ui_callback: ui_callback("⚙️ Sistema", f"Consultando servidor: {n_func}...", "#80868B")
+                                args = {k: v for k, v in part.function_call.args.items()}
+                                if n_func == "mcp_estado_pc": resultado_mcp = mcp_estado_pc()
+                                elif n_func == "mcp_hardware_pc": resultado_mcp = mcp_hardware_pc()
+                                elif n_func == "mcp_buscar_en_boveda": resultado_mcp = mcp_buscar_en_boveda(args.get("consulta", ""))
+                                elif n_func == "mcp_guardar_en_boveda": resultado_mcp = mcp_guardar_en_boveda(args.get("dato", ""))
+                                elif n_func == "mcp_explorar_ruta": resultado_mcp = mcp_explorar_ruta(args.get("ruta", ""))
+                                elif n_func == "mcp_leer_documento": resultado_mcp = mcp_leer_documento(args.get("ruta", ""))
+                            elif getattr(part, "text", None):
+                                print(part.text, end='', flush=True) 
                                 respuesta_ia += part.text
                                 if ui_callback: ui_callback("", part.text, "#E8EAED", nueva_linea=False)
                     except Exception: pass
 
-        # =================================================================
-        # EJECUCIÓN DEEPSEEK (Modo Planificador / Programador)
-        # =================================================================
-        else:
-            mensajes_ds = [{"role": "system", "content": contexto_sistema}]
-            for msg in CONTEXTO_CHAT:
-                rol_ds = "assistant" if msg['role'] == "model" else "user"
-                texto_historico = "".join([p for p in msg['parts'] if isinstance(p, str)])
-                mensajes_ds.append({"role": rol_ds, "content": texto_historico})
+                if usaste_mcp and modelo_gemini:
+                    mensajes_para_gemini.append({'role': 'model', 'parts': ['Analizando los datos del sistema...']})
+                    mensajes_para_gemini.append({'role': 'user', 'parts': [f"[DATO DEL SISTEMA: {resultado_mcp}]. Responde naturalmente."]})
+                    response_2 = modelo_gemini.generate_content(mensajes_para_gemini, stream=True)
+                    for chunk_2 in response_2:
+                        try:
+                            for part in chunk_2.parts:
+                                if getattr(part, "text", None):
+                                    print(part.text, end='', flush=True)
+                                    respuesta_ia += part.text
+                                    if ui_callback: ui_callback("", part.text, "#E8EAED", nueva_linea=False)
+                        except Exception: pass
+
+            else:
+                mensajes_ds = [{"role": "system", "content": contexto_sistema}]
+                for msg in CONTEXTO_CHAT:
+                    rol_ds = "assistant" if msg['role'] == "model" else "user"
+                    texto_historico = "".join([p for p in msg['parts'] if isinstance(p, str)])
+                    mensajes_ds.append({"role": rol_ds, "content": texto_historico})
+                
+                mensajes_ds.append({"role": "user", "content": texto_usuario})
+                if ui_callback: ui_callback("🤖 Cortana", "", "#A8C7FA", nueva_linea=False)
+                
+                parametros_api = {"model": modelo_activo, "messages": mensajes_ds, "stream": True}
+                response = cliente_deepseek.chat.completions.create(**parametros_api)
+                
+                for chunk in response:
+                    delta = chunk.choices[0].delta
+                    if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                        print(delta.reasoning_content, end='', flush=True)
+                    if getattr(delta, 'content', None):
+                        texto_chunk = delta.content
+                        print(texto_chunk, end='', flush=True)
+                        respuesta_ia += texto_chunk
+                        if ui_callback: ui_callback("", texto_chunk, "#E8EAED", nueva_linea=False)
+
+            print("\n---")
+            if ui_callback: ui_callback("", "", "#E8EAED", nueva_linea=True)
             
-            mensajes_ds.append({"role": "user", "content": texto_usuario})
+        except Exception as e:
+            print(f"\n❌ Error Crítico: {e}")
 
-            if ui_callback: ui_callback("🤖 Cortana", "", "#A8C7FA", nueva_linea=False)
-            
-            parametros_api = {"model": modelo_activo, "messages": mensajes_ds, "stream": True}
-            response = cliente_deepseek.chat.completions.create(**parametros_api)
-            
-            for chunk in response:
-                delta = chunk.choices[0].delta
-                if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
-                    print(delta.reasoning_content, end='', flush=True)
-                if getattr(delta, 'content', None):
-                    texto_chunk = delta.content
-                    print(texto_chunk, end='', flush=True)
-                    respuesta_ia += texto_chunk
-                    if ui_callback: ui_callback("", texto_chunk, "#E8EAED", nueva_linea=False)
+    # =================================================================
+    # INTERCEPTOR DE ACCIONES (Llama al controlador limpio)
+    # =================================================================
+    from modulos.controlador_acciones import procesar_acciones_ia
+    comando_busqueda = procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz)
+    
+    if comando_busqueda == "INTERRUPTED":
+        return # Semáforo (Git, etc) detuvo el flujo aquí
 
-        print("\n---")
-        if ui_callback: ui_callback("", "", "#E8EAED", nueva_linea=True)
-        
-        # =================================================================
-        # INTERCEPTOR DE ACCIONES (CONTROLADOR SEPARADO)
-        # =================================================================
-        from modulos.controlador_acciones import procesar_acciones_ia
-        comando_busqueda = procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz)
-        
-        if comando_busqueda == "INTERRUPTED":
-            return # Detenemos el flujo aquí (Ej. Se activó semáforo de Git)
+    if comando_busqueda and getattr(config.estado, 'modo_actual', 'general') == "gemini":
+        if ui_callback: ui_callback("⚙️ Sistema", f"🌍 Buscando en internet: {comando_busqueda}", "#80868B")
+        datos_encontrados = buscar_en_internet(comando_busqueda)
+        if "No se encontraron" not in datos_encontrados and modelo_gemini:
+            mensajes_secundarios = list(CONTEXTO_CHAT) + [{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [respuesta_ia]}, {'role': 'user', 'parts': [f"Resultados web:\n{datos_encontrados}\n\nRespondé usando esto."]}]
+            segunda_respuesta = modelo_gemini.generate_content(mensajes_secundarios, stream=True)
+            respuesta_final = ""
+            for chunk in segunda_respuesta:
+                if getattr(chunk, 'text', None):
+                    respuesta_final += chunk.text
+                    if ui_callback: ui_callback("", chunk.text, "#E8EAED", nueva_linea=False)
+            if ui_callback: ui_callback("", "", "#E8EAED", nueva_linea=True)
+            if modo_voz: hablar_no_bloqueante(respuesta_final)
+            CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [respuesta_final]}])
+            return
 
-        if comando_busqueda and modelo_activo == "gemini":
-            if ui_callback: ui_callback("⚙️ Sistema", f"🌍 Buscando en internet: {comando_busqueda}", "#80868B")
-            datos_encontrados = buscar_en_internet(comando_busqueda)
-            if "No se encontraron" not in datos_encontrados:
-                mensajes_secundarios = list(CONTEXTO_CHAT) + [{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [respuesta_ia]}, {'role': 'user', 'parts': [f"Resultados web:\n{datos_encontrados}\n\nRespondé usando esto."]}]
-                segunda_respuesta = modelo_gemini.generate_content(mensajes_secundarios, stream=True)
-                respuesta_final = ""
-                for chunk in segunda_respuesta:
-                    if chunk.text:
-                        respuesta_final += chunk.text
-                        if ui_callback: ui_callback("", chunk.text, "#E8EAED", nueva_linea=False)
-                if ui_callback: ui_callback("", "", "#E8EAED", nueva_linea=True)
-                if modo_voz: hablar_no_bloqueante(respuesta_final)
-                CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [respuesta_final]}])
-                return
-
-        if modo_voz: hablar_no_bloqueante(respuesta_ia)
-        
+    if modo_voz and respuesta_ia: hablar_no_bloqueante(respuesta_ia)
+    
+    if respuesta_ia:
         CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [respuesta_ia]}])
-        if len(CONTEXTO_CHAT) > 100: CONTEXTO_CHAT = CONTEXTO_CHAT[-100:]
-            
-    except Exception as e:
-        print(f"\n❌ Error Crítico: {e}")
+    if len(CONTEXTO_CHAT) > 100: config.estado.contexto_chat = CONTEXTO_CHAT[-100:]
 
 # =====================================================================
 # PROCESAMIENTO DE ARCHIVOS ADJUNTOS
 # =====================================================================
 def procesar_archivo_adjunto(rutas_archivos, ui_callback=None):
-    global ARCHIVO_PENDIENTE_INYECCION, DOCUMENTO_VOLATIL
+    import config
     if isinstance(rutas_archivos, str): rutas_archivos = [rutas_archivos]
     if ui_callback: ui_callback("⚙️ Sistema", f"📄 Leyendo {len(rutas_archivos)} archivo(s)...", "#80868B")
     
@@ -331,8 +339,8 @@ def procesar_archivo_adjunto(rutas_archivos, ui_callback=None):
 
     if not archivos_procesados: return
     
-    ARCHIVO_PENDIENTE_INYECCION = archivos_procesados
-    DOCUMENTO_VOLATIL = contenido_volatil_acumulado
+    config.estado.archivo_pendiente_inyeccion = archivos_procesados
+    config.estado.documento_volatil = contenido_volatil_acumulado
     nombres_str = ", ".join([f"'{a['nombre']}'" for a in archivos_procesados])
     
     try:
@@ -341,4 +349,4 @@ def procesar_archivo_adjunto(rutas_archivos, ui_callback=None):
     
     msg = f"Cargué {len(archivos_procesados)} archivo(s): {nombres_str}.\n\n*{resumen}*\n\n¿Querés que los guarde en la bóveda permanente, o solo charlamos de esto ahora?"
     if ui_callback: ui_callback("🤖 Cortana", msg, "#FFA500")
-    CONTEXTO_CHAT.append({'role': 'model', 'parts': [msg]})
+    config.estado.contexto_chat.append({'role': 'model', 'parts': [msg]})

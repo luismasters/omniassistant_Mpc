@@ -12,10 +12,11 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
     Controlador centralizado para parsear y ejecutar acciones solicitadas por la IA.
     Retorna un comando de búsqueda si lo detecta, o "INTERRUPTED" si la acción bloquea el flujo.
     """
-    WORKSPACE_ACTUAL = motor_ia.WORKSPACE_ACTUAL
-    CONTEXTO_CHAT = motor_ia.CONTEXTO_CHAT
-    ARCHIVOS_EN_MEMORIA = motor_ia.ARCHIVOS_EN_MEMORIA
-    MODO_ACTUAL = motor_ia.MODO_ACTUAL
+    import config
+    WORKSPACE_ACTUAL = config.estado.workspace_actual
+    CONTEXTO_CHAT = config.estado.contexto_chat
+    ARCHIVOS_EN_MEMORIA = config.estado.archivos_en_memoria
+    MODO_ACTUAL = config.estado.modo_actual
     
     reportes_acciones = []
     comando_busqueda_detectado = None
@@ -89,6 +90,8 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
 
             for ruta_edit, buscar_edit, reemplazar_edit in operaciones_reemplazo:
                 ruta_edit = ruta_edit.replace('`','').replace('*','').replace('<', '').replace('>', '').strip()
+                
+                # Limpieza de Markdown intruso
                 buscar_edit = re.sub(r'^```\w*\n?|\n?```$', '', buscar_edit.strip()).strip('\n')
                 reemplazar_edit = re.sub(r'^```\w*\n?|\n?```$', '', reemplazar_edit.strip()).strip('\n')
                 
@@ -96,47 +99,67 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                 contenido_actual = leer_contenido_archivo(ruta_real_edit)
                 
                 if not contenido_actual.startswith("ERROR"):
-                    if buscar_edit in contenido_actual:
-                        nuevo_contenido = contenido_actual.replace(buscar_edit, reemplazar_edit, 1)
+                    # Normalización CRÍTICA para evitar fallos invisibles por \r\n vs \n
+                    contenido_norm = contenido_actual.replace('\r\n', '\n')
+                    buscar_norm = buscar_edit.replace('\r\n', '\n')
+                    
+                    # Intento 1: Coincidencia exacta estricta
+                    count_exacto = contenido_norm.count(buscar_norm)
+                    if count_exacto == 1:
+                        nuevo_contenido = contenido_norm.replace(buscar_norm, reemplazar_edit, 1)
+                        escribir_archivo(ruta_real_edit, nuevo_contenido)
+                        
+                        # Actualizar la memoria a corto plazo para que la IA no trabaje a ciegas
+                        for msg in CONTEXTO_CHAT:
+                            if isinstance(msg.get('parts', [''])[0], str) and f"[CONTENIDO DE '{ruta_real_edit}']:" in msg['parts'][0]:
+                                msg['parts'][0] = f"[CONTENIDO DE '{ruta_real_edit}']:\n{nuevo_contenido}"
+                                
+                        exito_msg = f"[RESULTADO EDICIÓN] Modificación exacta exitosa en {ruta_edit}"
+                        CONTEXTO_CHAT.append({'role': 'user', 'parts': [exito_msg]})
+                        if ui_callback: ui_callback("⚙️ Sistema", f"✅ Bloque actualizado con precisión en {ruta_edit}", "#86efac")
+                        continue
+                    
+                    # Semáforo de Ambigüedad
+                    elif count_exacto > 1:
+                        msg_fallo = f"❌ Ambigüedad: El bloque aparece {count_exacto} veces. Dame más líneas de contexto (por ejemplo, la función padre) para saber cuál reemplazar."
+                        CONTEXTO_CHAT.append({'role': 'user', 'parts': [msg_fallo]})
+                        if ui_callback: ui_callback("⚙️ Sistema", f"❌ Ambigüedad en {ruta_edit}", "#ff4500")
+                        continue
+
+                    # Intento 2: Búsqueda flexible segura (solo ignora indentación extra)
+                    lineas_buscar = buscar_norm.split('\n')
+                    patron_regex = ""
+                    for linea in lineas_buscar:
+                        if linea.strip():
+                            # Busca la línea permitiendo que haya espacios/tabs variables al inicio y al final
+                            patron_regex += r'[ \t]*' + re.escape(linea.strip()) + r'[ \t]*\n'
+                        else:
+                            patron_regex += r'\s*\n'
+                    patron_regex = patron_regex.rstrip('\n')
+                    
+                    coincidencias = list(re.finditer(patron_regex, contenido_norm))
+                    
+                    if len(coincidencias) == 1:
+                        match = coincidencias[0]
+                        nuevo_contenido = contenido_norm[:match.start()] + reemplazar_edit + contenido_norm[match.end():]
                         escribir_archivo(ruta_real_edit, nuevo_contenido)
                         
                         for msg in CONTEXTO_CHAT:
                             if isinstance(msg.get('parts', [''])[0], str) and f"[CONTENIDO DE '{ruta_real_edit}']:" in msg['parts'][0]:
                                 msg['parts'][0] = f"[CONTENIDO DE '{ruta_real_edit}']:\n{nuevo_contenido}"
                                 
-                        CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Modificación exitosa y exacta en {ruta_edit}"]})
-                        if ui_callback: ui_callback("⚙️ Sistema", f"✅ Bloque actualizado con precisión en {ruta_edit}", "#86efac")
-                    
+                        exito_msg = f"[RESULTADO EDICIÓN] Modificación flexible (Regex) exitosa en {ruta_edit}"
+                        CONTEXTO_CHAT.append({'role': 'user', 'parts': [exito_msg]})
+                        if ui_callback: ui_callback("⚙️ Sistema", f"✅ Bloque ajustado (Flexible) en {ruta_edit}", "#86efac")
+                        
+                    elif len(coincidencias) > 1:
+                        msg_fallo = f"❌ Ambigüedad en búsqueda flexible. Demasiados resultados similares en {ruta_edit}. Proporciona un bloque más grande."
+                        CONTEXTO_CHAT.append({'role': 'user', 'parts': [msg_fallo]})
+                        if ui_callback: ui_callback("⚙️ Sistema", f"❌ Ambigüedad flexible en {ruta_edit}", "#ff4500")
                     else:
-                        source_lines = contenido_actual.splitlines()
-                        search_lines = buscar_edit.splitlines()
-                        mejor_ratio = 0; mejor_idx = -1; len_encontrado = 0; bloque_encontrado = ""
-                        
-                        if search_lines and source_lines:
-                            window_size = len(search_lines)
-                            for w_size in range(max(1, window_size - 2), min(len(source_lines), window_size + 3)):
-                                for i in range(len(source_lines) - w_size + 1):
-                                    window = '\n'.join(source_lines[i:i+w_size])
-                                    ratio = difflib.SequenceMatcher(None, buscar_edit, window).ratio()
-                                    if ratio > mejor_ratio:
-                                        mejor_ratio = ratio; mejor_idx = i; len_encontrado = w_size; bloque_encontrado = window
-                        
-                        if mejor_ratio >= 0.80: 
-                            before = '\n'.join(source_lines[:mejor_idx])
-                            after = '\n'.join(source_lines[mejor_idx+len_encontrado:])
-                            nuevo_contenido = (before + '\n' if before else '') + reemplazar_edit + ('\n' + after if after else '')
-                            escribir_archivo(ruta_real_edit, nuevo_contenido)
-                            
-                            for msg in CONTEXTO_CHAT:
-                                if isinstance(msg.get('parts', [''])[0], str) and f"[CONTENIDO DE '{ruta_real_edit}']:" in msg['parts'][0]:
-                                    msg['parts'][0] = f"[CONTENIDO DE '{ruta_real_edit}']:\n{nuevo_contenido}"
-                                    
-                            CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Modificación fuzzy exitosa en {ruta_edit} (Similitud: {mejor_ratio:.2f})"]})
-                            if ui_callback: ui_callback("⚙️ Sistema", f"✅ Bloque ajustado ({(mejor_ratio*100):.1f}%) en {ruta_edit}", "#86efac")
-                        else:
-                            msg_fallo = f"No encontré el bloque. ¿Querías decir esto?\n{bloque_encontrado[:100]}..."
-                            CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Fallo. Lo más parecido fue:\n{bloque_encontrado}"]})
-                            if ui_callback: ui_callback("⚙️ Sistema", f"❌ Fallo edición en {ruta_edit}. Similitud {(mejor_ratio*100):.1f}%", "#ff4500")
+                        msg_fallo = f"❌ Fallo crítico: No encontré el bloque en {ruta_edit}. Lee el archivo primero con 'leer_archivo:' y asegúrate de copiar el texto EXACTAMENTE igual."
+                        CONTEXTO_CHAT.append({'role': 'user', 'parts': [msg_fallo]})
+                        if ui_callback: ui_callback("⚙️ Sistema", f"❌ Bloque no encontrado en {ruta_edit}", "#ff4500")
                 else:
                     msg_fallo = f"❌ Error leyendo '{ruta_edit}' para editar: {contenido_actual}"
                     print(msg_fallo)
@@ -224,7 +247,7 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
             if WORKSPACE_ACTUAL:
                 resumen_estado = linea[linea.lower().find("snapshot:") + 9:].replace('<', '').replace('>', '').strip()
                 guardar_snapshot(WORKSPACE_ACTUAL, resumen_estado)
-                motor_ia.SNAPSHOT_ACTUAL = cargar_snapshot(WORKSPACE_ACTUAL)
+                config.estado.snapshot_actual = cargar_snapshot(WORKSPACE_ACTUAL)
                 if ui_callback: ui_callback("⚙️ Sistema", "📸 Snapshot guardado", "#FFA500")
 
         # BUSCAR WEB
@@ -235,12 +258,11 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
         elif linea_limpia.startswith(("github:", "<github>")):
             idx = linea.lower().find("github:") + 7 if "github:" in linea_limpia else linea.lower().find("<github>") + 8
             ruta_sucia = linea[idx:].replace('</github>', '').strip()
-            if "---" in ruta_sucia: ruta_corta = ruta_sucia.split("---")[0].strip()
-            else: ruta_corta = ruta_sucia.strip()
+            ruta_corta = ruta_sucia.split("---")[0].strip() if "---" in ruta_sucia else ruta_sucia.strip()
 
             ruta_real = WORKSPACE_ACTUAL if WORKSPACE_ACTUAL else buscar_archivo_o_carpeta(ruta_corta) 
             if ruta_real:
-                motor_ia.PENDIENTE_DE_GIT = {"accion": "github", "ruta": ruta_real, "url_custom": None}
+                config.estado.pendiente_de_git = {"accion": "github", "ruta": ruta_real, "url_custom": None}
                 msg_alerta = f"⚠️ ALERTA: Vas a subir el proyecto a GitHub:\n'{ruta_real}'\n\n¿Autorizás el Push? (SÍ / NO)."
                 if ui_callback: ui_callback("🤖 Cortana", msg_alerta, "#FF4500")
                 CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg_alerta]}])
@@ -251,7 +273,7 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
             partes = datos_git.split("||", 1) if "||" in datos_git else [datos_git, ""]
             ruta_real = WORKSPACE_ACTUAL if WORKSPACE_ACTUAL else buscar_archivo_o_carpeta(partes[0].strip())
             if ruta_real:
-                motor_ia.PENDIENTE_DE_GIT = {"accion": "github_reset", "ruta": ruta_real, "url_custom": partes[1].strip() if len(partes)>1 else None}
+                config.estado.pendiente_de_git = {"accion": "github_reset", "ruta": ruta_real, "url_custom": partes[1].strip() if len(partes)>1 else None}
                 msg_alerta = f"⚠️ ALERTA CRÍTICA: Vas a DESVINCULAR y subir el repo.\n\n¿Autorizás esta operación crítica? (SÍ / NO)"
                 if ui_callback: ui_callback("🤖 Cortana", msg_alerta, "#FF4500")
                 CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg_alerta]}])
@@ -262,7 +284,7 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
             partes = datos_git.split("||", 1) if "||" in datos_git else ["", ""]
             ruta_real = WORKSPACE_ACTUAL if WORKSPACE_ACTUAL else buscar_archivo_o_carpeta(partes[0].strip())
             if ruta_real and partes[1].strip():
-                motor_ia.PENDIENTE_DE_GIT = {"accion": "git_libre", "ruta": ruta_real, "url_custom": partes[1].strip()}
+                config.estado.pendiente_de_git = {"accion": "git_libre", "ruta": ruta_real, "url_custom": partes[1].strip()}
                 msg_alerta = f"⚠️ ALERTA: Vas a ejecutar un comando libre en Git.\nComando: {partes[1].strip()}\n\n¿Autorizás? (SÍ / NO)"
                 if ui_callback: ui_callback("🤖 Cortana", msg_alerta, "#FF4500")
                 CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg_alerta]}])
