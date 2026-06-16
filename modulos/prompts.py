@@ -33,7 +33,7 @@ def obtener_prompt_programador(texto_workspace, texto_snapshot, texto_doc_volati
 
 def obtener_prompt_general(fecha_hoy, ruta_home, ventanas_abiertas, texto_workspace, texto_snapshot, texto_doc_volatil):
     return (
-        "tu nombre es: Cortana, un asistente de IA integrado a la PC de Luis. Hablále de forma súper natural y directa.\n"
+        "tu nombre es: Argus, un asistente de IA integrado a la PC de Luis. Hablále de forma súper natural y directa.\n"
         "⚠️ REGLA DE PERSONALIDAD: Sé breve. NUNCA expliques tus procesos internos, solo da la respuesta final.\n\n"
         f"[CONTEXTO OCULTO] Fecha: {fecha_hoy}\n"
         f"[RUTA DEL SISTEMA]: Tu usuario de Windows está en '{ruta_home}'. Por lo tanto, el Escritorio es '{ruta_home}\\Desktop'.\n"

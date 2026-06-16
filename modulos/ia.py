@@ -93,7 +93,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             msg = f"Protocolo autorizado. {resultado}"
         else: msg = "Protocolo abortado. Archivos a salvo."
             
-        if ui_callback: ui_callback("🤖 Cortana", msg, "#FF4500" if "abortado" in msg else "#00E5FF")
+        if ui_callback: ui_callback("🤖 Argus", msg, "#FF4500" if "abortado" in msg else "#00E5FF")
         if modo_voz: hablar_no_bloqueante(msg)
         CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg]}])
         return
@@ -124,7 +124,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         else: 
             msg = "Operación en GitHub cancelada de forma segura."
             
-        if ui_callback: ui_callback("🤖 Cortana", msg, "#FF4500" if "cancelada" in msg else "#00E5FF")
+        if ui_callback: ui_callback("🤖 Argus", msg, "#FF4500" if "cancelada" in msg else "#00E5FF")
         if modo_voz: hablar_no_bloqueante("Operación finalizada." if "completada" in msg else "Operación cancelada.")
         CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg]}])
         return
@@ -148,7 +148,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             config.estado.documento_volatil = "" 
         else: msg = "Entendido. Dejé los archivos en mi memoria a corto plazo."
             
-        if ui_callback: ui_callback("🤖 Cortana", msg, "#A8C7FA")
+        if ui_callback: ui_callback("🤖 Argus", msg, "#A8C7FA")
         if modo_voz: hablar_no_bloqueante("Listo, decisión aplicada.")
         CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg]}])
         return 
@@ -178,7 +178,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
     # SI HAY UN COMANDO DIRECTO (Ej: "sube los cambios"), SALTAMOS LA API
     if comando_directo:
         respuesta_ia = comando_directo
-        if ui_callback: ui_callback("🤖 Cortana", f"Entendido, ejecutando acción solicitada...", "#A8C7FA", nueva_linea=True)
+        if ui_callback: ui_callback("🤖 Argus", f"Entendido, ejecutando acción solicitada...", "#A8C7FA", nueva_linea=True)
         if modo_voz: hablar_no_bloqueante("Entendido, ejecutando acción.")
 
     # SI NO HAY COMANDO DIRECTO, DEJAMOS QUE LA IA PIENSE NORMALMENTE
@@ -203,7 +203,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 contexto_sistema = obtener_prompt_general(fecha_hoy, ruta_home, ventanas_abiertas, texto_workspace, texto_snapshot, texto_doc_volatil)
                 modelo_activo = "gemini"
 
-            print(f"\n🤖 Cortana dice:\n---")
+            print(f"\n🤖 Argus dice:\n---")
             
             if modelo_activo == "gemini":
                 modelo_gemini = genai.GenerativeModel("gemini-flash-lite-latest", system_instruction=contexto_sistema, tools=lista_herramientas_mcp)
@@ -222,7 +222,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 mensajes_para_gemini.append({'role': 'user', 'parts': partes_usuario})
                 response = modelo_gemini.generate_content(mensajes_para_gemini, stream=True, generation_config=genai.GenerationConfig(temperature=0.1))
                 
-                if ui_callback: ui_callback("🤖 Cortana", "", "#A8C7FA", nueva_linea=False)
+                if ui_callback: ui_callback("🤖 Argus", "", "#A8C7FA", nueva_linea=False)
                 
                 for chunk in response:
                     try:
@@ -265,7 +265,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                     mensajes_ds.append({"role": rol_ds, "content": texto_historico})
                 
                 mensajes_ds.append({"role": "user", "content": texto_usuario})
-                if ui_callback: ui_callback("🤖 Cortana", "", "#A8C7FA", nueva_linea=False)
+                if ui_callback: ui_callback("🤖 Argus", "", "#A8C7FA", nueva_linea=False)
                 
                 parametros_api = {"model": modelo_activo, "messages": mensajes_ds, "stream": True}
                 response = cliente_deepseek.chat.completions.create(**parametros_api)
@@ -348,5 +348,5 @@ def procesar_archivo_adjunto(rutas_archivos, ui_callback=None):
     except: resumen = "Documentos cargados."
     
     msg = f"Cargué {len(archivos_procesados)} archivo(s): {nombres_str}.\n\n*{resumen}*\n\n¿Querés que los guarde en la bóveda permanente, o solo charlamos de esto ahora?"
-    if ui_callback: ui_callback("🤖 Cortana", msg, "#FFA500")
+    if ui_callback: ui_callback("🤖 Argus", msg, "#FFA500")
     config.estado.contexto_chat.append({'role': 'model', 'parts': [msg]})

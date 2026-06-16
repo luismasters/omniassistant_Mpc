@@ -284,7 +284,7 @@ class AIBubble(ctk.CTkFrame):
         modo_actual = getattr(motor_ia, 'MODO_ACTUAL', 'general')
         nombre_modelo = nombres_modelos.get(modo_actual, "IA")
         
-        ctk.CTkLabel(hdr, text=f"Cortana ({nombre_modelo})", font=(_F, TAMANO_BASE - 1, "bold"), text_color=TEXT_DIM
+        ctk.CTkLabel(hdr, text=f"Argus ({nombre_modelo})", font=(_F, TAMANO_BASE - 1, "bold"), text_color=TEXT_DIM
                      ).pack(side="left")
 
         # Botón copiar respuesta completa
@@ -610,7 +610,7 @@ class OmniApp(ctk.CTk):
         ancho, alto = 980, 700
         pw, ph = self.winfo_screenwidth(), self.winfo_screenheight()
         self.geometry(f"{ancho}x{alto}+{(pw-ancho)//2}+{(ph-alto)//2}")
-        self.title("Cortana")
+        self.title("Argus")
         self.configure(fg_color=BG_MAIN)
         self.resizable(True, True)
         self.minsize(640, 420)
@@ -642,7 +642,7 @@ class OmniApp(ctk.CTk):
         sb.grid(row=0, column=0, rowspan=2, sticky="nsew")
         sb.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(sb, text="◆ Cortana", font=(_F, TAMANO_BASE, "bold"),
+        ctk.CTkLabel(sb, text="◆ Argus", font=(_F, TAMANO_BASE, "bold"),
                      text_color=ACCENT).grid(row=0, column=0, padx=18, pady=(24,2), sticky="w")
         
         self.lbl_modelo_activo = ctk.CTkLabel(sb, text="🧠 Modelo: Gemini Flash", font=FONT_UI_SM,
@@ -968,7 +968,7 @@ class OmniApp(ctk.CTk):
                 self._welcome_label.destroy()
 
             # Mensaje de sistema
-            if remitente and remitente != "🤖 Cortana" and texto.strip():
+            if remitente and remitente != "🤖 Argus" and texto.strip():
                 self._agregar_sistema(texto)
                 self._scroll_abajo()
                 return
