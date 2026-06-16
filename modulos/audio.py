@@ -5,14 +5,25 @@ import keyboard
 import numpy as np
 import sounddevice as sd
 import scipy.io.wavfile as wav
-import pyttsx3
+import asyncio
+import edge_tts
+import tempfile
+
+# Ocultar el mensaje de bienvenida de pygame en la consola
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
+import pygame
 
 # Importamos la configuración limpia y desacoplada
 from config import WHISPER_MODEL_SIZE, WHISPER_DEVICE, WHISPER_COMPUTE_TYPE
 from config import TECLA_HABLAR, FS_AUDIO
 
-engine_voceando = None
 hablando_actualmente = False
+
+# Inicializamos el reproductor de audio de pygame
+try:
+    pygame.mixer.init()
+except Exception as e:
+    print(f"⚠️ Error al inicializar reproductor de audio: {e}")
 
 # =====================================================================
 # FASE 2.2: LAZY LOADING DE WHISPER
@@ -23,7 +34,6 @@ def _cargar_whisper_si_necesario():
     global _modelo_whisper
     if _modelo_whisper is None:
         print(f"\n⚙️ [AUDIO REAL] Cargando Whisper '{WHISPER_MODEL_SIZE}' en {WHISPER_DEVICE.upper()} ({WHISPER_COMPUTE_TYPE})... Esto solo pasa una vez.")
-        # Importamos la librería pesada SOLO cuando se llama a la función
         from faster_whisper import WhisperModel
         _modelo_whisper = WhisperModel(
             WHISPER_MODEL_SIZE, 
@@ -52,7 +62,7 @@ def limpiar_texto_para_voz(texto):
     return texto_final
 
 def hablar_no_bloqueante(texto):
-    global hablando_actualmente, engine_voceando
+    global hablando_actualmente
     
     detener_voz()
     texto_limpio = limpiar_texto_para_voz(texto)
@@ -60,37 +70,58 @@ def hablar_no_bloqueante(texto):
     if not texto_limpio:
         return
 
-    print(f"🔊 Hablando...")
+    print(f"🔊 Hablando (Voz: es-MX-JorgeNeural)...")
     
     def _hilo_voz():
-        global hablando_actualmente, engine_voceando
+        global hablando_actualmente
         try:
-            engine_voceando = pyttsx3.init()
-            engine_voceando.setProperty('rate', 180)
-            voices = engine_voceando.getProperty('voices')
-            for voice in voices:
-                if "spanish" in voice.name.lower() or "microsoft" in voice.id.lower():
-                    engine_voceando.setProperty('voice', voice.id)
-                    break
-            
             hablando_actualmente = True
-            engine_voceando.say(texto_limpio)
-            engine_voceando.runAndWait()
+            archivo_salida = os.path.join(tempfile.gettempdir(), "cortana_voz_temp.mp3")
+            
+            # --- TAREA ASÍNCRONA PARA DESCARGAR LA VOZ ---
+            async def generar_audio():
+                comunicacion = edge_tts.Communicate(texto_limpio, "es-MX-JorgeNeural", rate="+0%")
+                await comunicacion.save(archivo_salida)
+
+            # Creamos un nuevo bucle de eventos asíncrono para este hilo
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(generar_audio())
+            
+            # --- REPRODUCCIÓN DEL AUDIO ---
+            if os.path.exists(archivo_salida):
+                pygame.mixer.music.load(archivo_salida)
+                pygame.mixer.music.play()
+                
+                # Mantener el hilo vivo mientras habla o hasta que lo interrumpamos
+                while pygame.mixer.music.get_busy() and hablando_actualmente:
+                    time.sleep(0.05)
+                    
+                # Limpiar recursos para poder borrar el archivo
+                pygame.mixer.music.stop()
+                pygame.mixer.music.unload()
+                
+                try:
+                    os.remove(archivo_salida)
+                except Exception:
+                    pass
+
         except Exception as e:
-            print(f"⚠️ Error en el hilo de voz: {e}")
+            print(f"⚠️ Error en el hilo de voz (Edge-TTS): {e}")
         finally:
             hablando_actualmente = False
-            engine_voceando = None
 
+    # Ejecutamos todo el proceso de voz en un hilo secundario
     threading.Thread(target=_hilo_voz, daemon=True).start()
 
 def detener_voz():
-    global hablando_actualmente, engine_voceando
-    if hablando_actualmente and engine_voceando:
+    global hablando_actualmente
+    if hablando_actualmente:
         try:
             print("🛑 [INTERRUPCIÓN] Callando a Cortana...")
-            engine_voceando.stop()
-            time.sleep(0.1)
+            if pygame.mixer.get_init():
+                pygame.mixer.music.stop()
+                pygame.mixer.music.unload()
         except Exception:
             pass
         hablando_actualmente = False
@@ -105,13 +136,12 @@ def capturar_voz_micro():
         audio_data.append(indata.copy())
 
     with sd.InputStream(samplerate=FS_AUDIO, channels=1, callback=callback):
-        time.sleep(0.2) # <-- ¡Esta es la pausa que faltaba para darle respiro al mic!
+        time.sleep(0.2) 
         while keyboard.is_pressed(TECLA_HABLAR):
             time.sleep(0.02)
             
     print("--- ✅ PROCESANDO VOZ ---")
     
-    # Verificamos si realmente se grabó algo antes de intentar procesarlo
     if not audio_data:
         print("⚠️ [AUDIO] Grabación demasiado corta o vacía. Ignorando...")
         return ""
@@ -120,8 +150,7 @@ def capturar_voz_micro():
     grabacion = np.concatenate(audio_data, axis=0)
     wav.write(archivo_temporal, FS_AUDIO, grabacion)
     
-    # --- TRANSCRIPCIÓN CON LAZY LOADING ---
-    modelo_activo = _cargar_whisper_si_necesario() # <--- Pide el modelo aquí
+    modelo_activo = _cargar_whisper_si_necesario() 
     segmentos, info = modelo_activo.transcribe(archivo_temporal, beam_size=5, language="es")
     
     texto_completo = ""
@@ -129,9 +158,7 @@ def capturar_voz_micro():
         texto_completo += segmento.text
         
     texto = texto_completo.strip()
-    # ----------------------------------------------
     
-    # Limpiamos la basura temporal
     if os.path.exists(archivo_temporal):
         os.remove(archivo_temporal)
         

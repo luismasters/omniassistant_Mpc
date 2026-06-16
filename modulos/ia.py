@@ -295,7 +295,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
     if comando_busqueda == "INTERRUPTED":
         return # Semáforo (Git, etc) detuvo el flujo aquí
 
-    if comando_busqueda and getattr(config.estado, 'modo_actual', 'general') == "gemini":
+    if comando_busqueda and getattr(config.estado, 'modo_actual', 'general') == "general":
         if ui_callback: ui_callback("⚙️ Sistema", f"🌍 Buscando en internet: {comando_busqueda}", "#80868B")
         datos_encontrados = buscar_en_internet(comando_busqueda)
         if "No se encontraron" not in datos_encontrados and modelo_gemini:
