@@ -12,8 +12,9 @@ import tkinter.font as tkfont
 # Importaciones de tu backend
 from config import TECLA_HABLAR
 from modulos.ia import enviar_a_gemini
-from modulos.audio import capturar_voz_micro, detener_voz
-import modulos.audio as audio_modulo
+#from modulos.audio import capturar_voz_micro, detener_voz
+from modulos.audio_custom import hablar_no_bloqueante, capturar_voz_micro, detener_voz
+import modulos.audio_custom as audio_modulo
 import modulos.ia as motor_ia
 from modulos.memoria import guardar_snapshot
 

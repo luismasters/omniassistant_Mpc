@@ -1,107 +1,122 @@
-# PROJECT_STATE.md
+# PROJECT_STATE.md — Fuente de la Verdad
 
 ## 1. Resumen Ejecutivo
 
-**OmniAssistant (Cortana)** es un asistente de IA multimodal de escritorio con capacidad de voz, visión, control de sistema, edición de archivos, integración con Git, memoria persistente vectorial (ChromaDB), y soporte multi‑modelo (Gemini Flash para modo general, DeepSeek V4 para planificación y programación). Actúa como un copiloto inteligente que entiende el contexto del usuario, ejecuta comandos del sistema, lee/escribe archivos dentro de un sandbox controlado, y mantiene una bóveda de conocimiento a largo plazo. La interfaz gráfica está desarrollada con CustomTkinter, soporta múltiples modos de operación, entrada por voz y adjuntos de archivos.
+**OmniAssistant (Argus)** es un asistente de IA multimodal y multiagente integrado en el escritorio de Windows. Permite al usuario interactuar mediante texto, voz, captura de pantalla y adjuntos de archivos. El sistema cuenta con tres modos de operación (General, Planificador, Programador) que enrutan las consultas a modelos de lenguaje específicos (Gemini Flash, DeepSeek Reasoning y DeepSeek Chat) y ejecutan acciones concretas sobre el sistema operativo, el sistema de archivos, Git, la web, la memoria vectorial (Bóveda) y la automatización de ventanas.
+
+El proyecto está diseñado con una arquitectura modular, utilizando un hilo principal de interfaz gráfica (CustomTkinter) con un sidebar de control, un motor de voz (Whisper + Edge-TTS) y un backend de agentes con capacidad de ejecución de comandos mediante un parser de intenciones.
 
 ## 2. Arquitectura
 
-El sistema se organiza en módulos independientes que se comunican a través de un controlador central (`ia.py`) y una capa de servicios MCP.
+### Módulos y archivos principales
 
-### 2.1. Módulos principales
+| Archivo | Rol | Descripción |
+|---------|-----|-------------|
+| `config.py` | Configuración central | Define rutas seguras, límites de archivos, API keys, estados globales mediante la clase `EstadoGlobal`. |
+| `main_gui.py` | Interfaz de usuario | Ventana principal con CustomTkinter, sidebar de modos, área de chat con burbujas (usuario/IA), renderizado Markdown, input con soporte para arrastre de archivos y micrófono. |
+| `modulos/ia.py` | Motor de IA | Enruta consultas al modelo correspondiente (Gemini o DeepSeek), maneja streaming, MCP tools, interceptor de adjuntos y semáforos de seguridad (Git, borrado). |
+| `modulos/controlador_acciones.py` | Parser de acciones | Interpreta la respuesta de la IA y ejecuta operaciones de archivos (leer, escribir, reemplazar bloques), Git, snapshot, búsqueda web, comandos de sistema. |
+| `modulos/archivos.py` | Gestión de archivos | Funciones seguras de lectura/escritura/eliminación con validación de rutas (sandbox) y límites de tamaño. |
+| `modulos/sistema.py` | Interacción con Windows | Manejo de ventanas (mover, cerrar), búsqueda de programas/archivos, ejecución de comandos, monitoreo de hardware. |
+| `modulos/audio.py` | Voz | Captura con micrófono (Whisper lazy loading), síntesis de voz con Edge-TTS, reproducción con pygame, interrupción por tecla. |
+| `modulos/memoria.py` | Memoria a largo plazo | Base de datos vectorial ChromaDB (bóveda), funciones guardar/buscar, snapshots del proyecto, watchdog de cambios en tiempo real. |
+| `modulos/busqueda.py` | Búsqueda web | Consultas a DuckDuckGo (ddgs) con límite de resultados. |
+| `modulos/git_bot.py` | Operaciones Git | Inicialización, add, commit, pull (rebase), push, comandos libres. Manejo de remotos y conflictos. |
+| `modulos/vision.py` | Captura de pantalla | Toma capturas de monitores específicos o totales usando Pillow. |
+| `modulos/crawler.py` | Análisis de proyecto | Recorre el árbol de directorios y extrae el contenido de archivos de código/texto para crear un estado global. |
+| `modulos/prompts.py` | Prompts de sistema | Genera instrucciones para cada modo (General, Planificador, Programador) incluyendo contexto dinámico. |
+| `modulos/cliente_mcp.py` | Cliente MCP | Conecta con el servidor MCP interno para ejecutar herramientas del sistema (estado PC, exploración, etc.). |
+| `modulos/servidor_sistema_mcp.py` | Servidor MCP | Expone herramientas como `reporte_estado_pc`, `buscar_en_boveda`, `guardar_en_boveda`, `explorar_ruta`, `leer_documento`. |
+| `gestor_boveda.py` | Utilidad de administración | Interfaz de consola para listar/borrar/formatear la bóveda ChromaDB. |
+| `modulos/limpiar.py` | Script de limpieza | Borra todos los registros de la colección principal de memoria. |
 
-| Archivo / Módulo | Propósito |
-|------------------|-----------|
-| `main_gui.py` | Interfaz gráfica con CustomTkinter: sidebar, burbujas de chat (usuario/IA), entrada de texto, soporte adjuntos y voz. |
-| `config.py` | Configuración global: rutas seguras, límites de archivos, API keys, estados del sistema. |
-| `modulos/ia.py` | Orquestador principal. Enruta mensajes a Gemini o DeepSeek según el modo activo, gestiona contexto, ejecuta herramientas MCP y comandas propias. |
-| `modulos/prompts.py` | Genera prompts de sistema adaptados a cada modo (general, planificador, programador). |
-| `modulos/controlador_acciones.py` | Parsea la respuesta de la IA y ejecuta acciones concretas (guardar, reemplazar bloques, git, búsqueda, etc.) con soporte de fuzzy matching. |
-| `modulos/archivos.py` | Funciones seguras de lectura/escritura/eliminación de archivos con validación de rutas y límites. Incluye sandbox inteligente (modo general sin restricciones). |
-| `modulos/sistema.py` | Control de ventanas (abrir/cerrar/mover), búsqueda de archivos, radar inteligente de programas, telemetría (CPU, RAM, GPU). |
-| `modulos/audio.py` | Captura de voz por micrófono (Whisper local con lazy‑loading), síntesis de voz (pyttsx3), detección de interrupción por tecla Espacio. |
-| `modulos/vision.py` | Captura de pantalla usando PIL y screeninfo. |
-| `modulos/busqueda.py` | Búsqueda web mediante DuckDuckGo (ddgs). |
-| `modulos/memoria.py` | Base de datos vectorial ChromaDB para memoria a largo plazo, watchdog de cambios en workspace (limpia caché de IA automáticamente), snapshots JSON. |
-| `modulos/git_bot.py` | Integración con GitHub: init, add, commit, push, manejo de remote existente, comandos libres con lista blanca, validación de token. |
-| `modulos/cliente_mcp.py` | Cliente MCP asíncrono para comunicarse con el servidor MCP interno. |
-| `modulos/servidor_sistema_mcp.py` | Servidor MCP que expone herramientas: reporte de PC, hardware, búsqueda/guardado en bóveda, exploración de directorios, lectura de archivos. |
-| `modulos/crawler.py` | Extrae todo el código de un proyecto (ignorando carpetas no deseadas) para análisis. |
-| `modulos/logger.py` | Configuración de logging (archivo + consola). |
-| `modulos/limpiar.py` | Utilitario para vaciar la bóveda de memoria. |
-| `gestor_boveda.py` | Herramienta CLI para listar, eliminar o resetear la bóveda de ChromaDB. |
-| `plan.md` | Plan de consolidación (fases 1‑4) – describe las correcciones planificadas. |
-| `pruebas/` | Carpeta con tests básicos (aún no implementados completamente). |
+### Flujo de datos típico
 
-### 2.2. Flujo de comunicación
-
-```
-Usuario (GUI/voz) → ia.py → (Gemini/DeepSeek) → respuesta
-                                         ↓
-                              controlador_acciones.py → archivos, sistema, git, memoría, búsqueda web
-                                                             ↓
-                                                     servidor_sistema_mcp.py (herramientas nativas)
-```
+1. Usuario escribe texto o activa voz → `main_gui.py` captura y envía a `ia.py`.
+2. `ia.py` determina el modo actual y llama al modelo de IA correspondiente (Gemini o DeepSeek) con el prompt adecuado (`prompts.py`).
+3. La respuesta streamed se muestra en la GUI y se pasa a `controlador_acciones.py` para detectar comandos de acción.
+4. Las acciones ejecutan operaciones seguras (archivos, sistema, Git, web, memoria, MCP).
+5. Los resultados se retroalimentan al chat y al contexto del asistente.
 
 ## 3. Estado Actual
 
-### 3.1. Funcionalidades operativas
+### Funcionalidades operativas verificadas
 
-- **Chat multimodal** con renderizado de Markdown (negrita, itálica, código, tablas, listas, bloques de código con copiado).
-- **Entrada por voz** (tecla F8) con transcripción Whisper (lazy‑loading del modelo).
-- **Síntesis de voz** (pyttsx3) con detección de interrupción (tecla Espacio).
-- **Adjuntar archivos** desde el botón 📎 → lectura e inyección en contexto con confirmación para guardar en bóveda permanente.
-- **Cambio de modos** (General, Planificador, Programador) con preservación de historial visual y contexto de IA (CONTEXTO_CHAT) – implementación completa de Fase 1.3.
-- **Edición quirúrgica de archivos** mediante `reemplazar_bloque:` con fuzzy matching (difflib, umbral ≥80%) y soporte de formato XML alternativo (`<replace_block>`, `<reemplazar_bloque>`). Se maneja ambigüedad (más de una coincidencia) y se notifica al usuario.
-- **Escaneo completo del proyecto** (`escanear_proyecto:`) que genera PROJECT_STATE.md usando DeepSeek.
-- **Integración con Git** (push, reset, comandos libres seguros) con semáforo de confirmación, manejo de remote existente y validación del token al inicio.
-- **Control del sistema** (abrir/cerrar/mover ventanas, navegar web, explorar directorios) con búsqueda inteligente por radar de programas.
-- **Memoria persistente** (ChromaDB) con herramientas MCP para guardar y recuperar información.
-- **Watchdog** que detecta cambios en el workspace y limpia la caché de la IA automáticamente (Fase 3.2 implementada).
-- **Snapshots** de estado del proyecto (JSON en `.cortana/snapshot.json`).
-- **Búsqueda web** mediante DuckDuckGo.
-- **Logging** centralizado (archivo + consola) – parcialmente migrado desde `print()` (Fase 2.3 incompleta).
-- **Sandbox inteligente**: el modo general permite acceso a cualquier ruta; los modos planificador/programador solo dentro del workspace anclado.
-- **Unificación del servidor MCP**: solo existe en `modulos/servidor_sistema_mcp.py` y el cliente apunta a esa ruta (Fase 1.1 completada).
+| Funcionalidad | Estado | Detalle |
+|---------------|--------|---------|
+| **Chat multimodal** | ✅ | Entrada de texto + voz (Whisper) + adjuntos de archivos. Respuestas streamed en tiempo real. |
+| **Tres modos de IA** | ✅ | Modo General (Gemini Flash), Planificador (DeepSeek Reasoning), Programador (DeepSeek Chat). Cambio desde sidebar con preservación de historial. |
+| **Renderizado Markdown** | ✅ | Bloques de código con resaltado sintáctico, tablas, listas, negrita/cursiva/inline code. Botón copiar en cada bloque. |
+| **Operaciones de archivos** | ✅ | Lectura, escritura, creación de carpetas, eliminación (con confirmación), reemplazo de bloques (exacto y flexible), edición de una línea. Sandbox y límites de tamaño. |
+| **Control de sistema Windows** | ✅ | Abrir/cerrar programas, mover ventanas entre monitores, búsqueda inteligente de programas (radar), comandos de apagado/cancelación. |
+| **Git integrado** | ✅ | Inicialización, commit automático, pull (rebase), push, manejo de remotos, confirmación de usuario mediante semáforo. |
+| **Búsqueda web** | ✅ | DuckDuckGo con límite de resultados. |
+| **Memoria a largo plazo (Bóveda)** | ✅ | ChromaDB persistente. Guarda y recupera información por etiquetas. Integración con MCP. |
+| **Snapshots de proyecto** | ✅ | Guarda estado del workspace en `.cortana/snapshot.json` y lo carga automáticamente. |
+| **Watchdog de archivos** | ✅ | Detecta cambios manuales en el workspace y limpia la caché de la IA para mantener consistencia. |
+| **Captura de pantalla** | ✅ | Toma capturas de pantalla (monitor específico o todos) y las envía a Gemini como imagen. |
+| **Síntesis de voz** | ✅ | Edge-TTS con reproducción en hilo separado, interrupción por tecla. |
+| **MCP (Model Context Protocol)** | ✅ | Servidor y cliente internos para herramientas del sistema (hardware, exploración, bóveda). |
+| **Crawler de proyecto** | ✅ | Extrae todo el código de un proyecto y lo envía a DeepSeek para generar PROJECT_STATE.md. |
+| **Gestor de bóveda** | ✅ | Script independiente para listar, borrar o formatear la bóveda desde terminal. |
 
-### 3.2. Limitaciones conocidas
+### Limitaciones conocidas
 
-- El servidor MCP se inicia en cada petición (no persistente) – Fase 3.1 pendiente.
-- Whisper en modelo `medium` ocupa ~2 GB de RAM; el lazy‑loading evita que se cargue al inicio, pero no hay feedback visual en la UI durante la primera carga (solo mensaje en consola).
-- El modo Planificador y Programador dependen de un workspace seleccionado; si no se ancla, fallan con mensaje de advertencia.
-- **Migración de `print()` a logging incompleta**: `ia.py`, `audio.py`, `memoria.py` y `sistema.py` aún contienen muchos `print()` directos.
-- **No hay internacionalización**: todos los strings están en español duro (Fase 4.1 pendiente).
-- **Pruebas unitarias no implementadas**: carpeta `pruebas/` contiene esbozos vacíos (Fase 4.2 pendiente).
-- **Centralización del estado global**: no existe una clase `EstadoGlobal`; las variables se asignan directamente en `config.py`, `ia.py` y `main_gui.py` (Fase 2.1 pendiente).
-- El reemplazo de bloques puede fallar si el código contiene caracteres especiales no escapados en el patrón de búsqueda (aunque el fuzzy matching mitiga esto).
-- La edición de archivos grandes (>80k caracteres) trunca el contenido leído para evitar saturar tokens (Fase 1.4 parcialmente implementada).
-- El reemplazo de bloques usa `replace(buscar, reemplazar, 1)` sin límites de línea exactos; la ambigüedad se maneja con advertencia, pero no se usa `re.sub` con límites de línea como se planeó en Fase 1.2.
-- No hay confirmación visual para el radar de cambios (watchdog) cuando el workspace cambia mientras el modo no es planificador/programador.
-- La síntesis de voz usa `pyttsx3`, que tiene dependencia de `winsound` y no es multiplataforma.
-- El botón de "Nueva conversación" no está implementado en la UI; la función `_nueva_conversacion` existe pero no se enlaza a ningún control.
+- **Compatibilidad**: El sistema está fuertemente ligado a Windows (win32gui, nvidia-smi, powershell). No es portable a Linux/macOS sin refactorización.
+- **Dependencias externas**: Requiere `faster-whisper`, `edge-tts`, `gitpython`, `chromadb`, `sentence-transformers`, `psutil`, `screeninfo`, `thefuzz`, `ddgs`, entre otras.
+- **Instalación inicial**: El modelo Whisper se descarga automáticamente al primer uso (puede tardar). La bóveda se crea vacía.
+- **Seguridad**: El sandbox solo se aplica en modo General. En modos Planificador/Programador el workspace es protegido, pero no hay limitación de rutas fuera del proyecto.
+- **Git**: El auto-commit usa un mensaje fijo. No se manejan autenticaciones (se asume que el usuario tiene credenciales configuradas).
 
 ## 4. Deuda Técnica / Próximos Pasos
 
-### 4.1. Prioridad alta (Fase 1 – Correcciones Críticas)
+### Deuda técnica identificada
 
-- [ ] **1.2 (mejora pendiente)**: Sustituir `replace()` por `re.sub` con límites de línea exactos en `controlador_acciones.py` para evitar reemplazos ambiguos. Actualmente se usa advertencia, pero no se bloquea.
-- [ ] **1.4 (completar)**: Implementar flag `ARCHIVO_CARGADO` para no recargar archivos grandes que ya fueron leídos, y usar `difflib` como fallback más robusto (ya hay fuzzy, pero podría mejorarse la notificación al usuario).
+1. **Módulo `ia.py` demasiado monolítico**:
+   - Contiene lógica de enrutamiento, streaming, MCP, interceptor de adjuntos, semáforos de seguridad y procesamiento posterior. Fragmentar en submódulos mejoraría la mantenibilidad.
 
-### 4.2. Prioridad media (Fase 2 – Estabilización)
+2. **Manejo de errores inconsistente**:
+   - Algunos `try/except` son genéricos, otros no registran errores. En `modulos/audio.py` no se captura la falla de carga de Whisper más allá del `Global` de `_cargar_whisper_si_necesario()`.
 
-- [ ] **2.1**: Centralizar estado global en una clase `EstadoGlobal` en `config.py` con setters que actualicen la UI y los módulos.
-- [ ] **2.2 (mejora)**: Añadir feedback visual en la UI durante la carga de Whisper ("Cargando modelo de voz...").
-- [ ] **2.3**: Reemplazar todos los `print()` restantes por `logger.info/warning/error` (priorizar `ia.py`, `audio.py`, `memoria.py`, `sistema.py`).
-- [ ] **2.4 (verificación adicional)**: Probar `github:` con proyectos reales, con y sin token válido, y con conflictos simulados para asegurar que el manejo de `stderr` y la lista blanca funcionan correctamente.
+3. **Doble interpretación de acciones**:
+   - `controlador_acciones.py` parsea la respuesta de la IA línea por línea, pero también `ia.py` detecta comandos directos (como "sube los cambios") antes de enviar a la IA. Podría unificarse en un solo pipeline.
 
-### 4.3. Prioridad baja (Fase 3 y 4 – Optimización y Calidad de Vida)
+4. **Caché de contexto en memoria**:
+   - `contexto_chat` crece sin límite (aunque se trunca a 100 mensajes). No se persiste el historial entre sesiones. Podría migrarse a la bóveda con metadatos de sesión.
 
-- [ ] **3.1**: Convertir `GestorMCP` en un singleton reconectable que mantenga la sesión abierta.
-- [ ] **3.2 (mejora)**: Notificar en la UI cuando el watchdog detecte cambios en el workspace (actualmente solo limpia caché en segundo plano).
-- [ ] **3.3**: Separar completamente la lógica de acciones de `ia.py` (ya está en `controlador_acciones.py`, pero aún hay dependencias).
-- [ ] **4.1**: Centralizar todos los strings en `modulos/lang/es.py` y referenciarlos en los módulos.
-- [ ] **4.2**: Escribir pruebas unitarias con pytest para `archivos.py`, `sistema.py`, `git_bot.py`.
-- [ ] **4.3**: Eliminar dependencia de `winsound` y `pyttsx3` (considerar alternativas multiplataforma como `sounddevice` para síntesis).
-- [ ] **4.4**: Mejorar la UI: tema claro, soporte de fuentes dinámicas, búsqueda dentro del historial, implementar botón "Nueva conversación".
+5. **Dependencia de `keyboard`**:
+   - La detección de teclas (F8, espacio) en `main_gui.py` y `audio.py` utiliza la librería `keyboard`, que requiere privilegios de administrador en algunas configuraciones. Podría reemplazarse por hooks de Windows nativos.
 
-> **Nota:** El plan detallado se encuentra en `plan.md` con tiempos estimados y orden de ejecución recomendado. Se sugiere comenzar por las tareas pendientes de la Fase 1 para garantizar estabilidad antes de optimizar.
+6. **Servidor MCP interno frágil**:
+   - El servidor se ejecuta en un subproceso y redirige stdout/stderr a `os.devnull` para silenciar logs. Si ocurre un error, la comunicación falla silenciosamente.
+
+7. **Falta de tests automatizados**:
+   - No hay pruebas unitarias ni de integración. El archivo `pruebas/test_nuevo_parser.py` está vacío.
+
+### Próximos pasos recomendados
+
+1. **Refactorizar `ia.py`**:
+   - Separar en `enrutador.py`, `stream_handler.py`, `interceptor.py`, `semáforos.py`.
+   - Mover el manejo de confirmaciones (Git, borrado, adjuntos) a un controlador dedicado.
+
+2. **Implementar persistencia de conversaciones**:
+   - Guardar historial de chat en la bóveda con etiqueta de sesión y fecha. Opción de restaurar sesiones anteriores.
+
+3. **Mejorar el sandbox**:
+   - Ampliar la protección a los modos Planificador/Programador, permitiendo solo operaciones dentro del workspace explícitamente anclado.
+
+4. **Optimizar el parser de acciones**:
+   - Unificar detección de comandos (actualmente hay tanto patrón de línea como etiquetas `<...>`) en un solo sistema basado en JSON o instrucciones estructuradas.
+
+5. **Añadir tests**:
+   - Escribir tests unitarios para `archivos.py`, `git_bot.py`, `controlador_acciones.py` (usando fixtures de archivos temporales y repositorios).
+   - Tests de integración para el flujo completo de voz->texto->comando.
+
+6. **Mejorar la experiencia de instalación**:
+   - Crear un script `setup.bat` o `install.py` que instale dependencias y descargue el modelo Whisper automáticamente.
+
+7. **Documentar API de plugins**:
+   - Permitir que terceros agreguen nuevas herramientas MCP sin modificar el core.
+
+8. **Revisar seguridad de ejecución remota**:
+   - Validar que los comandos de sistema (abrir/cerrar/mover) no puedan ser inyectados por el modelo de IA (ya hay un sandbox de rutas, pero no hay sanitización del comando en sí).

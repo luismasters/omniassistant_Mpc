@@ -13,7 +13,7 @@ from config import GEMINI_API_KEY, DEEPSEEK_API_KEY
 from modulos.archivos import eliminar_elemento, leer_contenido_archivo
 from modulos.sistema import obtener_ventanas_activas
 from modulos.busqueda import buscar_en_internet
-from modulos.audio import hablar_no_bloqueante
+from modulos.audio_custom import hablar_no_bloqueante
 from modulos.vision import capturar_pantalla
 from modulos.git_bot import sincronizar_proyecto_git, ejecutar_comando_git_libre
 from modulos.memoria import guardar_recuerdo
