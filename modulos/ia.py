@@ -13,7 +13,7 @@ from config import GEMINI_API_KEY, DEEPSEEK_API_KEY
 from modulos.archivos import eliminar_elemento, leer_contenido_archivo
 from modulos.sistema import obtener_ventanas_activas
 from modulos.busqueda import buscar_en_internet
-from modulos.audio_custom import hablar_no_bloqueante
+from modulos.audio_custom import hablar_no_bloqueante, encolar_texto_para_hablar, detener_voz
 from modulos.vision import capturar_pantalla
 from modulos.git_bot import sincronizar_proyecto_git, ejecutar_comando_git_libre
 from modulos.memoria import guardar_recuerdo
@@ -42,6 +42,38 @@ lista_herramientas_mcp = [
     mcp_estado_pc, mcp_hardware_pc, mcp_buscar_en_boveda, 
     mcp_guardar_en_boveda, mcp_explorar_ruta, mcp_leer_documento
 ]
+
+
+# =====================================================================
+# HELPER: STREAMING DE VOZ PARALELO AL STREAMING DE IA
+# =====================================================================
+# Caracteres que delimitan el fin de una oración "speakeable"
+_PATRON_CORTE_VOZ = re.compile(r'(?<=[.!?])\s+')
+_MIN_CHARS_CHUNK_VOZ = 80  # No hablar hasta tener al menos este largo
+
+def _procesar_buffer_voz(buffer: str, forzar: bool = False) -> str:
+    """
+    Analiza el buffer acumulado de texto de la IA.
+    Si hay una oración completa (termina en . ! ?), la encola para hablar.
+    Devuelve el buffer restante (lo que todavía no se habló).
+    Si forzar=True, habla lo que quede aunque esté incompleto (fin de respuesta).
+    """
+    while True:
+        match = _PATRON_CORTE_VOZ.search(buffer)
+        if match and len(buffer[:match.end()].strip()) >= _MIN_CHARS_CHUNK_VOZ:
+            fragmento = buffer[:match.end()].strip()
+            encolar_texto_para_hablar(fragmento)
+            buffer = buffer[match.end():]
+        else:
+            break
+
+    # Al final de la respuesta, hablamos lo que quedó
+    if forzar and buffer.strip():
+        encolar_texto_para_hablar(buffer.strip())
+        buffer = ""
+
+    return buffer
+
 
 def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
     """Enrutador Universal y traductor de acciones."""
@@ -175,13 +207,11 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
     resultado_mcp = ""
     modelo_gemini = None
 
-    # SI HAY UN COMANDO DIRECTO (Ej: "sube los cambios"), SALTAMOS LA API
     if comando_directo:
         respuesta_ia = comando_directo
         if ui_callback: ui_callback("🤖 Argus", f"Entendido, ejecutando acción solicitada...", "#A8C7FA", nueva_linea=True)
         if modo_voz: hablar_no_bloqueante("Entendido, ejecutando acción.")
 
-    # SI NO HAY COMANDO DIRECTO, DEJAMOS QUE LA IA PIENSE NORMALMENTE
     else:
         print(f"\n🧠 PENSANDO ({MODO_ACTUAL.upper()})...")
         try:
@@ -223,7 +253,10 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 response = modelo_gemini.generate_content(mensajes_para_gemini, stream=True, generation_config=genai.GenerationConfig(temperature=0.1))
                 
                 if ui_callback: ui_callback("🤖 Argus", "", "#A8C7FA", nueva_linea=False)
-                
+
+                # ✅ MEJORA: buffer de voz para hablar en paralelo al streaming
+                buffer_voz = ""
+
                 for chunk in response:
                     try:
                         for part in chunk.parts:
@@ -242,12 +275,24 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                 print(part.text, end='', flush=True) 
                                 respuesta_ia += part.text
                                 if ui_callback: ui_callback("", part.text, "#E8EAED", nueva_linea=False)
+                                
+                                # ✅ NUEVO: acumular en buffer y hablar apenas haya oraciones completas
+                                if modo_voz and not usaste_mcp:
+                                    buffer_voz += part.text
+                                    buffer_voz = _procesar_buffer_voz(buffer_voz, forzar=False)
+
                     except Exception: pass
+
+                # ✅ Hablar el resto del buffer al terminar el stream
+                if modo_voz and buffer_voz.strip() and not usaste_mcp:
+                    _procesar_buffer_voz(buffer_voz, forzar=True)
 
                 if usaste_mcp and modelo_gemini:
                     mensajes_para_gemini.append({'role': 'model', 'parts': ['Analizando los datos del sistema...']})
                     mensajes_para_gemini.append({'role': 'user', 'parts': [f"[DATO DEL SISTEMA: {resultado_mcp}]. Responde naturalmente."]})
                     response_2 = modelo_gemini.generate_content(mensajes_para_gemini, stream=True)
+                    
+                    buffer_voz_2 = ""
                     for chunk_2 in response_2:
                         try:
                             for part in chunk_2.parts:
@@ -255,9 +300,15 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                     print(part.text, end='', flush=True)
                                     respuesta_ia += part.text
                                     if ui_callback: ui_callback("", part.text, "#E8EAED", nueva_linea=False)
+                                    if modo_voz:
+                                        buffer_voz_2 += part.text
+                                        buffer_voz_2 = _procesar_buffer_voz(buffer_voz_2, forzar=False)
                         except Exception: pass
+                    if modo_voz and buffer_voz_2.strip():
+                        _procesar_buffer_voz(buffer_voz_2, forzar=True)
 
             else:
+                # DeepSeek (planificador / programador)
                 mensajes_ds = [{"role": "system", "content": contexto_sistema}]
                 for msg in CONTEXTO_CHAT:
                     rol_ds = "assistant" if msg['role'] == "model" else "user"
@@ -270,6 +321,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 parametros_api = {"model": modelo_activo, "messages": mensajes_ds, "stream": True}
                 response = cliente_deepseek.chat.completions.create(**parametros_api)
                 
+                buffer_voz_ds = ""
                 for chunk in response:
                     delta = chunk.choices[0].delta
                     if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
@@ -279,6 +331,13 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                         print(texto_chunk, end='', flush=True)
                         respuesta_ia += texto_chunk
                         if ui_callback: ui_callback("", texto_chunk, "#E8EAED", nueva_linea=False)
+                        # ✅ NUEVO: streaming de voz también para DeepSeek
+                        if modo_voz:
+                            buffer_voz_ds += texto_chunk
+                            buffer_voz_ds = _procesar_buffer_voz(buffer_voz_ds, forzar=False)
+
+                if modo_voz and buffer_voz_ds.strip():
+                    _procesar_buffer_voz(buffer_voz_ds, forzar=True)
 
             print("\n---")
             if ui_callback: ui_callback("", "", "#E8EAED", nueva_linea=True)
@@ -287,13 +346,13 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             print(f"\n❌ Error Crítico: {e}")
 
     # =================================================================
-    # INTERCEPTOR DE ACCIONES (Llama al controlador limpio)
+    # INTERCEPTOR DE ACCIONES
     # =================================================================
     from modulos.controlador_acciones import procesar_acciones_ia
     comando_busqueda = procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz)
     
     if comando_busqueda == "INTERRUPTED":
-        return # Semáforo (Git, etc) detuvo el flujo aquí
+        return
 
     if comando_busqueda and getattr(config.estado, 'modo_actual', 'general') == "general":
         if ui_callback: ui_callback("⚙️ Sistema", f"🌍 Buscando en internet: {comando_busqueda}", "#80868B")
@@ -302,20 +361,33 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             mensajes_secundarios = list(CONTEXTO_CHAT) + [{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [respuesta_ia]}, {'role': 'user', 'parts': [f"Resultados web:\n{datos_encontrados}\n\nRespondé usando esto."]}]
             segunda_respuesta = modelo_gemini.generate_content(mensajes_secundarios, stream=True)
             respuesta_final = ""
+            buffer_voz_web = ""
             for chunk in segunda_respuesta:
                 if getattr(chunk, 'text', None):
                     respuesta_final += chunk.text
                     if ui_callback: ui_callback("", chunk.text, "#E8EAED", nueva_linea=False)
+                    if modo_voz:
+                        buffer_voz_web += chunk.text
+                        buffer_voz_web = _procesar_buffer_voz(buffer_voz_web, forzar=False)
+            if modo_voz and buffer_voz_web.strip():
+                _procesar_buffer_voz(buffer_voz_web, forzar=True)
             if ui_callback: ui_callback("", "", "#E8EAED", nueva_linea=True)
-            if modo_voz: hablar_no_bloqueante(respuesta_final)
             CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [respuesta_final]}])
             return
 
-    if modo_voz and respuesta_ia: hablar_no_bloqueante(respuesta_ia)
+    # ✅ FALLBACK: si por alguna razón no se habló nada en streaming, hablar ahora
+    if modo_voz and respuesta_ia and not comando_directo:
+        pass  # Ya se habló en streaming; no repetir
+
+    # Para comandos directos (github, etc.) que no pasan por streaming
+    if modo_voz and comando_directo:
+        hablar_no_bloqueante(respuesta_ia)
     
     if respuesta_ia:
         CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [respuesta_ia]}])
-    if len(CONTEXTO_CHAT) > 100: config.estado.contexto_chat = CONTEXTO_CHAT[-100:]
+    if len(CONTEXTO_CHAT) > 100:
+        config.estado.contexto_chat = CONTEXTO_CHAT[-100:]
+
 
 # =====================================================================
 # PROCESAMIENTO DE ARCHIVOS ADJUNTOS

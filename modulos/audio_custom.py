@@ -5,58 +5,44 @@ import keyboard
 import numpy as np
 import sounddevice as sd
 import scipy.io.wavfile as wav
-import soundfile as sf
+import queue
+import re
+import asyncio
+import uuid
 import tempfile
 
-# Importamos la configuración limpia y desacoplada
+import pygame
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
+
 from config import WHISPER_MODEL_SIZE, WHISPER_DEVICE, WHISPER_COMPUTE_TYPE
 from config import TECLA_HABLAR, FS_AUDIO
 
 hablando_actualmente = False
 
+# ==============================================================
+# CONFIGURACION DE VOZ — Edge TTS
+# ==============================================================
+VOZ_ACTIVA = "es-MX-JorgeNeural"   # colombiano, grave y serio
+TONO       = "-3Hz"                   
+VELOCIDAD  = "+0%"                    
+
+try:
+    pygame.mixer.init()
+except Exception as e:
+    print(f"Error al inicializar pygame: {e}")
+
 # =====================================================================
-# LAZY LOADING DE WHISPER (Escucha)
+# LAZY LOADING DE WHISPER
 # =====================================================================
-_modelo_whisper = None  
+_modelo_whisper = None
 
 def _cargar_whisper_si_necesario():
     global _modelo_whisper
     if _modelo_whisper is None:
-        print(f"\n⚙️ [AUDIO REAL] Cargando Whisper '{WHISPER_MODEL_SIZE}' en {WHISPER_DEVICE.upper()} ({WHISPER_COMPUTE_TYPE})... Esto solo pasa una vez.")
+        print(f"\n[AUDIO] Cargando Whisper '{WHISPER_MODEL_SIZE}'... Solo pasa una vez.")
         from faster_whisper import WhisperModel
-        _modelo_whisper = WhisperModel(
-            WHISPER_MODEL_SIZE, 
-            device=WHISPER_DEVICE, 
-            compute_type=WHISPER_COMPUTE_TYPE
-        )
-        print("✅ Modelo de escucha (Whisper) cargado en memoria.")
+        _modelo_whisper = WhisperModel(WHISPER_MODEL_SIZE, device=WHISPER_DEVICE, compute_type=WHISPER_COMPUTE_TYPE)
     return _modelo_whisper
-
-# =====================================================================
-# LAZY LOADING DE XTTSv2 (Habla) + PARCHE PYTORCH 2.6
-# =====================================================================
-_modelo_xtts = None
-
-def _cargar_xtts_si_necesario():
-    global _modelo_xtts
-    if _modelo_xtts is None:
-        print("\n⚙️ [AUDIO REAL] Cargando motor premium XTTSv2 en la RTX 3060... Esto solo pasa una vez.")
-        
-        import torch
-        # --- PARCHE DE COMPATIBILIDAD PARA PYTORCH 2.6+ ---
-        # Obligamos a PyTorch a confiar en los archivos locales de XTTSv2
-        _carga_original = torch.load
-        def _carga_parcheada(*args, **kwargs):
-            kwargs['weights_only'] = False
-            return _carga_original(*args, **kwargs)
-        torch.load = _carga_parcheada
-        # --------------------------------------------------
-        
-        from TTS.api import TTS
-        # Cargamos el modelo localmente en la GPU
-        _modelo_xtts = TTS("tts_models/multilingual/multi-dataset/xtts_v2", gpu=True)
-        print("✅ Motor de voz (XTTSv2) cargado en memoria.")
-    return _modelo_xtts
 
 # =====================================================================
 # UTILIDADES DE TEXTO
@@ -64,136 +50,250 @@ def _cargar_xtts_si_necesario():
 def limpiar_texto_para_voz(texto):
     lineas = texto.split('\n')
     texto_hablado = []
-    
     for linea in lineas:
         linea_baja = linea.lower().strip()
-        if linea_baja.startswith(("abrir:", "cerrar:", "navegar:", "buscar:")):
+        if linea_baja.startswith(("abrir:", "cerrar:", "navegar:", "buscar:", "*(accion")):
             continue
-        if linea_baja.startswith("*(acción"):
-            continue
-            
         texto_hablado.append(linea)
-        
     texto_final = " ".join(texto_hablado).strip()
-    texto_final = texto_final.replace("🤖", "").replace("🧠", "").replace("🎙️", "").replace("`", "").replace("*", "")
+    reemplazos = {"🤖": "", "🧠": "", "🎙️": "", "`": "", "*": ""}
+    for viejo, nuevo in reemplazos.items():
+        texto_final = texto_final.replace(viejo, nuevo)
     return texto_final
 
+def _agrupar_oraciones(oraciones, min_chars=80):
+    grupos = []
+    buffer = ""
+    for o in oraciones:
+        buffer += (" " if buffer else "") + o
+        if len(buffer) >= min_chars:
+            grupos.append(buffer.strip())
+            buffer = ""
+    if buffer.strip():
+        grupos.append(buffer.strip())
+    return grupos
+
 # =====================================================================
-# FUNCIONES PRINCIPALES DE AUDIO
+# GENERACION DE AUDIO CON EDGE TTS (Directo a MP3)
 # =====================================================================
-def hablar_no_bloqueante(texto):
+async def _sintetizar_edge_async(texto, ruta_salida):
+    import edge_tts
+    tts = edge_tts.Communicate(texto, voice=VOZ_ACTIVA, pitch=TONO, rate=VELOCIDAD)
+    await tts.save(ruta_salida)
+
+def _sintetizar_sincrono(texto):
+    """Genera el audio usando Edge TTS y lo guarda en un MP3 temporal seguro."""
+    try:
+        # Usamos UUID para que los archivos no se pisen entre hilos
+        nombre_temp = f"edge_temp_{uuid.uuid4().hex[:8]}.mp3"
+        ruta_salida = os.path.join(tempfile.gettempdir(), nombre_temp)
+        
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(_sintetizar_edge_async(texto, ruta_salida))
+        loop.close()
+        
+        if os.path.exists(ruta_salida) and os.path.getsize(ruta_salida) > 0:
+            return ruta_salida
+        return None
+    except Exception as e:
+        print(f"[EDGE] Error en síntesis: {e}")
+        return None
+
+# =====================================================================
+# COLA GLOBAL DE REPRODUCCION (Stream Continuo con Pygame)
+# =====================================================================
+_cola_reproduccion = queue.Queue()
+_hilo_reproductor_activo = False
+
+def _hilo_reproductor_global():
+    global _hilo_reproductor_activo, hablando_actualmente
+
+    while True:
+        try:
+            archivo_mp3 = _cola_reproduccion.get(timeout=0.5)
+        except queue.Empty:
+            if not hablando_actualmente:
+                break
+            continue
+
+        if archivo_mp3 is None:
+            break
+
+        if not hablando_actualmente:
+            _vaciar_cola()
+            break
+
+        try:
+            # Reproducción nativa sin necesidad de FFmpeg
+            pygame.mixer.music.load(archivo_mp3)
+            pygame.mixer.music.play()
+            
+            while pygame.mixer.music.get_busy() and hablando_actualmente:
+                if keyboard.is_pressed('esc') or not hablando_actualmente:
+                    hablando_actualmente = False
+                    pygame.mixer.music.stop()
+                    _vaciar_cola()
+                    break
+                time.sleep(0.02)
+                
+            pygame.mixer.music.stop()
+            pygame.mixer.music.unload()
+            
+            # Limpieza del archivo temporal
+            try:
+                os.remove(archivo_mp3)
+            except:
+                pass
+        except Exception as e:
+            print(f"Error reproduciendo con Pygame: {e}")
+
+    _hilo_reproductor_activo = False
+
+def _vaciar_cola():
+    while not _cola_reproduccion.empty():
+        try: 
+            archivo = _cola_reproduccion.get_nowait()
+            if archivo and isinstance(archivo, str) and os.path.exists(archivo):
+                try:
+                    os.remove(archivo)
+                except:
+                    pass
+        except: 
+            pass
+
+def _asegurar_reproductor_activo():
+    global _hilo_reproductor_activo
+    if not _hilo_reproductor_activo:
+        _hilo_reproductor_activo = True
+        threading.Thread(target=_hilo_reproductor_global, daemon=True).start()
+
+# =====================================================================
+# FUNCIONES PUBLICAS
+# =====================================================================
+def encolar_texto_para_hablar(texto):
     global hablando_actualmente
-    
-    detener_voz()
     texto_limpio = limpiar_texto_para_voz(texto)
-    
     if not texto_limpio:
         return
 
-    print(f"🔊 Hablando (Voz: XTTSv2 Premium Local)...")
-    
-    def _hilo_voz():
+    hablando_actualmente = True
+    _asegurar_reproductor_activo()
+
+    def _generar_y_encolar():
+        inicio = time.time()
+        archivo = _sintetizar_sincrono(texto_limpio)
+        if archivo is not None:
+            _cola_reproduccion.put(archivo)
+            print(f"[EDGE] '{texto_limpio[:45]}' → {time.time() - inicio:.2f}s")
+
+    threading.Thread(target=_generar_y_encolar, daemon=True).start()
+
+def hablar_no_bloqueante(texto):
+    global hablando_actualmente
+    detener_voz()
+    texto_limpio = limpiar_texto_para_voz(texto)
+    if not texto_limpio:
+        return
+
+    def _hilo_maestro():
         global hablando_actualmente
         try:
             hablando_actualmente = True
-            archivo_salida = os.path.join(tempfile.gettempdir(), "cortana_voz_temp.wav")
-            # Ruta relativa a la raíz del proyecto donde se ejecuta main_gui.py
-            ruta_referencia = "referencia.wav" 
-            
-            # 1. Asegurarnos de que el modelo está cargado (con el parche)
-            tts = _cargar_xtts_si_necesario()
+            oraciones_raw = [o.strip() for o in re.split(r'(?<=[.!?\n])', texto_limpio) if len(o.strip()) > 1]
+            oraciones = _agrupar_oraciones(oraciones_raw, min_chars=80)
+            cola_local = queue.Queue()
 
-            if not os.path.exists(ruta_referencia):
-                print(f"⚠️ [Error de Voz] No se encontró el archivo molde '{ruta_referencia}' en la raíz del proyecto.")
-                return
-
-            # 2. Generar el audio neuronal
-            tts.tts_to_file(
-                text=texto_limpio,
-                file_path=archivo_salida,
-                speaker_wav=ruta_referencia,
-                language="es"
-            )
-            
-            # 3. Reproducción del audio
-            if os.path.exists(archivo_salida):
-                data, fs = sf.read(archivo_salida)
-                sd.play(data, fs)
-                
-                # Calcular la duración del audio para saber cuánto esperar
-                duracion_segundos = len(data) / fs
-                tiempo_inicio = time.time()
-                
-                # Mantener el hilo vivo mientras habla o hasta que lo interrumpamos
-                while (time.time() - tiempo_inicio < duracion_segundos) and hablando_actualmente:
-                    # Detectar si el usuario presiona la tecla Escape (Interrupción directa)
-                    if keyboard.is_pressed('esc'):
-                        print("\n🛑 [TECLADO] Tecla ESC presionada. Cortando audio...")
-                        hablando_actualmente = False
+            def productor():
+                for i, oracion in enumerate(oraciones):
+                    if not hablando_actualmente:
                         break
-                        
-                    time.sleep(0.05)
-                    
-                # Limpiar la reproducción al terminar
-                sd.stop()
-                
+                    inicio = time.time()
+                    archivo = _sintetizar_sincrono(oracion)
+                    if archivo is not None:
+                        cola_local.put(archivo)
+                        if i == 0:
+                            print(f"[EDGE] Primer chunk listo en {time.time() - inicio:.2f}s")
+                cola_local.put(None)
+
+            threading.Thread(target=productor, daemon=True).start()
+
+            while hablando_actualmente:
+                archivo = cola_local.get()
+                if archivo is None:
+                    break
+                if not hablando_actualmente:
+                    break
+
                 try:
-                    os.remove(archivo_salida)
-                except Exception:
-                    pass
+                    pygame.mixer.music.load(archivo)
+                    pygame.mixer.music.play()
+                    
+                    while pygame.mixer.music.get_busy() and hablando_actualmente:
+                        if keyboard.is_pressed('esc') or not hablando_actualmente:
+                            hablando_actualmente = False
+                            pygame.mixer.music.stop()
+                            break
+                        time.sleep(0.02)
+                        
+                    pygame.mixer.music.stop()
+                    pygame.mixer.music.unload()
+                    
+                    try:
+                        os.remove(archivo)
+                    except:
+                        pass
+                except Exception as e:
+                    print(f"Error en reproducción local: {e}")
 
         except Exception as e:
-            print(f"⚠️ Error en el hilo de voz (XTTSv2): {e}")
+            print(f"Error en hablar_no_bloqueante: {e}")
         finally:
             hablando_actualmente = False
 
-    # Ejecutamos todo el proceso de voz en un hilo secundario
-    threading.Thread(target=_hilo_voz, daemon=True).start()
+    threading.Thread(target=_hilo_maestro, daemon=True).start()
 
 def detener_voz():
     global hablando_actualmente
-    if hablando_actualmente:
-        try:
-            print("🛑 [INTERRUPCIÓN] Callando a Argus...")
-            sd.stop() # Corta de raíz cualquier sonido en sounddevice
-        except Exception:
-            pass
-        hablando_actualmente = False
+    hablando_actualmente = False
+    try:
+        if pygame.mixer.get_init():
+            pygame.mixer.music.stop()
+            pygame.mixer.music.unload()
+    except:
+        pass
+    _vaciar_cola()
 
+# =====================================================================
+# CAPTURA DE VOZ (Whisper)
+# =====================================================================
 def capturar_voz_micro():
-    print(f"\n🎙️ [GRABANDO] Hablá ahora... (Soltá {TECLA_HABLAR.upper()} para terminar)")
+    print(f"\n[GRABANDO] Habla ahora... (Solta {TECLA_HABLAR.upper()} para terminar)")
     audio_data = []
-    
+
     def callback(indata, frames, time, status):
-        if status:
-            print(f"⚠️ [AUDIO] {status}")
         audio_data.append(indata.copy())
 
     with sd.InputStream(samplerate=FS_AUDIO, channels=1, callback=callback):
-        time.sleep(0.2) 
+        time.sleep(0.2)
         while keyboard.is_pressed(TECLA_HABLAR):
             time.sleep(0.02)
-            
-    print("--- ✅ PROCESANDO VOZ ---")
-    
+
+    print("--- PROCESANDO VOZ ---")
     if not audio_data:
-        print("⚠️ [AUDIO] Grabación demasiado corta o vacía. Ignorando...")
         return ""
 
     archivo_temporal = 'output.wav'
-    grabacion = np.concatenate(audio_data, axis=0)
-    wav.write(archivo_temporal, FS_AUDIO, grabacion)
-    
-    modelo_activo = _cargar_whisper_si_necesario() 
-    segmentos, info = modelo_activo.transcribe(archivo_temporal, beam_size=5, language="es")
-    
-    texto_completo = ""
-    for segmento in segmentos:
-        texto_completo += segmento.text
-        
-    texto = texto_completo.strip()
-    
+    wav.write(archivo_temporal, FS_AUDIO, np.concatenate(audio_data, axis=0))
+    modelo_activo = _cargar_whisper_si_necesario()
+
+    segmentos, _ = modelo_activo.transcribe(
+        archivo_temporal,
+        beam_size=1,
+        language="es",
+        vad_filter=True
+    )
+
+    texto = "".join([s.text for s in segmentos]).strip()
     if os.path.exists(archivo_temporal):
         os.remove(archivo_temporal)
-        
     return texto
