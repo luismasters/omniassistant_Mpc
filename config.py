@@ -55,11 +55,12 @@ TECLA_HABLAR = 'f8'
 FS_AUDIO = 16000
 
 # =========================================================
-# ESTADOS DEL SISTEMA GLOBAL (CENTRALIZADO CON THREAD SAFETY)
+# ESTADO GLOBAL CON THREAD SAFETY (VERSIÓN SIMPLIFICADA)
 # =========================================================
 class EstadoGlobal:
     def __init__(self):
         self._lock = threading.Lock()
+        # Atributos públicos (acceso directo pero con locks en los métodos)
         self.modo_actual = "general"
         self.workspace_actual = None
         self.snapshot_actual = ""
@@ -116,56 +117,25 @@ class EstadoGlobal:
         with self._lock:
             self.workspace_actual = ruta
 
-    # ─── PROPIEDADES CON ACCESO SEGURO (PERO MANTENEMOS COMPATIBILIDAD) ──
-
-    @property
-    def contexto_chat(self):
-        """Acceso de solo lectura al contexto (con copia)."""
+    def cambiar_snapshot(self, texto):
+        """Cambia el snapshot actual de forma thread-safe."""
         with self._lock:
-            return self._contexto_chat
+            self.snapshot_actual = texto
 
-    @contexto_chat.setter
-    def contexto_chat(self, value):
-        """Asignación del contexto de forma thread-safe."""
+    def cambiar_documento_volatil(self, texto):
+        """Cambia el documento volátil de forma thread-safe."""
         with self._lock:
-            self._contexto_chat = value
+            self.documento_volatil = texto
 
-    @property
-    def archivos_en_memoria(self):
-        """Acceso de solo lectura a archivos en memoria (con copia)."""
+    def limpiar_contexto(self):
+        """Limpia el contexto del chat (thread-safe)."""
         with self._lock:
-            return self._archivos_en_memoria
+            self.contexto_chat.clear()
 
-    @archivos_en_memoria.setter
-    def archivos_en_memoria(self, value):
-        """Asignación de archivos en memoria de forma thread-safe."""
+    def limpiar_archivos_memoria(self):
+        """Limpia la caché de archivos (thread-safe)."""
         with self._lock:
-            self._archivos_en_memoria = value
+            self.archivos_en_memoria.clear()
 
-    # ─── INICIALIZACIÓN DE ATRIBUTOS INTERNOS ───────────────────────────
-
-    def __getattribute__(self, name):
-        """Intercepta el acceso a atributos que tienen backing store."""
-        if name in ['_contexto_chat', '_archivos_en_memoria']:
-            return super().__getattribute__(name)
-        # Para los atributos normales, acceso directo
-        return super().__getattribute__(name)
-
-    def __setattr__(self, name, value):
-        """Intercepta la asignación para sincronizar backing stores."""
-        if name == 'contexto_chat':
-            with self._lock:
-                self._contexto_chat = value
-        elif name == 'archivos_en_memoria':
-            with self._lock:
-                self._archivos_en_memoria = value
-        else:
-            super().__setattr__(name, value)
-
-# ─── INSTANCIA GLOBAL (SINGLETON) ──────────────────────────────────────────
+# Instancia global única
 estado = EstadoGlobal()
-
-# Inicializar los backing stores después de la creación
-with estado._lock:
-    estado._contexto_chat = []
-    estado._archivos_en_memoria = set()

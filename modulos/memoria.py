@@ -80,44 +80,73 @@ def cargar_snapshot(ruta_workspace):
     return ""
 
 # =====================================================================
-# MOTOR WATCHDOG (Fase 3.2 - Radar de Cambios en Tiempo Real)
+# MOTOR WATCHDOG (Radar de Cambios con Debounce)
 # =====================================================================
 _observador_global = None
 
 class ManejadorCambiosProyecto(FileSystemEventHandler):
-    """Manejador que reacciona cuando modificas un archivo en tu editor."""
-    def __init__(self, ruta_workspace, ui_callback=None):
+    """Manejador que reacciona cuando modificas un archivo con debounce."""
+    def __init__(self, ruta_workspace, ui_callback=None, debounce_ms=500):
         self.ruta_workspace = ruta_workspace
         self.ui_callback = ui_callback
+        self.debounce_ms = debounce_ms
+        self._timers = {}  # {ruta: timer}
+        self._lock = threading.Lock()
 
     def on_modified(self, event):
-        # Ignoramos si cambian carpetas o archivos ocultos de Git/Cortana
-        if event.is_directory or any(x in event.src_path for x in ['.git', '.cortana', '__pycache__', 'venv']):
+        # Ignorar si es directorio o archivos del sistema
+        if event.is_directory or any(x in event.src_path for x in ['.git', '.cortana', '__pycache__', 'venv', 'chroma.sqlite3']):
             return
-            
-        nombre_archivo = os.path.basename(event.src_path)
-        print(f"👁️ [RADAR] Se detectó un cambio manual en: {nombre_archivo}")
-        
-        # Importamos config de forma local para acceder a la Pizarra Central
-        import config
-        
-        # Si el archivo modificado estaba en la memoria de la IA, lo limpiamos de la caché 
-        # para obligar a Cortana a leer la nueva versión real del disco en el siguiente turno.
+
         ruta_abs = os.path.abspath(event.src_path)
-        if ruta_abs in config.estado.archivos_en_memoria:
-            config.estado.archivos_en_memoria.remove(ruta_abs)
-            # Removemos la versión vieja del historial del chat para que no se confunda
-            config.estado.contexto_chat = [
-                msg for msg in config.estado.contexto_chat 
-                if not (isinstance(msg.get('parts', [''])[0], str) and f"[CONTENIDO DE '{ruta_abs}']:" in msg['parts'][0])
-            ]
-            msg_log = f"Caché desactualizada limpia para: {nombre_archivo}. Cortana leerá los cambios nuevos."
+        nombre_archivo = os.path.basename(ruta_abs)
+
+        # Cancelar cualquier timer pendiente para esta ruta
+        with self._lock:
+            if ruta_abs in self._timers:
+                self._timers[ruta_abs].cancel()
+                del self._timers[ruta_abs]
+
+        # Crear un nuevo timer
+        timer = threading.Timer(self.debounce_ms / 1000.0, self._procesar_cambio, args=[ruta_abs, nombre_archivo])
+        timer.daemon = True
+        with self._lock:
+            self._timers[ruta_abs] = timer
+        timer.start()
+
+    def _procesar_cambio(self, ruta_abs, nombre_archivo):
+        """Procesa el cambio después del debounce."""
+        # Limpiar el timer
+        with self._lock:
+            if ruta_abs in self._timers:
+                del self._timers[ruta_abs]
+
+        print(f"👁️ [RADAR] Cambio confirmado en: {nombre_archivo}")
+
+        # Usar los métodos thread-safe de config.estado
+        archivos_memoria = config.estado.obtener_archivos_copia()
+        if ruta_abs in archivos_memoria:
+            # Eliminar de la caché
+            config.estado.eliminar_archivo_memoria(ruta_abs)
+            
+            # Eliminar del contexto del chat
+            contexto_actual = config.estado.obtener_contexto_copia()
+            nuevo_contexto = []
+            for msg in contexto_actual:
+                if isinstance(msg.get('parts', [''])[0], str) and f"[CONTENIDO DE '{ruta_abs}']:" in msg['parts'][0]:
+                    continue
+                nuevo_contexto.append(msg)
+            
+            # Actualizar el contexto de forma segura
+            config.estado.contexto_chat = nuevo_contexto
+
+            msg_log = f"Caché desactualizada limpia para: {nombre_archivo}. Argus leerá los cambios nuevos."
             print(f"💡 [RADAR] {msg_log}")
             if self.ui_callback:
                 self.ui_callback("⚙️ Sistema", f"🔄 Radar: Detectado cambio manual en '{nombre_archivo}'. Memoria sincronizada.", "#80868B")
 
 def iniciar_radar_proyecto(ruta_workspace, ui_callback=None):
-    """Arranca el hilo espía que vigila tu carpeta de desarrollo."""
+    """Arranca el hilo espía que vigila tu carpeta de desarrollo con debounce."""
     global _observador_global
     
     # Si ya había un radar corriendo para otro proyecto, lo apagamos primero
@@ -126,7 +155,7 @@ def iniciar_radar_proyecto(ruta_workspace, ui_callback=None):
         _observador_global.join()
         
     print(f"👁️ [RADAR] Activando vigilancia en tiempo real para: {ruta_workspace}")
-    manejador = ManejadorCambiosProyecto(ruta_workspace, ui_callback)
+    manejador = ManejadorCambiosProyecto(ruta_workspace, ui_callback, debounce_ms=500)
     _observador_global = Observer()
     _observador_global.schedule(manejador, path=ruta_workspace, recursive=True)
     _observador_global.start()
