@@ -9,14 +9,14 @@ import re
 import tkinter as tk
 import tkinter.font as tkfont
 
-# Importaciones de tu backend
+# Importaciones del backend
 from config import TECLA_HABLAR
 from modulos.ia import enviar_a_gemini
-#from modulos.audio import capturar_voz_micro, detener_voz
 from modulos.audio_custom import hablar_no_bloqueante, capturar_voz_micro, detener_voz
 import modulos.audio_custom as audio_modulo
 import modulos.ia as motor_ia
-from modulos.memoria import guardar_snapshot
+from modulos.memoria import guardar_snapshot, iniciar_radar_proyecto, guardar_recuerdo
+from modulos.archivos import leer_contenido_archivo
 
 # ─── Paleta ───────────────────────────────────────────────────────────────────
 BG_MAIN        = "#141414"
@@ -39,7 +39,7 @@ BORDER_COLOR   = "#1e1e2e"
 BORDER_INPUT   = "#2a2a3e"
 BORDER_CODE    = "#2d2d4e"
 BORDER_TABLE   = "#2a2a4a"
-SIDEBAR_LINE   = "#2a2a3e"   # línea divisoria sidebar
+SIDEBAR_LINE   = "#2a2a3e"
 
 SYN = {
     "keyword":  "#c084fc",
@@ -52,32 +52,53 @@ SYN = {
 
 _F  = "Segoe UI"
 _FM = "Consolas"
-
 TAMANO_BASE = 15
-
 FONT_CHAT    = (_F, TAMANO_BASE)
 FONT_CHAT_MD = (_F, TAMANO_BASE)
 FONT_UI      = (_F, TAMANO_BASE - 1)
 FONT_UI_SM   = (_F, TAMANO_BASE - 2)
 FONT_CODE    = (_FM, TAMANO_BASE - 1)
-
-# tk.Text nativo usa puntos tipográficos; negativo = píxeles (igual que CTk)
-# Esto hace que el texto de la IA se vea del mismo tamaño que el del usuario
-_TK_SIZE     = -TAMANO_BASE        # px equivalente para tk.Text normal
-_TK_SIZE_CO  = -(TAMANO_BASE - 1)  # px equivalente para código inline
+_TK_SIZE     = -TAMANO_BASE
+_TK_SIZE_CO  = -(TAMANO_BASE - 1)
 
 MAX_USER_LINES    = 5
 LINE_HEIGHT_PX    = 24
 USER_BUBBLE_MAX_H = MAX_USER_LINES * LINE_HEIGHT_PX + 20
-
-# Márgenes tipo Bootstrap container — se aplica como padx en pack/grid
 CHAT_PAD_X = 110
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
+# ─── ESTADO CENTRALIZADO (Singleton) ────────────────────────────────────────
+class _AppState:
+    _instance = None
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._init()
+        return cls._instance
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
+    def _init(self):
+        self.modo_actual = "general"
+        self.workspace_actual = None
+        self.snapshot_actual = ""
+        self.contexto_chat = []
+        self.historial_por_modo = {}   # {modo: {"visual": [], "contexto": []}}
+        self.archivos_en_memoria = set()
+        self.documento_volatil = ""
+
+    def guardar_historial_modo(self, modo, visual, contexto):
+        self.historial_por_modo[modo] = {
+            "visual": visual[-50:],
+            "contexto": contexto[-100:]
+        }
+
+    def cargar_historial_modo(self, modo):
+        return self.historial_por_modo.get(modo, {"visual": [], "contexto": []})
+
+state = _AppState()
+
+# ─── RENDERIZADO DE MARKDOWN ────────────────────────────────────────────────
 _KW  = r'\b(def|class|return|import|from|as|if|elif|else|for|while|with|try|except|finally|pass|break|continue|lambda|yield|in|not|and|or|is|None|True|False|raise|del|global|nonlocal|assert|async|await)\b'
 _BLT = r'\b(print|len|range|int|str|float|list|dict|set|tuple|type|isinstance|hasattr|getattr|setattr|open|super|property|staticmethod|classmethod|zip|map|filter|sorted|enumerate|any|all|sum|min|max|abs|round|input|format|repr|id|dir)\b'
 _STR = r'("""[\s\S]*?"""|\'\'\'[\s\S]*?\'\'\'|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\')'
@@ -99,8 +120,60 @@ def _strip_md(text: str) -> str:
     text = re.sub(r'`(.+?)`',       r'\1', text)
     return text.strip()
 
+def _make_inline_text(parent, text: str, wrap_px: int) -> tk.Text:
+    t = tk.Text(parent, bg=BG_CHAT, fg=TEXT_AI, font=(_F, _TK_SIZE),
+                wrap="word", bd=0, relief="flat", highlightthickness=0,
+                state="normal", cursor="xterm", height=1, width=1,
+                selectbackground=ACCENT_SOFT, selectforeground=TEXT_PRIMARY)
+    t.tag_configure("bold",        font=(_F, _TK_SIZE, "bold"))
+    t.tag_configure("italic",      font=(_F, _TK_SIZE, "italic"))
+    t.tag_configure("code_inline", font=(_FM, _TK_SIZE_CO),
+                    foreground=SYN["builtin"], background=BG_CODE)
+    pat = re.compile(r'\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`')
+    last = 0
+    for m in pat.finditer(text):
+        if m.start() > last:
+            t.insert("end", text[last:m.start()])
+        if m.group(1):   t.insert("end", m.group(1), "bold")
+        elif m.group(2): t.insert("end", m.group(2), "italic")
+        elif m.group(3): t.insert("end", m.group(3), "code_inline")
+        last = m.end()
+    if last < len(text):
+        t.insert("end", text[last:])
+    t.configure(state="disabled")
+    return t
 
-# ─── CodeBlock ────────────────────────────────────────────────────────────────
+def _auto_height(t: tk.Text, wrap_px: int = 0):
+    t.update_idletasks()
+    try:
+        result = t.count("1.0", "end", "displaylines")
+        vis_lines = result[0] if result else 1
+        t.configure(height=max(1, vis_lines))
+    except Exception:
+        try:
+            lines = int(t.index("end-1c").split(".")[0])
+            t.configure(height=max(1, lines))
+        except Exception:
+            pass
+
+def _pack_text(t: tk.Text, parent, pady=(1,1)):
+    t.pack(fill="x", pady=pady)
+    t.update_idletasks()
+    _auto_height(t)
+
+def _parse_table(lines: list[str]) -> list[list[str]] | None:
+    rows = []
+    for line in lines:
+        if not line.strip().startswith("|"):
+            return None
+        cells = [c for c in line.strip().split("|")]
+        if cells and cells[0].strip() == "":
+            cells = cells[1:]
+        if cells and cells[-1].strip() == "":
+            cells = cells[:-1]
+        rows.append(cells)
+    return rows if len(rows) >= 2 else None
+
 class CodeBlock(ctk.CTkFrame):
     def __init__(self, parent, code: str, lang: str = "", **kwargs):
         super().__init__(parent, fg_color=BG_CODE, corner_radius=8,
@@ -124,22 +197,14 @@ class CodeBlock(ctk.CTkFrame):
         _highlight_code(self._txt, code)
         self._txt.configure(height=min(code.count("\n") + 1, 30))
 
-
-# ─── TableBlock ───────────────────────────────────────────────────────────────
 class TableBlock(ctk.CTkFrame):
-    """Renderiza tablas Markdown como grid de labels."""
-
     def __init__(self, parent, rows: list[list[str]], **kwargs):
         super().__init__(parent, fg_color="transparent", **kwargs)
         if not rows:
             return
-
         headers = rows[0]
-        data    = [r for r in rows[2:] if r]   # skip separator row
-
-        # Calcular anchos de columna proporcionales
+        data    = [r for r in rows[2:] if r]
         n_cols = len(headers)
-
         for col_i, header in enumerate(headers):
             cell = ctk.CTkFrame(self, fg_color=BG_TABLE_HDR, corner_radius=0,
                                 border_width=1, border_color=BORDER_TABLE)
@@ -148,7 +213,6 @@ class TableBlock(ctk.CTkFrame):
             ctk.CTkLabel(cell, text=_strip_md(header.strip()),
                          font=(_F, TAMANO_BASE - 1, "bold"), text_color=TEXT_PRIMARY,
                          anchor="w").pack(padx=10, pady=6, fill="x")
-
         for row_i, row in enumerate(data):
             bg = BG_TABLE_ROW if row_i % 2 == 0 else BG_TABLE_ALT
             for col_i in range(n_cols):
@@ -161,83 +225,15 @@ class TableBlock(ctk.CTkFrame):
                              anchor="w", justify="left", wraplength=0
                              ).pack(padx=10, pady=5, fill="x")
 
-
-def _parse_table(lines: list[str]) -> list[list[str]] | None:
-    """Devuelve lista de filas si las líneas forman una tabla MD, sino None."""
-    rows = []
-    for line in lines:
-        if not line.strip().startswith("|"):
-            return None
-        cells = [c for c in line.strip().split("|")]
-        # quitar primero y último si están vacíos (pipes de borde)
-        if cells and cells[0].strip() == "":
-            cells = cells[1:]
-        if cells and cells[-1].strip() == "":
-            cells = cells[:-1]
-        rows.append(cells)
-    return rows if len(rows) >= 2 else None
-
-
-# ─── Texto inline con negrita/itálica ─────────────────────────────────────────
-def _make_inline_text(parent, text: str, wrap_px: int) -> tk.Text:
-    """tk.Text de una o más líneas con soporte **bold** *italic* `code`."""
-    t = tk.Text(parent, bg=BG_CHAT, fg=TEXT_AI, font=(_F, _TK_SIZE),
-                wrap="word", bd=0, relief="flat", highlightthickness=0,
-                state="normal", cursor="xterm", height=1,
-                width=1,   # width=1 → se expande via pack fill="x"
-                selectbackground=ACCENT_SOFT, selectforeground=TEXT_PRIMARY)
-    t.tag_configure("bold",        font=(_F, _TK_SIZE, "bold"))
-    t.tag_configure("italic",      font=(_F, _TK_SIZE, "italic"))
-    t.tag_configure("code_inline", font=(_FM, _TK_SIZE_CO),
-                    foreground=SYN["builtin"], background=BG_CODE)
-
-    pat = re.compile(r'\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`')
-    last = 0
-    for m in pat.finditer(text):
-        if m.start() > last:
-            t.insert("end", text[last:m.start()])
-        if m.group(1):   t.insert("end", m.group(1), "bold")
-        elif m.group(2): t.insert("end", m.group(2), "italic")
-        elif m.group(3): t.insert("end", m.group(3), "code_inline")
-        last = m.end()
-    if last < len(text):
-        t.insert("end", text[last:])
-
-    t.configure(state="disabled")
-    return t
-
-def _auto_height(t: tk.Text, wrap_px: int = 0):
-    """Ajusta altura de tk.Text usando displaylines (cuenta líneas visuales tras wrap)."""
-    t.update_idletasks()
-    try:
-        result = t.count("1.0", "end", "displaylines")
-        vis_lines = result[0] if result else 1
-        t.configure(height=max(1, vis_lines))
-    except Exception:
-        try:
-            lines = int(t.index("end-1c").split(".")[0])
-            t.configure(height=max(1, lines))
-        except Exception:
-            pass
-
-def _pack_text(t: tk.Text, parent, pady=(1,1)):
-    """Pack un tk.Text y ajusta su altura sincrónicamente."""
-    t.pack(fill="x", pady=pady)
-    t.update_idletasks()
-    _auto_height(t)
-
-
-# ─── UserBubble ───────────────────────────────────────────────────────────────
+# ─── BURBUJAS ────────────────────────────────────────────────────────────────
 class UserBubble(ctk.CTkFrame):
     MAX_WIDTH_RATIO = 0.60
-
     def __init__(self, parent, texto: str, **kwargs):
         super().__init__(parent, fg_color="transparent", **kwargs)
         self._pill = ctk.CTkFrame(self, fg_color=BG_USER_MSG, corner_radius=18,
                                   border_width=1, border_color=BORDER_COLOR)
         ctk.CTkFrame(self, fg_color="transparent").pack(side="left", fill="both", expand=True)
         self._pill.pack(side="right", padx=(0, 2))
-
         self._tb = ctk.CTkTextbox(self._pill, fg_color="transparent", font=FONT_CHAT,
                                   text_color=TEXT_USER, wrap="word", border_width=0,
                                   height=LINE_HEIGHT_PX + 20, width=300)
@@ -261,34 +257,28 @@ class UserBubble(ctk.CTkFrame):
             self._tb.configure(height=USER_BUBBLE_MAX_H)
             self._tb._textbox.yview_moveto(1.0)
 
-
-# ─── AIBubble ─────────────────────────────────────────────────────────────────
 class AIBubble(ctk.CTkFrame):
     def __init__(self, parent, **kwargs):
         super().__init__(parent, fg_color="transparent", **kwargs)
         self._raw       = ""
         self._streaming = True
-        self._wrap_px   = 600   # se recalcula en finalizar()
+        self._wrap_px   = 600
+        self._mostrando_carga = False
 
         # Header
         hdr = ctk.CTkFrame(self, fg_color="transparent")
         hdr.pack(fill="x", padx=4, pady=(12, 4))
         ctk.CTkLabel(hdr, text="◆", font=(_F, TAMANO_BASE), text_color=ACCENT, width=20
                      ).pack(side="left", padx=(0, 6))
-        
-        # --- LEER EL MODELO ACTIVO PARA EL TÍTULO ---
         nombres_modelos = {
             "general": "Gemini Flash",
-            "planificador": "DeepSeek V4 (Thinking)",
-            "programador": "DeepSeek V4 (Fast)"
+            "programador": "DeepSeek V4 (Reasoner)",
+            "planificador": "DeepSeek V4 (Reasoner)"
         }
-        modo_actual = getattr(motor_ia, 'MODO_ACTUAL', 'general')
+        modo_actual = state.modo_actual
         nombre_modelo = nombres_modelos.get(modo_actual, "IA")
-        
         ctk.CTkLabel(hdr, text=f"Argus ({nombre_modelo})", font=(_F, TAMANO_BASE - 1, "bold"), text_color=TEXT_DIM
                      ).pack(side="left")
-
-        # Botón copiar respuesta completa
         self._btn_copy = ctk.CTkButton(
             hdr, text="⎘", width=28, height=28,
             corner_radius=6,
@@ -300,11 +290,9 @@ class AIBubble(ctk.CTkFrame):
         )
         self._btn_copy.pack(side="right", padx=(0, 4))
 
-        # Contenedor de contenido
         self._content = ctk.CTkFrame(self, fg_color="transparent")
         self._content.pack(fill="x", padx=(28, 4), pady=(0, 14))
 
-        # Textbox provisional para streaming
         self._stream_box = ctk.CTkTextbox(
             self._content, fg_color="transparent",
             font=FONT_CHAT_MD, text_color=TEXT_AI,
@@ -312,8 +300,21 @@ class AIBubble(ctk.CTkFrame):
         self._stream_box.pack(fill="x")
         self._stream_box.configure(state="disabled")
 
-    # ── Stream ────────────────────────────────────────────────────────────────
+    def mostrar_carga(self):
+        """Muestra un indicador de que la IA está procesando."""
+        self._mostrando_carga = True
+        self._stream_box.configure(state="normal")
+        self._stream_box.insert("end", " ...")
+        self._stream_box.configure(state="disabled")
+        self._ajustar_stream()
+
     def append_text(self, texto: str):
+        if self._mostrando_carga:
+            # Limpiar el mensaje de carga
+            self._stream_box.configure(state="normal")
+            self._stream_box.delete("1.0", "end")
+            self._stream_box.configure(state="disabled")
+            self._mostrando_carga = False
         if not texto:
             return
         self._raw += texto
@@ -341,22 +342,16 @@ class AIBubble(ctk.CTkFrame):
         self._btn_copy.configure(text="✓", text_color="#86efac")
         self.after(1500, lambda: self._btn_copy.configure(text="⎘", text_color=TEXT_DIM))
 
-    # ── Finalizar: reemplazar stream por Markdown renderizado ─────────────────
     def finalizar(self):
         if not self._streaming:
             return
         self._streaming = False
         self._stream_box.destroy()
-
         self.update_idletasks()
         self._wrap_px = max(300, self.winfo_width() - 60)
-
         if self._raw.strip():
             self._render_markdown(self._raw)
 
-
-
-    # ── Parser de Markdown ────────────────────────────────────────────────────
     def _render_markdown(self, text: str):
         CODE_STRONG = re.compile(
             r'^(import |from \w+ import |def |class |\s+def |\s+class |'
@@ -451,11 +446,9 @@ class AIBubble(ctk.CTkFrame):
         while i < len(lines):
             line = lines[i]
             stripped = line.strip()
-
             if not stripped:
                 i += 1
                 continue
-
             if stripped.startswith("### "):
                 self._add_label(parent, stripped[4:], (_F,15,"bold"), TEXT_PRIMARY, (8,2))
                 i += 1; continue
@@ -465,11 +458,9 @@ class AIBubble(ctk.CTkFrame):
             if stripped.startswith("# "):
                 self._add_label(parent, stripped[2:], (_F,18,"bold"), TEXT_PRIMARY, (12,2))
                 i += 1; continue
-
             if re.match(r'^[-*_]{3,}$', stripped):
                 ctk.CTkFrame(parent, height=1, fg_color=BORDER_COLOR).pack(fill="x", pady=8)
                 i += 1; continue
-
             if stripped.startswith("|"):
                 table_lines = []
                 while i < len(lines) and lines[i].strip().startswith("|"):
@@ -479,7 +470,6 @@ class AIBubble(ctk.CTkFrame):
                 if rows:
                     TableBlock(parent, rows).pack(fill="x", pady=(6,6))
                 continue
-
             if stripped.startswith(("- ","* ","• ")):
                 items = []
                 while i < len(lines):
@@ -490,12 +480,11 @@ class AIBubble(ctk.CTkFrame):
                     elif s2 and not s2.startswith(("- ","* ","• ")) and not re.match(r'^\d+\. ', s2):
                         break
                     elif not s2:
-                        i += 1 
+                        i += 1
                     else:
                         break
                 self._add_text_block(parent, "\n".join(items))
                 continue
-
             if re.match(r'^\d+\. ', stripped):
                 items = []
                 while i < len(lines):
@@ -511,7 +500,6 @@ class AIBubble(ctk.CTkFrame):
                         break
                 self._add_text_block(parent, "\n".join(items))
                 continue
-
             para_lines = []
             while i < len(lines) and lines[i].strip() and \
                   not lines[i].strip().startswith(("#","- ","* ","• ","|")) and \
@@ -521,7 +509,6 @@ class AIBubble(ctk.CTkFrame):
                 i += 1
             if para_lines:
                 self._add_text_block(parent, " ".join(para_lines))
-
 
     def _add_text_block(self, parent, text: str, pady=(1, 1)):
         t = tk.Text(parent, bg=BG_CHAT, fg=TEXT_AI, font=(_F, _TK_SIZE),
@@ -562,7 +549,6 @@ class AIBubble(ctk.CTkFrame):
     def _add_inline(self, parent, text: str):
         pat = re.compile(r'\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`')
         has_md = bool(pat.search(text))
-
         if not has_md:
             t = tk.Text(parent, bg=BG_CHAT, fg=TEXT_AI, font=(_F, _TK_SIZE),
                         wrap="word", bd=0, relief="flat", highlightthickness=0,
@@ -572,12 +558,10 @@ class AIBubble(ctk.CTkFrame):
             t.configure(state="disabled")
             _pack_text(t, parent)
             return
-
         t = _make_inline_text(parent, text, self._wrap_px)
         _pack_text(t, parent)
 
-
-# ─── LogRedirector ────────────────────────────────────────────────────────────
+# ─── LOG REDIRECTOR ──────────────────────────────────────────────────────────
 class LogRedirector:
     def __init__(self, target_widget):
         self.target = target_widget
@@ -602,12 +586,10 @@ class LogRedirector:
         self.target.see("end")
         self.target.configure(state="disabled")
 
-
-# ─── OmniApp ──────────────────────────────────────────────────────────────────
+# ─── APLICACIÓN PRINCIPAL ────────────────────────────────────────────────────
 class OmniApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-
         ancho, alto = 980, 700
         pw, ph = self.winfo_screenwidth(), self.winfo_screenheight()
         self.geometry(f"{ancho}x{alto}+{(pw-ancho)//2}+{(ph-alto)//2}")
@@ -616,7 +598,6 @@ class OmniApp(ctk.CTk):
         self.resizable(True, True)
         self.minsize(640, 420)
 
-        # col 0 = sidebar fijo, col 1 = separador 1px, col 2 = chat
         self.grid_columnconfigure(0, weight=0, minsize=215)
         self.grid_columnconfigure(1, weight=0, minsize=1)
         self.grid_columnconfigure(2, weight=1)
@@ -627,25 +608,28 @@ class OmniApp(ctk.CTk):
         self._build_main_area()
 
         self.burbuja_ia_actual: AIBubble | None = None
-        self.texto_sin_enviar: str = ""      
-        self.historiales: dict = {}          
-        self.modo_actual = "general"         
+        self.texto_sin_enviar: str = ""
+        self._stop_micro_event = threading.Event()
         threading.Thread(target=self.motor_microfono, daemon=True).start()
 
-    # ── Separador vertical sidebar/chat ───────────────────────────────────────
-    def _build_separator(self):
-        sep = ctk.CTkFrame(self, width=1, fg_color=SIDEBAR_LINE, corner_radius=0)
-        sep.grid(row=0, column=1, rowspan=2, sticky="ns")
+        # Capturar cierre de ventana
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def on_closing(self):
+        """Detiene el hilo del micrófono y cierra limpiamente."""
+        self._stop_micro_event.set()
+        time.sleep(0.2)
+        self.destroy()
 
     # ── Sidebar ────────────────────────────────────────────────────────────────
     def _build_sidebar(self):
+        import config  # Importar aquí para sincronizar estado inicial
         sb = ctk.CTkFrame(self, fg_color=BG_SIDEBAR, corner_radius=0)
         sb.grid(row=0, column=0, rowspan=2, sticky="nsew")
         sb.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(sb, text="◆ Argus", font=(_F, TAMANO_BASE, "bold"),
                      text_color=ACCENT).grid(row=0, column=0, padx=18, pady=(24,2), sticky="w")
-        
         self.lbl_modelo_activo = ctk.CTkLabel(sb, text="🧠 Modelo: Gemini Flash", font=FONT_UI_SM,
                      text_color="#86efac")
         self.lbl_modelo_activo.grid(row=1, column=0, padx=18, pady=(0,14), sticky="w")
@@ -653,14 +637,20 @@ class OmniApp(ctk.CTk):
         ctk.CTkFrame(sb, height=1, fg_color=SIDEBAR_LINE).grid(
             row=2, column=0, padx=0, sticky="ew")
 
-        self.modo_actual = "general"
+        # Sincronizar estado inicial con config.estado
+        modo_inicial = config.estado.modo_actual if hasattr(config.estado, 'modo_actual') else "general"
+        textos_modelos = {
+            "general": "🧠 Modelo: Gemini Flash",
+            "programador": "🧠 Modelo: DeepSeek V4 (Reasoner)",
+            "planificador": "🧠 Modelo: DeepSeek V4 (Reasoner)"
+        }
+        self.lbl_modelo_activo.configure(text=textos_modelos.get(modo_inicial, textos_modelos["general"]))
+        state.modo_actual = modo_inicial
 
         botones = [
             ("💬  Chat General",       lambda: self._cambiar_modo("general")),
-            ("📐  Modo Planificador",  lambda: self._cambiar_modo("planificador")),
-            ("💻  Modo Programador",   lambda: self._cambiar_modo("programador"))
+            ("💻  Modo Programador",   lambda: self._cambiar_modo("programador")),
         ]
-        
         self.botones_ui = []
         for i, (txt, cmd) in enumerate(botones, start=3):
             btn = ctk.CTkButton(sb, text=txt, anchor="w", font=FONT_UI,
@@ -670,24 +660,25 @@ class OmniApp(ctk.CTk):
             btn.grid(row=i, column=0, padx=10, pady=2, sticky="ew")
             self.botones_ui.append(btn)
 
-        ctk.CTkLabel(sb, text="v0.2.0 - Multi-Modo", font=FONT_UI_SM,
+        ctk.CTkLabel(sb, text="v0.3.0 - Modo Programador Unificado", font=FONT_UI_SM,
                      text_color=TEXT_DIM).grid(row=10, column=0, padx=18, pady=16, sticky="sw")
         sb.grid_rowconfigure(10, weight=1)
 
-    # --- FUNCIÓN _CAMBIAR_MODO (CON FASE 1.3: PRESERVACIÓN DE CONTEXTO) ---
     def _cambiar_modo(self, nuevo_modo):
-        if nuevo_modo == self.modo_actual:
+        import config
+        if nuevo_modo == state.modo_actual:
             return
 
-        # 1. Verificación automática de entorno para los modos avanzados
+        # 1. Verificar workspace para modo programador
         if nuevo_modo in ["planificador", "programador"]:
-            if not getattr(motor_ia, 'WORKSPACE_ACTUAL', None):
+            if not state.workspace_actual:
                 ruta = filedialog.askdirectory(title=f"Selecciona el proyecto para el Modo {nuevo_modo.capitalize()}")
                 if not ruta:
                     return
+                state.workspace_actual = ruta
                 motor_ia.WORKSPACE_ACTUAL = ruta
-                import config
                 config.estado.workspace_actual = ruta
+                # Generar snapshot
                 nombre_proj = os.path.basename(ruta)
                 estructura = []
                 for raiz, carpetas, archivos in os.walk(ruta):
@@ -699,103 +690,70 @@ class OmniApp(ctk.CTk):
                     for f in archivos: estructura.append(f"{sind}📄 {f}")
                 arbol = f"Estructura del proyecto '{nombre_proj}':\n" + "\n".join(estructura)
                 guardar_snapshot(ruta, arbol)
-                motor_ia.SNAPSHOT_ACTUAL = arbol 
-            
-            # FASE 3.2: Encendemos el radar Watchdog conectado a la UI
-            from modulos.memoria import iniciar_radar_proyecto
-            iniciar_radar_proyecto(motor_ia.WORKSPACE_ACTUAL, ui_callback=self.callback_ia)
+                state.snapshot_actual = arbol
+                motor_ia.SNAPSHOT_ACTUAL = arbol
+                config.estado.snapshot_actual = arbol
+                iniciar_radar_proyecto(ruta, ui_callback=self.callback_ia)
 
-        # 2. PASO 3 / FASE 1.3 — Guardar historial visual Y CONTEXTO DEL MOTOR IA
-        snapshot_actual = []
+        # 2. Guardar historial del modo actual (solo si hay mensajes visuales)
+        visual = []
         for widget in self.chat_scroll.winfo_children():
             if isinstance(widget, UserBubble):
                 try:
                     txt = widget._tb.get("1.0", "end").strip()
                     if txt:
-                        snapshot_actual.append(("usuario", txt))
+                        visual.append(("usuario", txt))
                 except Exception:
                     pass
             elif isinstance(widget, AIBubble):
                 if widget._raw.strip():
-                    snapshot_actual.append(("ia", widget._raw))
+                    visual.append(("ia", widget._raw))
             elif isinstance(widget, ctk.CTkLabel):
                 try:
                     txt = widget.cget("text")
                     if txt and txt.startswith("⚙"):
-                        snapshot_actual.append(("sistema", txt[2:].strip()))
+                        visual.append(("sistema", txt[2:].strip()))
                 except Exception:
                     pass
-                    
-        # Guardamos todo en un diccionario para este modo
-        self.historiales[self.modo_actual] = {
-            "visual": snapshot_actual[-50:], # Limitar a 50 mensajes visuales
-            "contexto": list(getattr(motor_ia, 'CONTEXTO_CHAT', []))
-        }
 
-        # 3. Aplicamos el cambio de modo
-        self.modo_actual = nuevo_modo
+        if visual:
+            state.guardar_historial_modo(state.modo_actual, visual, state.contexto_chat)
+
+        # 3. Aplicar cambio de modo (NO LIMPIAR CONTEXTO)
+        state.modo_actual = nuevo_modo
         motor_ia.MODO_ACTUAL = nuevo_modo
+        config.estado.modo_actual = nuevo_modo
 
-        # 4. Limpiar UI y Limpiar Contexto de la IA (Para que empiece fresco)
-        for w in self.chat_scroll.winfo_children():
-            w.destroy()
-        self.burbuja_ia_actual = None
-        
-        if hasattr(motor_ia, 'CONTEXTO_CHAT'):
-            motor_ia.CONTEXTO_CHAT.clear()
+        # 4. Actualizar etiqueta del modelo en sidebar
+        textos_modelos = {
+            "general": "🧠 Modelo: Gemini Flash",
+            "programador": "🧠 Modelo: DeepSeek V4 (Reasoner)",
+            "planificador": "🧠 Modelo: DeepSeek V4 (Reasoner)"
+        }
+        self.lbl_modelo_activo.configure(text=textos_modelos.get(nuevo_modo, textos_modelos["general"]))
 
-        # 5. Restaurar historial del nuevo modo si existe
-        datos_historial = self.historiales.get(nuevo_modo, {})
-        
-        # Manejo de retrocompatibilidad (por si antes era una lista simple)
-        if isinstance(datos_historial, list):
-            historial_visual = datos_historial
-            historial_contexto = []
-        else:
-            historial_visual = datos_historial.get("visual", [])
-            historial_contexto = datos_historial.get("contexto", [])
+        # 5. Mostrar mensaje de sistema (sin borrar nada)
+        self._agregar_sistema(f"🔁 Cambiado a modo {nuevo_modo.upper()}")
 
-        # Restauramos la memoria interna de la IA
-        if hasattr(motor_ia, 'CONTEXTO_CHAT') and historial_contexto:
-            motor_ia.CONTEXTO_CHAT.extend(historial_contexto)
-
-        if historial_visual:
-            for tipo, texto in historial_visual:
-                if tipo == "usuario":
-                    self._agregar_usuario(texto)
-                elif tipo == "ia":
-                    burbuja = AIBubble(self.chat_scroll)
-                    burbuja.pack(fill="x", padx=CHAT_PAD_X, pady=(2,6))
-                    burbuja._raw = texto
-                    burbuja._streaming = False
-                    burbuja._stream_box.destroy()
-                    burbuja._render_markdown(texto)
-                elif tipo == "sistema":
-                    self._agregar_sistema(texto)
-        else:
-            # Primera vez en este modo: mostrar bienvenida
-            ruta_corta = os.path.basename(getattr(motor_ia, 'WORKSPACE_ACTUAL', '')) if getattr(motor_ia, 'WORKSPACE_ACTUAL', None) else ""
-            mensajes_bienvenida = {
-                "general":      "¿En qué puedo ayudarte hoy?",
-                "planificador": f"📐 Modo Planificador\n[ {ruta_corta} ]\n¿Qué vamos a diseñar?",
-                "programador":  f"💻 Modo Programador\n[ {ruta_corta} ]\nListo para ejecutar."
+        # 6. Si no hay mensajes, mostrar bienvenida
+        if not any(isinstance(w, (UserBubble, AIBubble)) for w in self.chat_scroll.winfo_children()):
+            ruta_corta = os.path.basename(state.workspace_actual) if state.workspace_actual else ""
+            mensajes = {
+                "general": "¿En qué puedo ayudarte hoy?",
+                "programador": f"💻 Modo Programador\n[ {ruta_corta} ]\n¿Qué vamos a diseñar o programar?",
+                "planificador": f"📐 Modo Planificador\n[ {ruta_corta} ]\n(redirigido a Programador)"
             }
             self._welcome_label = ctk.CTkLabel(
-                self.chat_scroll, text=mensajes_bienvenida[nuevo_modo],
+                self.chat_scroll, text=mensajes.get(nuevo_modo, mensajes["programador"]),
                 font=(_F, TAMANO_BASE + 6, "bold"), text_color="#2a2a3e")
             self._welcome_label.pack(expand=True, pady=(120,0))
-            self._agregar_sistema(f"Modo cambiado a: {nuevo_modo.upper()}")
 
-        # 6. Actualizar etiqueta de modelo en sidebar
-        textos_modelos = {
-            "general":      "🧠 Modelo: Gemini Flash",
-            "planificador": "🧠 Modelo: DeepSeek V4 (Thinking)",
-            "programador":  "🧠 Modelo: DeepSeek V4 (Fast)"
-        }
-        self.lbl_modelo_activo.configure(text=textos_modelos[nuevo_modo])
         self._scroll_abajo()
 
-    # ── Main area (tabs) ───────────────────────────────────────────────────────
+    def _build_separator(self):
+        sep = ctk.CTkFrame(self, width=1, fg_color=SIDEBAR_LINE, corner_radius=0)
+        sep.grid(row=0, column=1, rowspan=2, sticky="ns")
+
     def _build_main_area(self):
         self.tabs = ctk.CTkTabview(
             self, fg_color="transparent",
@@ -816,8 +774,8 @@ class OmniApp(ctk.CTk):
         self.log_box.pack(fill="both", expand=True, padx=10, pady=10)
         self.log_box.configure(state="disabled")
         sys.stdout = LogRedirector(self.log_box)
+        sys.stderr = LogRedirector(self.log_box)
 
-    # ── Chat area ──────────────────────────────────────────────────────────────
     def _build_chat_area(self, parent):
         self.chat_scroll = ctk.CTkScrollableFrame(
             parent, fg_color=BG_CHAT, corner_radius=0,
@@ -833,7 +791,6 @@ class OmniApp(ctk.CTk):
         self._welcome_label.pack(expand=True, pady=(120,0))
         self._build_input_bar()
 
-    # ── Input bar ──────────────────────────────────────────────────────────────
     def _build_input_bar(self):
         outer = ctk.CTkFrame(self, fg_color=BG_MAIN, corner_radius=0)
         outer.grid(row=1, column=2, sticky="ew")
@@ -845,6 +802,7 @@ class OmniApp(ctk.CTk):
         bar.grid_columnconfigure(0, weight=1)
         bar.grid_columnconfigure(1, weight=0)
         bar.grid_columnconfigure(2, weight=0)
+        bar.grid_columnconfigure(3, weight=0)  # botón guardar
 
         self.entry = ctk.CTkTextbox(bar, height=48, fg_color="transparent",
                                     font=FONT_CHAT, text_color=TEXT_PRIMARY,
@@ -852,9 +810,11 @@ class OmniApp(ctk.CTk):
         self.entry.grid(row=0, column=0, padx=(8,4), pady=6, sticky="ew")
         self.entry.bind("<Return>",       self._on_enter)
         self.entry.bind("<Shift-Return>", self._on_shift_enter)
+        self._placeholder_active = True
+        self._texto_real = ""
         self._set_placeholder()
 
-        # Botón adjuntar (📎)
+        # 📎 Botón adjuntar (carga en contexto)
         self.btn_attach = ctk.CTkButton(
             bar, text="📎", width=38, height=38,
             corner_radius=8, fg_color="transparent",
@@ -863,17 +823,26 @@ class OmniApp(ctk.CTk):
             command=self._adjuntar_archivo)
         self.btn_attach.grid(row=0, column=1, padx=(0,2), pady=6)
 
+        # 💾 Botón guardar en memoria (archivos -> bóveda)
+        self.btn_save_memory = ctk.CTkButton(
+            bar, text="💾", width=38, height=38,
+            corner_radius=8, fg_color="transparent",
+            hover_color=ACCENT_SOFT,
+            font=(_F, TAMANO_BASE + 1), text_color=TEXT_DIM,
+            command=self._guardar_archivos_en_memoria)
+        self.btn_save_memory.grid(row=0, column=2, padx=(0,2), pady=6)
+
+        # ▲ Botón enviar
         self.btn_send = ctk.CTkButton(bar, text="▲", width=42, height=42,
                                       corner_radius=10, fg_color=ACCENT,
                                       hover_color=ACCENT_HOVER,
                                       font=(_F, TAMANO_BASE, "bold"), text_color="#f0f0f0",
                                       command=self.enviar_mensaje)
-        self.btn_send.grid(row=0, column=2, padx=(0,8), pady=6)
+        self.btn_send.grid(row=0, column=3, padx=(0,8), pady=6)
 
         ctk.CTkLabel(outer, text="Enter · enviar   Shift+Enter · nueva línea",
                      font=FONT_UI_SM, text_color=TEXT_DIM).grid(row=1, column=0, pady=(2,10))
 
-    # ── Placeholder ────────────────────────────────────────────────────────────
     def _set_placeholder(self):
         self.entry.insert("1.0", "Escribí tu mensaje...")
         self.entry.configure(text_color=TEXT_DIM)
@@ -883,14 +852,12 @@ class OmniApp(ctk.CTk):
 
     def _clear_placeholder(self, event=None):
         if self._placeholder_active:
-            # Solo borramos si el contenido ES el placeholder, no texto real
             self.entry.delete("1.0", "end")
             self.entry.configure(text_color=TEXT_PRIMARY)
             self._placeholder_active = False
-            # Restaurar texto real que el usuario había escrito antes
-            if self.texto_sin_enviar:
-                self.entry.insert("1.0", self.texto_sin_enviar)
-                self.texto_sin_enviar = ""
+            if self._texto_real:
+                self.entry.insert("1.0", self._texto_real)
+                self._texto_real = ""
 
     def _restore_placeholder(self, event=None):
         contenido = self.entry.get("1.0", "end").strip()
@@ -899,13 +866,12 @@ class OmniApp(ctk.CTk):
             self.entry.configure(text_color=TEXT_DIM)
             self._placeholder_active = True
         else:
-            # Guardar el texto real antes de perder el foco
-            self.texto_sin_enviar = contenido
+            self._texto_real = contenido
 
     def _adjuntar_archivo(self):
-        """Abre diálogo para adjuntar archivo e inserta la ruta en el input."""
+        """Carga archivos en contexto volátil (NO en bóveda)."""
         rutas = filedialog.askopenfilenames(
-            title="Adjuntar archivos",
+            title="Adjuntar archivos (contexto)",
             filetypes=[
                 ("Todos los archivos", "*.*"),
                 ("Python", "*.py"),
@@ -919,15 +885,50 @@ class OmniApp(ctk.CTk):
             for ruta in rutas:
                 self.entry.insert("end", f"[adjunto: {ruta}]")
 
+    def _guardar_archivos_en_memoria(self):
+        """Guarda archivos seleccionados directamente en la bóveda RAG (memoria permanente)."""
+        rutas = filedialog.askopenfilenames(
+            title="Guardar archivos en memoria",
+            filetypes=[
+                ("Todos los archivos", "*.*"),
+                ("Python", "*.py"),
+                ("Texto", "*.txt"),
+                ("JSON", "*.json"),
+                ("Markdown", "*.md"),
+            ]
+        )
+        if not rutas:
+            return
+
+        contador = 0
+        for ruta in rutas:
+            nombre = os.path.basename(ruta)
+            contenido = leer_contenido_archivo(ruta)
+            if contenido.startswith("ERROR"):
+                self._agregar_sistema(f"❌ No se pudo leer {nombre}: {contenido}")
+                continue
+            # Guardar en bóveda
+            exito = guardar_recuerdo(
+                texto_a_guardar=contenido,
+                etiqueta_tema=f"Archivo: {nombre} (guardado manual)"
+            )
+            if exito:
+                contador += 1
+                self._agregar_sistema(f"✅ Guardado en memoria: {nombre}")
+            else:
+                self._agregar_sistema(f"❌ Error al guardar {nombre}")
+
+        self._agregar_sistema(f"📦 {contador} archivo(s) guardados en la bóveda de memoria.")
+
     def _on_enter(self, event):
         self.enviar_mensaje(); return "break"
 
     def _on_shift_enter(self, event):
         return
 
-    # ── Motor de micrófono ─────────────────────────────────────────────────────
+    # ── Micrófono ──────────────────────────────────────────────────────────────
     def motor_microfono(self):
-        while True:
+        while not self._stop_micro_event.is_set():
             try:
                 if audio_modulo.hablando_actualmente and keyboard.is_pressed('space'):
                     detener_voz()
@@ -949,18 +950,24 @@ class OmniApp(ctk.CTk):
 
     # ── Envío ──────────────────────────────────────────────────────────────────
     def enviar_mensaje(self):
-        if self._placeholder_active: return
+        if self._placeholder_active:
+            return
         texto = self.entry.get("1.0","end").strip()
-        if not texto: return
+        if not texto:
+            return
         if hasattr(self,"_welcome_label") and self._welcome_label.winfo_exists():
             self._welcome_label.destroy()
         self.entry.delete("1.0","end")
         self._placeholder_active = False
+        self._texto_real = ""
         self._agregar_usuario(texto)
         self.burbuja_ia_actual = None
-        threading.Thread(target=enviar_a_gemini,
-                         args=(texto, False, self.callback_ia),
-                         daemon=True).start()
+        try:
+            threading.Thread(target=enviar_a_gemini,
+                             args=(texto, False, self.callback_ia),
+                             daemon=True).start()
+        except Exception as e:
+            self._agregar_sistema(f"Error al enviar mensaje: {e}")
 
     # ── Callback IA ───────────────────────────────────────────────────────────
     def callback_ia(self, remitente, texto: str, color=None, nueva_linea=True):
@@ -968,13 +975,11 @@ class OmniApp(ctk.CTk):
             if hasattr(self,"_welcome_label") and self._welcome_label.winfo_exists():
                 self._welcome_label.destroy()
 
-            # Mensaje de sistema
             if remitente and remitente != "🤖 Argus" and texto.strip():
                 self._agregar_sistema(texto)
                 self._scroll_abajo()
                 return
 
-            # FIN del stream
             if nueva_linea and texto == "":
                 if self.burbuja_ia_actual:
                     self.burbuja_ia_actual.finalizar()
@@ -982,16 +987,15 @@ class OmniApp(ctk.CTk):
                 self._scroll_abajo()
                 return
 
-            # Crear burbuja si no existe
             if not self.burbuja_ia_actual:
                 self.burbuja_ia_actual = AIBubble(self.chat_scroll)
                 self.burbuja_ia_actual.pack(fill="x", padx=CHAT_PAD_X, pady=(2,6))
+                self.burbuja_ia_actual.mostrar_carga()
 
-            # Chunk de texto
             if texto:
                 self.burbuja_ia_actual.append_text(texto)
 
-            self.after(50, self._scroll_abajo) # Fase 1.2: Scroll suave activado
+            self.after(50, self._scroll_abajo)
         self.after(0, _update)
 
     def _agregar_sistema(self, texto: str):
@@ -1009,21 +1013,14 @@ class OmniApp(ctk.CTk):
         self._scroll_abajo()
 
     def _scroll_abajo(self):
-        self.update_idletasks() # Fase 1.2: Parche para evitar crasheos visuales
+        self.after(10, self._scroll_abajo_impl)
+
+    def _scroll_abajo_impl(self):
         try:
             if hasattr(self.chat_scroll, "_parent_canvas"):
                 self.chat_scroll._parent_canvas.yview_moveto(1.0)
         except Exception:
             pass
-
-    def _nueva_conversacion(self):
-        for w in self.chat_scroll.winfo_children():
-            w.destroy()
-        self.burbuja_ia_actual = None
-        self._welcome_label = ctk.CTkLabel(
-            self.chat_scroll, text="¿En qué puedo ayudarte hoy?",
-            font=(_F, TAMANO_BASE + 11, "bold"), text_color="#2a2a3e")
-        self._welcome_label.pack(expand=True, pady=(120,0))
 
 if __name__ == "__main__":
     app = OmniApp()

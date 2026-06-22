@@ -19,8 +19,12 @@ from modulos.git_bot import sincronizar_proyecto_git, ejecutar_comando_git_libre
 from modulos.memoria import guardar_recuerdo
 from modulos.cliente_mcp import cliente_sistema 
 
-# Importación de Prompts Separados
-from modulos.prompts import obtener_prompt_planificador, obtener_prompt_programador, obtener_prompt_general
+from modulos.prompts import (
+    obtener_prompt_planificador,
+    obtener_prompt_programador,
+    obtener_prompt_general,
+    obtener_prompt_programador_unificado
+)
 
 # =====================================================================
 # INICIALIZACIÓN DE CLIENTES IA
@@ -47,17 +51,10 @@ lista_herramientas_mcp = [
 # =====================================================================
 # HELPER: STREAMING DE VOZ PARALELO AL STREAMING DE IA
 # =====================================================================
-# Caracteres que delimitan el fin de una oración "speakeable"
 _PATRON_CORTE_VOZ = re.compile(r'(?<=[.!?])\s+')
-_MIN_CHARS_CHUNK_VOZ = 80  # No hablar hasta tener al menos este largo
+_MIN_CHARS_CHUNK_VOZ = 80
 
 def _procesar_buffer_voz(buffer: str, forzar: bool = False) -> str:
-    """
-    Analiza el buffer acumulado de texto de la IA.
-    Si hay una oración completa (termina en . ! ?), la encola para hablar.
-    Devuelve el buffer restante (lo que todavía no se habló).
-    Si forzar=True, habla lo que quede aunque esté incompleto (fin de respuesta).
-    """
     while True:
         match = _PATRON_CORTE_VOZ.search(buffer)
         if match and len(buffer[:match.end()].strip()) >= _MIN_CHARS_CHUNK_VOZ:
@@ -66,12 +63,9 @@ def _procesar_buffer_voz(buffer: str, forzar: bool = False) -> str:
             buffer = buffer[match.end():]
         else:
             break
-
-    # Al final de la respuesta, hablamos lo que quedó
     if forzar and buffer.strip():
         encolar_texto_para_hablar(buffer.strip())
         buffer = ""
-
     return buffer
 
 
@@ -79,13 +73,12 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
     """Enrutador Universal y traductor de acciones."""
     import config
     CONTEXTO_CHAT = config.estado.contexto_chat
-    ARCHIVO_PENDIENTE_INYECCION = config.estado.archivo_pendiente_inyeccion
     DOCUMENTO_VOLATIL = config.estado.documento_volatil
     PENDIENTE_DE_BORRADO = config.estado.pendiente_de_borrado
     PENDIENTE_DE_GIT = config.estado.pendiente_de_git
     WORKSPACE_ACTUAL = config.estado.workspace_actual
     SNAPSHOT_ACTUAL = config.estado.snapshot_actual
-    MODO_ACTUAL = config.estado.modo_actual
+    MODO_ACTUAL = config.estado.modo_actual  # Leer de config.estado
     ARCHIVOS_EN_MEMORIA = config.estado.archivos_en_memoria
     
     config.RUTA_WORKSPACE_ACTUAL = WORKSPACE_ACTUAL
@@ -98,14 +91,15 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         return
 
     # =================================================================
-    # 🩹 INTERCEPTOR DE ADJUNTOS
+    # 🩹 INTERCEPTOR DE ADJUNTOS (SIEMPRE A CONTEXTO VOLÁTIL)
     # =================================================================
     if "[adjunto:" in texto_usuario.lower():
         rutas_extraidas = re.findall(r'\[adjunto:\s*(.*?)\]', texto_usuario, re.IGNORECASE)
         if rutas_extraidas:
             texto_usuario = re.sub(r'\[adjunto:\s*.*?\]', '', texto_usuario, flags=re.IGNORECASE).strip()
-            procesar_archivo_adjunto(rutas_extraidas, ui_callback)
-            return
+            cargar_adjuntos_en_contexto(rutas_extraidas, ui_callback)
+            if not texto_usuario:
+                return
 
     # =================================================================
     # 🛡️ ESCUDOS DE SEGURIDAD (Confirmaciones de UI)
@@ -161,30 +155,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg]}])
         return
 
-    if ARCHIVO_PENDIENTE_INYECCION:
-        tarea_inyeccion = ARCHIVO_PENDIENTE_INYECCION
-        config.estado.archivo_pendiente_inyeccion = None
-        
-        evaluador = genai.GenerativeModel("gemini-flash-lite-latest")
-        prompt_juez = f"El usuario debe confirmar guardar adjuntos. Su respuesta: '{texto_usuario}'. Responde CONFIRMADO o CANCELADO."
-        try: decision = evaluador.generate_content(prompt_juez).text.strip().upper()
-        except: decision = "CANCELADO"
-        
-        if "CONFIRMADO" in decision:
-            for archivo_dict in tarea_inyeccion:
-                nombre = archivo_dict["nombre"]
-                contenido = archivo_dict["contenido"]
-                chunks = [contenido[i:i+1500] for i in range(0, len(contenido), 1500)]
-                for chunk in chunks: guardar_recuerdo(texto_a_guardar=chunk, etiqueta_tema=f"Doc: {nombre}")
-            msg = f"¡Perfecto! Inyecté los archivos en la bóveda permanente."
-            config.estado.documento_volatil = "" 
-        else: msg = "Entendido. Dejé los archivos en mi memoria a corto plazo."
-            
-        if ui_callback: ui_callback("🤖 Argus", msg, "#A8C7FA")
-        if modo_voz: hablar_no_bloqueante("Listo, decisión aplicada.")
-        CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg]}])
-        return 
-
     # =================================================================
     # 🧠 TRADUCTOR INSTANTÁNEO DE INTENCIONES NATURALES
     # =================================================================
@@ -222,15 +192,19 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             texto_snapshot = f"[ESTADO DEL PROYECTO]:\n{SNAPSHOT_ACTUAL}\n\n" if SNAPSHOT_ACTUAL else ""
             texto_doc_volatil = f"[DOCUMENTOS EN MEMORIA]:\n{DOCUMENTO_VOLATIL}\n\n" if DOCUMENTO_VOLATIL else ""
 
-            if MODO_ACTUAL == "planificador":
-                contexto_sistema = obtener_prompt_planificador(texto_workspace, texto_snapshot, texto_doc_volatil)
+            # ─── SELECCIÓN DE MODELO Y CONTEXTO (USANDO config.estado.modo_actual) ──
+            MODO_ACTUAL = config.estado.modo_actual
+            if MODO_ACTUAL in ["programador", "planificador"]:
+                contexto_sistema = obtener_prompt_programador_unificado(
+                    texto_workspace, texto_snapshot, texto_doc_volatil
+                )
                 modelo_activo = "deepseek-reasoner"
-            elif MODO_ACTUAL == "programador":
-                contexto_sistema = obtener_prompt_programador(texto_workspace, texto_snapshot, texto_doc_volatil)
-                modelo_activo = "deepseek-chat"
             else:
                 ruta_home = os.path.expanduser("~") 
-                contexto_sistema = obtener_prompt_general(fecha_hoy, ruta_home, ventanas_abiertas, texto_workspace, texto_snapshot, texto_doc_volatil)
+                contexto_sistema = obtener_prompt_general(
+                    fecha_hoy, ruta_home, ventanas_abiertas,
+                    texto_workspace, texto_snapshot, texto_doc_volatil
+                )
                 modelo_activo = "gemini"
 
             print(f"\n🤖 Argus dice:\n---")
@@ -254,7 +228,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 
                 if ui_callback: ui_callback("🤖 Argus", "", "#A8C7FA", nueva_linea=False)
 
-                # ✅ MEJORA: buffer de voz para hablar en paralelo al streaming
                 buffer_voz = ""
 
                 for chunk in response:
@@ -276,14 +249,12 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                 respuesta_ia += part.text
                                 if ui_callback: ui_callback("", part.text, "#E8EAED", nueva_linea=False)
                                 
-                                # ✅ NUEVO: acumular en buffer y hablar apenas haya oraciones completas
                                 if modo_voz and not usaste_mcp:
                                     buffer_voz += part.text
                                     buffer_voz = _procesar_buffer_voz(buffer_voz, forzar=False)
 
                     except Exception: pass
 
-                # ✅ Hablar el resto del buffer al terminar el stream
                 if modo_voz and buffer_voz.strip() and not usaste_mcp:
                     _procesar_buffer_voz(buffer_voz, forzar=True)
 
@@ -308,7 +279,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                         _procesar_buffer_voz(buffer_voz_2, forzar=True)
 
             else:
-                # DeepSeek (planificador / programador)
+                # DeepSeek (programador / planificador)
                 mensajes_ds = [{"role": "system", "content": contexto_sistema}]
                 for msg in CONTEXTO_CHAT:
                     rol_ds = "assistant" if msg['role'] == "model" else "user"
@@ -331,7 +302,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                         print(texto_chunk, end='', flush=True)
                         respuesta_ia += texto_chunk
                         if ui_callback: ui_callback("", texto_chunk, "#E8EAED", nueva_linea=False)
-                        # ✅ NUEVO: streaming de voz también para DeepSeek
                         if modo_voz:
                             buffer_voz_ds += texto_chunk
                             buffer_voz_ds = _procesar_buffer_voz(buffer_voz_ds, forzar=False)
@@ -375,11 +345,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [respuesta_final]}])
             return
 
-    # ✅ FALLBACK: si por alguna razón no se habló nada en streaming, hablar ahora
-    if modo_voz and respuesta_ia and not comando_directo:
-        pass  # Ya se habló en streaming; no repetir
-
-    # Para comandos directos (github, etc.) que no pasan por streaming
     if modo_voz and comando_directo:
         hablar_no_bloqueante(respuesta_ia)
     
@@ -390,35 +355,51 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
 
 
 # =====================================================================
-# PROCESAMIENTO DE ARCHIVOS ADJUNTOS
+# PROCESAMIENTO DE ARCHIVOS ADJUNTOS (SIEMPRE A CONTEXTO)
 # =====================================================================
-def procesar_archivo_adjunto(rutas_archivos, ui_callback=None):
+def cargar_adjuntos_en_contexto(rutas_archivos, ui_callback=None):
     import config
-    if isinstance(rutas_archivos, str): rutas_archivos = [rutas_archivos]
-    if ui_callback: ui_callback("⚙️ Sistema", f"📄 Leyendo {len(rutas_archivos)} archivo(s)...", "#80868B")
+    if isinstance(rutas_archivos, str):
+        rutas_archivos = [rutas_archivos]
+    
+    if ui_callback:
+        ui_callback("⚙️ Sistema", f"📄 Leyendo {len(rutas_archivos)} archivo(s)...", "#80868B")
     
     archivos_procesados = []
     contenido_volatil_acumulado = ""
+    
     for ruta in rutas_archivos:
         nombre_archivo = os.path.basename(ruta)
         carpeta_padre = os.path.basename(os.path.dirname(ruta)) or "Proyecto_General"
         identificador_unico = f"{carpeta_padre}/{nombre_archivo}"
         contenido = leer_contenido_archivo(ruta)
         
-        if contenido == "CODIGO_ERROR_NO_ENCONTRADO" or contenido.startswith("CODIGO_ERROR_LECTURA:"): continue
+        if contenido == "CODIGO_ERROR_NO_ENCONTRADO" or contenido.startswith("CODIGO_ERROR_LECTURA:"):
+            if ui_callback:
+                ui_callback("⚙️ Sistema", f"❌ No se pudo leer: {identificador_unico}", "#FF4500")
+            continue
+        
         archivos_procesados.append({"nombre": identificador_unico, "contenido": contenido})
         contenido_volatil_acumulado += f"\n\n--- INICIO: {identificador_unico} ---\n{contenido}\n--- FIN: {identificador_unico} ---"
 
-    if not archivos_procesados: return
-    
-    config.estado.archivo_pendiente_inyeccion = archivos_procesados
+    if not archivos_procesados:
+        if ui_callback:
+            ui_callback("⚙️ Sistema", "❌ No se pudo leer ningún archivo.", "#FF4500")
+        return
+
     config.estado.documento_volatil = contenido_volatil_acumulado
-    nombres_str = ", ".join([f"'{a['nombre']}'" for a in archivos_procesados])
-    
+
     try:
-        resumen = genai.GenerativeModel("gemini-flash-lite-latest").generate_content(f"Resume en 2 líneas:\n\n{contenido_volatil_acumulado[:8000]}").text.strip()
-    except: resumen = "Documentos cargados."
+        resumen = genai.GenerativeModel("gemini-flash-lite-latest").generate_content(
+            f"Resume en 2 líneas el contenido de estos archivos:\n\n{contenido_volatil_acumulado[:8000]}"
+        ).text.strip()
+    except:
+        resumen = "Documentos cargados en contexto."
+
+    nombres_str = ", ".join([f"'{a['nombre']}'" for a in archivos_procesados])
+    msg = f"✅ {len(archivos_procesados)} archivo(s) cargado(s) en contexto:\n{nombres_str}\n\n{resumen}"
     
-    msg = f"Cargué {len(archivos_procesados)} archivo(s): {nombres_str}.\n\n*{resumen}*\n\n¿Querés que los guarde en la bóveda permanente, o solo charlamos de esto ahora?"
-    if ui_callback: ui_callback("🤖 Argus", msg, "#FFA500")
-    config.estado.contexto_chat.append({'role': 'model', 'parts': [msg]})
+    if ui_callback:
+        ui_callback("⚙️ Sistema", msg, "#86EFAC")
+    
+    config.estado.contexto_chat.append({'role': 'user', 'parts': [f"[SISTEMA] Archivos cargados en contexto: {nombres_str}"]})

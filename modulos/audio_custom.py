@@ -288,7 +288,7 @@ def capturar_voz_micro():
 
     segmentos, _ = modelo_activo.transcribe(
         archivo_temporal,
-        beam_size=1,
+        beam_size=4,
         language="es",
         vad_filter=True
     )
