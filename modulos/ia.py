@@ -10,11 +10,14 @@ import config
 # ─── Importación de logger ──────────────────────────────────────────────
 from modulos.logger import logger
 
+# ─── Importación del gestor de skills ────────────────────────────────────
+from modulos.skills.gestor_skills import gestor
+
 # Importación de llaves
 from config import GEMINI_API_KEY, DEEPSEEK_API_KEY
 
 from modulos.archivos import eliminar_elemento, leer_contenido_archivo
-from modulos.sistema import obtener_ventanas_activas
+from modulos.sistema import obtener_ventanas_activas, obtener_estado_pc, escanear_hardware_completo, explorar_directorio
 from modulos.busqueda import buscar_en_internet
 from modulos.audio_custom import hablar_no_bloqueante, encolar_texto_para_hablar, detener_voz
 from modulos.vision import capturar_pantalla
@@ -29,6 +32,9 @@ from modulos.prompts import (
     obtener_prompt_programador_unificado
 )
 
+# ─── Usar la instancia global del gestor ────────────────────────────────
+gestor_skills = gestor
+
 # =====================================================================
 # INICIALIZACIÓN DE CLIENTES IA
 # =====================================================================
@@ -38,12 +44,53 @@ cliente_deepseek = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepse
 # =====================================================================
 # HERRAMIENTAS NATIVAS MCP (GEMINI)
 # =====================================================================
-def mcp_estado_pc(): return cliente_sistema.ejecutar("reporte_estado_pc")
-def mcp_hardware_pc(): return cliente_sistema.ejecutar("reporte_hardware")
-def mcp_buscar_en_boveda(consulta: str): return cliente_sistema.ejecutar("buscar_en_boveda", {"consulta": consulta})
-def mcp_guardar_en_boveda(dato: str): return cliente_sistema.ejecutar("guardar_en_boveda", {"dato": dato})
-def mcp_explorar_ruta(ruta: str): return cliente_sistema.ejecutar("explorar_ruta", {"ruta": ruta})
-def mcp_leer_documento(ruta: str): return cliente_sistema.ejecutar("leer_documento", {"ruta": ruta})
+def mcp_estado_pc():
+    """
+    Obtiene el estado en tiempo real del PC: uso de CPU en porcentaje,
+    uso y cantidad de RAM, temperatura actual de la GPU en °C, y VRAM usada.
+    Usar cuando el usuario pregunte por temperatura de GPU, uso de CPU,
+    uso de RAM, o rendimiento actual del sistema.
+    """
+    return obtener_estado_pc()
+
+def mcp_hardware_pc():
+    """
+    Obtiene información estática del hardware instalado: modelo exacto del
+    procesador (CPU), modelo de la tarjeta gráfica (GPU) y placa madre.
+    Usar cuando el usuario pregunte QUÉ componentes tiene instalados,
+    NO para temperatura ni uso en tiempo real.
+    """
+    hw = escanear_hardware_completo()
+    return f"CPU: {hw['cpu']} | GPU: {hw['gpu']} | Placa madre: {hw['motherboard']}"
+
+def mcp_buscar_en_boveda(consulta: str):
+    """Busca recuerdos o información guardada previamente en la memoria a largo plazo (bóveda)."""
+    return cliente_sistema.ejecutar("buscar_en_boveda", {"consulta": consulta})
+
+def mcp_guardar_en_boveda(dato: str):
+    """Guarda un dato, recuerdo o información importante en la memoria a largo plazo (bóveda)."""
+    return cliente_sistema.ejecutar("guardar_en_boveda", {"dato": dato})
+
+def mcp_explorar_ruta(ruta: str):
+    """
+    Lista y muestra el contenido (archivos y carpetas) de un directorio en el chat,
+    SIN abrir ninguna ventana en Windows.
+    Usar SOLO cuando el usuario pida VER o LISTAR el contenido de una carpeta
+    (ej: "qué hay en el escritorio", "listá mis descargas", "qué archivos tengo en documentos").
+    NO usar si el usuario dice "abrí", "abrir", "mostrame la carpeta", "abrí el escritorio" —
+    en esos casos se debe usar el comando de texto: abrir: ruta_completa
+    """
+    return explorar_directorio(ruta)
+
+def mcp_leer_documento(ruta: str):
+    """
+    Lee y devuelve el contenido completo de un archivo de texto del sistema.
+    Usar cuando el usuario pida leer, ver o abrir el contenido de un archivo específico.
+    """
+    contenido = leer_contenido_archivo(ruta)
+    if contenido == "CODIGO_ERROR_NO_ENCONTRADO" or contenido.startswith("CODIGO_ERROR_LECTURA:"):
+        return f"Error: No se pudo encontrar o abrir el archivo '{ruta}'. Verificá que la ruta sea correcta."
+    return f"Contenido del archivo:\n{contenido}"
 
 lista_herramientas_mcp = [
     mcp_estado_pc, mcp_hardware_pc, mcp_buscar_en_boveda,
@@ -71,10 +118,10 @@ def _procesar_buffer_voz(buffer: str, forzar: bool = False) -> str:
     return buffer
 
 # =====================================================================
-# ENRUTADOR PRINCIPAL CON MANEJO DE ERRORES MEJORADO
+# ENRUTADOR PRINCIPAL CON MANEJO DE ERRORES MEJORADO Y SKILLS
 # =====================================================================
 def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
-    """Enrutador Universal y traductor de acciones."""
+    """Enrutador Universal y traductor de acciones con soporte para Skills."""
     import config
     CONTEXTO_CHAT = config.estado.contexto_chat
     DOCUMENTO_VOLATIL = config.estado.documento_volatil
@@ -196,6 +243,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
     resultado_mcp = ""
     modelo_gemini = None
     error_ocurrido = False
+    skill_activa = False
 
     if comando_directo:
         respuesta_ia = comando_directo
@@ -228,12 +276,37 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 )
                 modelo_activo = "gemini"
 
+            # ─── INYECCIÓN DE SKILLS RELEVANTES ──────────────────────────────
+            skill_info = gestor_skills.obtener_skill_relevante(texto_usuario)
+            if skill_info:
+                nombre_skill, instrucciones = skill_info
+                skill_activa = True
+                logger.info(f"🧠 Skill activada: {nombre_skill}")
+                contexto_sistema += f"\n\n[SKILL ACTIVADA: {nombre_skill}]\n\n"
+                contexto_sistema += instrucciones
+                contexto_sistema += "\n\n[FIN DE SKILL]\n"
+                if ui_callback:
+                    ui_callback("⚙️ Sistema", f"🧠 Skill activada: {nombre_skill}", "#A8C7FA")
+
             logger.debug(f"Modelo activo: {modelo_activo}")
             print(f"\n🤖 Argus dice:\n---")
 
             # ─── GEMINI ────────────────────────────────────────────────────────
             if modelo_activo == "gemini":
-                modelo_gemini = genai.GenerativeModel("gemini-flash-lite-latest", system_instruction=contexto_sistema, tools=lista_herramientas_mcp)
+                # 🔥 NUEVO: Si hay skill activa, NO pasamos herramientas MCP
+                if skill_activa:
+                    modelo_gemini = genai.GenerativeModel(
+                        "gemini-flash-lite-latest",
+                        system_instruction=contexto_sistema
+                        # Sin tools para forzar el uso de buscar_en_internet
+                    )
+                else:
+                    modelo_gemini = genai.GenerativeModel(
+                        "gemini-flash-lite-latest",
+                        system_instruction=contexto_sistema,
+                        tools=lista_herramientas_mcp
+                    )
+
                 mensajes_para_gemini = list(CONTEXTO_CHAT)
                 partes_usuario = [texto_usuario]
 
@@ -294,9 +367,13 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                     args = {k: v for k, v in part.function_call.args.items()}
                                     try:
                                         if n_func == "mcp_estado_pc":
+                                            # Bypass directo: temperatura GPU + uso CPU/RAM en tiempo real
                                             resultado_mcp = mcp_estado_pc()
+                                            logger.debug("mcp_estado_pc: bypass local directo")
                                         elif n_func == "mcp_hardware_pc":
+                                            # Bypass directo: info estática de hardware
                                             resultado_mcp = mcp_hardware_pc()
+                                            logger.debug("mcp_hardware_pc: bypass local directo")
                                         elif n_func == "mcp_buscar_en_boveda":
                                             resultado_mcp = mcp_buscar_en_boveda(args.get("consulta", ""))
                                         elif n_func == "mcp_guardar_en_boveda":
@@ -305,6 +382,13 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                             resultado_mcp = mcp_explorar_ruta(args.get("ruta", ""))
                                         elif n_func == "mcp_leer_documento":
                                             resultado_mcp = mcp_leer_documento(args.get("ruta", ""))
+                                        # Mostrar en UI que se obtuvo el dato
+                                        if resultado_mcp and "TIMEOUT" not in str(resultado_mcp):
+                                            if ui_callback:
+                                                ui_callback("⚙️ Sistema", f"✅ Dato obtenido: {str(resultado_mcp)[:120]}...", "#80868B")
+                                        elif resultado_mcp and "TIMEOUT" in str(resultado_mcp):
+                                            if ui_callback:
+                                                ui_callback("⚙️ Sistema", "⚠️ MCP tardó demasiado, usando datos locales.", "#FFA500")
                                     except Exception as e:
                                         logger.exception(f"Error ejecutando herramienta MCP {n_func}")
                                         ui_callback("⚙️ Sistema", f"❌ Error en herramienta {n_func}: {str(e)[:80]}", "#FF4500")
@@ -328,30 +412,43 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                     if modo_voz and buffer_voz.strip() and not usaste_mcp:
                         _procesar_buffer_voz(buffer_voz, forzar=True)
 
-                # ─── MCP ──────────────────────────────────────────────────────
-                if usaste_mcp and modelo_gemini and not error_ocurrido:
+                # ─── MCP SEGUNDA RONDA ────────────────────────────────────────
+                if usaste_mcp and modelo_gemini and not error_ocurrido and not skill_activa:
                     try:
-                        mensajes_para_gemini.append({'role': 'model', 'parts': ['Analizando los datos del sistema...']})
-                        mensajes_para_gemini.append({'role': 'user', 'parts': [f"[DATO DEL SISTEMA: {resultado_mcp}]. Responde naturalmente."]})
-                        response_2 = modelo_gemini.generate_content(mensajes_para_gemini, stream=True)
-                        buffer_voz_2 = ""
-                        for chunk_2 in response_2:
-                            try:
-                                for part in chunk_2.parts:
-                                    if getattr(part, "text", None):
-                                        print(part.text, end='', flush=True)
-                                        respuesta_ia += part.text
-                                        if ui_callback:
-                                            ui_callback("", part.text, "#E8EAED", nueva_linea=False)
-                                        if modo_voz:
-                                            buffer_voz_2 += part.text
-                                            buffer_voz_2 = _procesar_buffer_voz(buffer_voz_2, forzar=False)
-                            except Exception as e:
-                                logger.exception("Error procesando chunk MCP")
-                                ui_callback("⚙️ Sistema", f"❌ Error en respuesta MCP: {str(e)[:80]}", "#FF4500")
-                                break
-                        if modo_voz and buffer_voz_2.strip():
-                            _procesar_buffer_voz(buffer_voz_2, forzar=True)
+                        if not resultado_mcp or "TIMEOUT" in str(resultado_mcp):
+                            if ui_callback:
+                                ui_callback("⚙️ Sistema", "⚠️ No se obtuvo dato del sistema. Verifica que el servidor MCP esté activo.", "#FFA500")
+                        else:
+                            mensajes_para_gemini.append({'role': 'model', 'parts': ['Obteniendo datos del sistema...']})
+                            mensajes_para_gemini.append({'role': 'user', 'parts': [
+                                f"[DATO DEL SISTEMA OBTENIDO]: {resultado_mcp}\n\n"
+                                "Respondé al usuario de forma natural y directa con este dato. "
+                                "No inventes valores que no estén en el dato. "
+                                "Si falta algún dato (ej. temperatura de CPU), decílo explícitamente."
+                            ]})
+                            response_2 = modelo_gemini.generate_content(mensajes_para_gemini, stream=True)
+                            if ui_callback:
+                                ui_callback("🤖 Argus", "", "#A8C7FA", nueva_linea=True)
+                            buffer_voz_2 = ""
+                            for chunk_2 in response_2:
+                                try:
+                                    for part in chunk_2.parts:
+                                        if getattr(part, "text", None):
+                                            print(part.text, end='', flush=True)
+                                            respuesta_ia += part.text
+                                            if ui_callback:
+                                                ui_callback("", part.text, "#E8EAED", nueva_linea=False)
+                                            if modo_voz:
+                                                buffer_voz_2 += part.text
+                                                buffer_voz_2 = _procesar_buffer_voz(buffer_voz_2, forzar=False)
+                                except Exception as e:
+                                    logger.exception("Error procesando chunk MCP")
+                                    ui_callback("⚙️ Sistema", f"❌ Error en respuesta MCP: {str(e)[:80]}", "#FF4500")
+                                    break
+                            if ui_callback:
+                                ui_callback("", "", "#E8EAED", nueva_linea=True)
+                            if modo_voz and buffer_voz_2.strip():
+                                _procesar_buffer_voz(buffer_voz_2, forzar=True)
                     except Exception as e:
                         logger.exception("Error en generación MCP")
                         ui_callback("⚙️ Sistema", f"❌ Error en generación MCP: {str(e)[:80]}", "#FF4500")
@@ -455,8 +552,11 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         if comando_busqueda and getattr(config.estado, 'modo_actual', 'general') == "general":
             if ui_callback:
                 ui_callback("⚙️ Sistema", f"🌍 Buscando en internet: {comando_busqueda}", "#80868B")
-            datos_encontrados = buscar_en_internet(comando_busqueda)
-            if "No se encontraron" not in datos_encontrados and modelo_gemini:
+            datos_encontrados = buscar_en_internet(comando_busqueda, reciente=skill_activa)
+            if "No se encontraron" in datos_encontrados or "error de conexión" in datos_encontrados.lower():
+                if ui_callback:
+                    ui_callback("⚙️ Sistema", "⚠️ No se encontraron resultados web. Respondiendo con conocimiento interno.", "#FFA500")
+            elif modelo_gemini:
                 try:
                     mensajes_secundarios = list(CONTEXTO_CHAT) + [
                         {'role': 'user', 'parts': [texto_usuario]},

@@ -1,116 +1,81 @@
-# PROJECT_STATE.md — Fuente de la Verdad del Proyecto Argus
-
----
+# PROJECT_STATE.md — Argus (Personal AI Assistant)
 
 ## 1. Resumen Ejecutivo
 
-**Argus** es un asistente de inteligencia artificial de escritorio integrado al sistema operativo Windows. Actúa como un copiloto conversacional capaz de interactuar mediante texto y voz, leer/escribir archivos locales, controlar ventanas y programas, gestionar un repositorio local de memoria vectorial (ChromaDB), realizar búsquedas web, y programar con ayuda de modelos avanzados (Gemini Flash Lite y DeepSeek Reasoner). El proyecto está orientado a desarrolladores y usuarios avanzados, ofreciendo modos especializados (General, Programador/Planificador) con acceso seguro al sistema de archivos mediante un sandbox dinámico.
+Argus es un asistente de IA de escritorio integrado en Windows, que combina procesamiento de lenguaje natural (Gemini/DeepSeek), control del sistema (abrir programas, mover ventanas, ejecutar comandos), búsqueda web (DuckDuckGo), captura de pantalla, memoria vectorial a largo plazo (ChromaDB), control por voz (Edge TTS + Whisper) y un sistema de plugins (Skills). Su propósito es servir como interfaz conversacional para productividad, programación y gestión del entorno del usuario.
 
----
+## 2. Arquitectura
 
-## 2. Arquitectura y Módulos Principales
+### Módulos principales y responsabilidad de cada archivo
 
-### 2.1. Estructura de Archivos
+| Archivo | Función |
+|---------|---------|
+| `config.py` | Variables globales, API keys, límites de seguridad, estado global thread-safe (`EstadoGlobal`). |
+| `main_gui.py` | Interfaz gráfica con CustomTkinter: sidebar, chat burbujas, input bar, pestaña de logs. |
+| `gestor_boveda.py` | CLI para administrar la memoria vectorial (listar/borrar/formatear colecciones ChromaDB). |
+| `modulos/ia.py` | Enrutador principal de IA: decide modelo (Gemini/DeepSeek), maneja streaming, acciones, skills y contexto. |
+| `modulos/controlador_acciones.py` | Parsea comandos de la IA (guardar_archivo, reemplazar_bloque, buscar web, git, etc.) y ejecuta modificaciones seguras. |
+| `modulos/archivos.py` | Operaciones seguras de archivos: leer, escribir, eliminar, listar, validar rutas (sandbox). |
+| `modulos/sistema.py` | Control del sistema Windows: abrir programas con radar inteligente, mover ventanas, cerrar procesos, explorar directorios, obtener hardware. |
+| `modulos/audio_custom.py` | Síntesis de voz (Edge TTS), reproducción con pygame, cola de chunks, captura de micrófono (Whisper). |
+| `modulos/vision.py` | Captura de pantalla con PIL, soporte multimonitor. |
+| `modulos/memoria.py` | Memoria vectorial ChromaDB (guardar/recuperar recuerdos), snapshot del proyecto, watchdog (radar de cambios). |
+| `modulos/busqueda.py` | Búsqueda web real con DuckDuckGo (ddgs). |
+| `modulos/crawler.py` | Extrae código completo del proyecto (sin .git, venv) para análisis con DeepSeek. |
+| `modulos/git_bot.py` | Integración Git (init/add/commit/pull/push) con GitPython. |
+| `modulos/cliente_mcp.py` | Cliente asíncrono para el servidor MCP (`modulos/servidor_sistema_mcp.py`). |
+| `modulos/servidor_sistema_mcp.py` | Servidor MCP que expone herramientas: estado PC, hardware, búsqueda/guardado en bóveda, explorar/leer archivos. |
+| `modulos/prompts.py` | Generación de prompts según el modo (general, programador unificado). |
+| `modulos/logger.py` | Configuración centralizada de logging con archivo y consola. |
+| `modulos/skills/gestor_skills.py` | Carga skills desde subcarpetas (`SKILL.md`, `instructions.md`, `ejemplos.md`) y detecta relevancia por palabras clave. |
+| `modulos/skills/busqueda_web_actualizada/` | Skill de ejemplo: búsqueda web con filtros de fecha, prioriza resultados recientes. |
 
-| Ruta | Propósito |
-|---|---|
-| `main_gui.py` | Punto de entrada principal. Interfaz gráfica con CustomTkinter, manejo de burbujas de chat, entrada de texto, botones de adjuntar/guardar, pestaña de logs y cambio de modo. Renderizado de Markdown extendido (código, tablas, listas) en las burbujas de IA. |
-| `config.py` | Configuración global: API keys, límites de seguridad, parámetros de Whisper, clase EstadoGlobal thread-safe que centraliza el estado de la sesión (modo, workspace, contexto, archivos en memoria, etc.). |
-| `gestor_boveda.py` | Herramienta CLI para listar, eliminar documentos o hacer hard reset de la base de datos vectorial (ChromaDB). |
-| `requirements.txt` | Dependencias externas del proyecto. |
-| `modulos/archivos.py` | Funciones seguras de lectura/escritura/eliminación/creación de archivos y carpetas, con validación de sandbox, límites de tamaño y espacio en disco. |
-| `modulos/audio_custom.py` | Captura de voz con micrófono mediante `sounddevice` y transcripción con `faster-whisper`. Síntesis de voz con `edge-tts` y reproducción asíncrona con `pygame`. |
-| `modulos/busqueda.py` | Búsqueda web real mediante DuckDuckGo (`ddgs`), devuelve resultados textuales. |
-| `modulos/cliente_mcp.py` | Cliente asíncrono para el servidor MCP local (`modulos/servidor_sistema_mcp.py`). Permite ejecutar herramientas del servidor desde el flujo principal. |
-| `modulos/controlador_acciones.py` | Intérprete y ejecutor de comandos generados por la IA (guardar_archivo, reemplazar_bloque, leer_archivo, buscar, github, etc.). Contiene lógica de reemplazo flexible (regex) y protección de sandbox. |
-| `modulos/crawler.py` | Recorre un proyecto para extraer el código completo de todos los archivos fuente (`.py`, `.md`, `.json`, `.txt`), omitiendo carpetas no relevantes. |
-| `modulos/git_bot.py` | Integración con GitPython: init, add, commit, pull (con rebase) y push. Soporte para reset remoto y comandos libres. |
-| `modulos/ia.py` | **Enrutador principal de inteligencia artificial**. Maneja la lógica de envío a Gemini o DeepSeek según el modo, procesamiento de MCP, streaming de voz, interceptación de comandos adjuntos, y confirmaciones de seguridad (borrado, git). |
-| `modulos/limpiar.py` | Script para vaciar completamente la colección ChromaDB. |
-| `modulos/logger.py` | Configuración centralizada de logging: archivo `logs/omniassistant.log` y salida a consola. |
-| `modulos/memoria.py` | **Capa de persistencia vectorial**: conexión a ChromaDB, guardado/búsqueda de recuerdos por embeddings (`all-MiniLM-L6-v2`), snapshot del proyecto (archivo JSON) y watchdog que detecta cambios en el workspace y limpia la caché correspondiente. |
-| `modulos/prompts.py` | Fábrica de prompts según el modo: general, programador (dos versiones, la actual unificada), planificador (deprecado). |
-| `modulos/servidor_sistema_mcp.py` | Servidor MCP basado en `FastMCP` que expone herramientas: estado de PC, hardware, búsqueda/guardado en bóveda, exploración de directorios y lectura de archivos. |
-| `modulos/sistema.py` | **Control del sistema Windows**: búsqueda inteligente de programas (radar con fuzzy matching), apertura/cierre de ventanas, movimiento entre monitores, exploración de carpetas, obtención de ventanas activas, telemetría (CPU, RAM, GPU). |
-| `modulos/vision.py` | Captura de pantalla de monitores específicos usando `PIL.ImageGrab` y `screeninfo`. |
-| `a.py` | Script auxiliar que fuerza la descarga del modelo Whisper "medium" en CPU para que quede en caché. |
+### Flujo de datos
 
-### 2.2. Flujo de Datos Principal
-
-```
-Usuario (texto/voz) → main_gui.py → ia.py (enrutador)
-  ├─ Si modo general: Gemini Flash Lite + MCP (opcional) + búsqueda web (si aplica)
-  └─ Si modo programador/planificador: DeepSeek Reasoner (stream)
-Luego → controlador_acciones.py (parsea comandos de la respuesta)
-  ├─ Acciones de archivos → archivos.py
-  ├─ Acciones de sistema → sistema.py
-  ├─ Acciones Git → git_bot.py
-  ├─ Acciones de memoria → memoria.py (guardado en bóveda)
-  └─ Acciones web → busqueda.py (si se detecta "buscar:")
-```
-
----
+1. Usuario escribe/habla → `main_gui` captura entrada.
+2. `ia.py` recibe texto, determina modo (general → Gemini; programador/planificador → DeepSeek), inyecta prompt + skills + contexto.
+3. Durante streaming, la IA puede emitir comandos de acción (XML o `verbo: objetivo`).
+4. `controlador_acciones.py` parsea y ejecuta (escribir archivos, buscar web, git, etc.) usando funciones seguras de `archivos.py`, `sistema.py`, `busqueda.py`.
+5. Las acciones son confirmadas por el usuario (borrados, git) mediante juez IA en `ia.py`.
+6. La respuesta final se muestra en burbujas AI y se puede leer en voz alta.
 
 ## 3. Estado Actual
 
-### 3.1. Funcionalidades Completas y Operativas
+### Funcionalidades operativas
 
-- **Chat conversacional** con renderizado de Markdown extendido (código coloreado, tablas, listas, texto en negrita/cursiva/monospace).
-- **Modo General**: usa Gemini Flash Lite, acceso completo a archivos sin restricción de sandbox, control de ventanas (abrir/cerrar/mover), búsqueda web, captura de pantalla.
-- **Modo Programador/Planificador**: usa DeepSeek Reasoner, sandbox restrictivo al workspace seleccionado, comandos directos de lectura/escritura/reemplazo de archivos, generación de snapshot, escaneo y análisis del proyecto (crawler → DeepSeek → PROJECT_STATE.md).
-- **Memoria a largo plazo (Bóveda)**: ChromaDB con embeddings, posibilidad de guardar/recuperar recuerdos mediante MCP o comandos explícitos.
-- **Interacción por voz**: captura con micrófono (tecla F8), transcripción con Whisper, síntesis con Edge TTS (voz española latina) y reproducción en streaming.
-- **Watchdog de cambios en el workspace**: detecta modificaciones en los archivos y limpia automáticamente la caché obsoleta del contexto.
-- **Integración Git**: inicialización, commit, pull con rebase, push, comandos personalizados.
-- **Seguridad de archivos**: sandbox por modo, verificación de espacio en disco, límite de tamaño, confirmación de eliminación vía modelo juez.
-- **MCP (Model Context Protocol)**: servidor local que expone estado del sistema, hardware, memoria y sistema de archivos al LLM.
-- **Logging centralizado** con rotación a archivo y consola.
-- **Interfaz adaptable** con CustomTkinter (tema oscuro, pestañas, scroll, botones de acción rápida).
+- ✅ **Chat multimodal** (texto, voz, adjuntos, captura de pantalla).
+- ✅ **Dos modos de IA**: Gemini (general) y DeepSeek Reasoner (programación/planificación).
+- ✅ **Edición segura de archivos**: leer, escribir, reemplazar bloques, crear carpetas, todo con sandbox.
+- ✅ **Control del sistema**: abrir programas (radar inteligente), mover ventanas entre monitores, cerrar procesos, explorar carpetas.
+- ✅ **Búsqueda web real** con DuckDuckGo.
+- ✅ **Memoria a largo plazo** (ChromaDB): guardar/recuperar recuerdos, snapshots de proyecto.
+- ✅ **Radar de cambios** (watchdog) que invalida caché al modificar archivos.
+- ✅ **Sistema de Skills extensible** (carga dinámica desde subcarpetas).
+- ✅ **Streaming de voz** con Edge TTS y reproducción paralela.
+- ✅ **Captura de pantalla** multimonitor.
+- ✅ **Git**: sync completo (init/add/commit/pull/push) y comandos libres (previa confirmación).
+- ✅ **Crawler** para escanear todo el proyecto y generar `PROJECT_STATE.md` automáticamente.
+- ✅ **Interfaz gráfica** con temas oscuros, burbujas de usuario/IA, resaltado de código, tablas, botón de copia.
+- ✅ **Logs** en pestaña dedicada y archivo `logs/omniassistant.log`.
+- ✅ **Thread-safety** en estado global (`EstadoGlobal` con locks).
 
-### 3.2. Funcionalidades Parciales o con Advertencias
+## 4. Deuda Técnica / Próximos Pasos
 
-- **Modo Planificador**: deprecado, redirige al modo Programador. El prompt "planificador" existe pero no se usa activamente.
-- **Captura de pantalla**: funciona, pero la imagen no se pasa directamente al modelo (solo se usa en mensajes adjuntos genéricos). La integración con Gemini para análisis visual no está implementada (no se envía como parte multimodal).
-- **Búsqueda web**: solo en modo general, la respuesta secundaria reemplaza a la primera generación (podría duplicar contenido si la búsqueda falla).
-- **Tecla de voz F8**: puede causar conflictos si el teclado tiene otras funciones asignadas; no hay GUI para reasignar.
+### 🔴 Crítico
+- **Compatibilidad ChromaDB/Protocol Buffers**: El parche `os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"` puede degradar rendimiento. Migrar a ChromaDB 2.x o usar implementación nativa.
+- **Gestión de errores en `main_gui.py`**: La burbuja AI no tiene un mecanismo robusto de cleanup si el streaming falla (puede quedar `_streaming = True` y no finalizar). Implementar `__del__` o manejo de excepciones en el callback.
+- **Dependencia de `pywin32`**: Solo funciona en Windows; no hay abstracción multiplataforma.
 
----
+### 🟡 Importante
+- **Doble definición de estados**: Existe `config.EstadoGlobal` (thread-safe con locks) y `_AppState` en `main_gui.py` (singleton sin locks). Refactorizar para usar solo la instancia de `config.estado`.
+- **Skills**: Solo hay una skill de ejemplo. Completar al menos 2-3 skills funcionales y agregar detección de relevancia más inteligente (ej. embeddings).
+- **Crawler**: Ignora archivos `.env` (bien), pero no filtra archivos binarios; podría incluir imágenes/PDFs.
+- **Confirmaciones de UI**: El juez IA (Gemini) es lento y susceptible a errores. Reemplazar con confirmaciones explícitas del usuario en la GUI (popup Sí/No).
+- **Memoria volátil vs. bóveda**: Hay dos mecanismos de carga de archivos (adjuntos → contexto volátil, guardar en memoria → bóveda). Unificarlos con una interfaz clara.
 
-## 4. Deuda Técnica y Próximos Pasos
-
-### 4.1. Deuda Técnica Identificada
-
-1. **Duplicación de estado**: Existe `EstadoGlobal` en `config.py` y también `_AppState` en `main_gui.py` (clase singleton). Ambos mantienen información similar (modo, workspace, contexto, memoria de archivos). Esto puede ocasionar inconsistencias. Se recomienda unificar en un solo gestor de estado.
-
-2. **Manejo de errores en streaming**: En `ia.py`, los bloques `try/except` dentro de los bucles de streaming para Gemini y DeepSeek son generales y capturan excepciones amplias. Sería mejor diferenciar entre errores recuperables (timeout de red) y fatales.
-
-3. **Renderizado de Markdown**: La lógica en `AIBubble` es pesada y manual. Podría simplificarse usando una librería como `rich` o `mistune` para convertir a widgets tkinter.
-
-4. **Confirmaciones de seguridad**: El uso de un modelo "juez" (Gemini Flash Lite) para decidir si el usuario confirmó un borrado o una operación Git es frágil. Depende del prompt y puede fallar si el usuario responde de manera ambigua. Mejor usar botones de confirmación en la GUI.
-
-5. **Dependencias pesadas**: `chromadb` y `faster-whisper` (con modelo "medium") se cargan por completo incluso si no se usan (por ejemplo, en modo solo texto). Se podría implementar lazy loading más agresivo.
-
-6. **Manejo de la sesión de voz**: `pygame` mezcla la reproducción de audio en el mismo hilo que el resto de la GUI. Si hay muchos fragmentos, puede generar latencia. Mejor usar un thread separado con cola (ya está implementado de forma básica pero con algunas condiciones de carrera en `hablar_no_bloqueante`).
-
-7. **Código muerto**: `a.py` es un script que ya no es necesario porque el modelo se descarga bajo demanda. `pruebas/test_nuevo_parser.py` está vacío.
-
-8. **Protección contra inyección de comandos**: En `controlador_acciones.py`, los comandos extraídos de la respuesta de la IA se ejecutan directamente. Aunque hay validación de rutas, un LLM malicioso o con alucinaciones podría generar comandos peligrosos. Falta un filtro de verbos permitidos y sanitización de argumentos.
-
-### 4.2. Próximos Pasos Recomendados
-
-| Prioridad | Tarea |
-|---|---|
-| **Crítica** | Unificar estado en un solo gestor thread-safe (fusionar `EstadoGlobal` y `_AppState`). |
-| **Alta** | Reemplazar confirmaciones de seguridad (borrado, git) por botones en la GUI en lugar del juez LLM. |
-| **Alta** | Agregar una pantalla de configuración (tecla de voz, modelo Whisper, API keys) dentro de la aplicación. |
-| **Media** | Implementar lazy loading para ChromaDB y Whisper (iniciar solo cuando se use voz o memoria). |
-| **Media** | Mejorar el renderizado de Markdown usando una librería externa (p.ej., `tkinterhtml` o `markdown` + `tkinter.Text` más limpio). |
-| **Media** | Agregar soporte multimodal real: enviar capturas de pantalla a Gemini como imágenes en la generación. |
-| **Baja** | Crear un asistente de configuración inicial (first-run wizard) para seleccionar workspace y API keys. |
-| **Baja** | Refactorizar `sistema.py` para separar la captura de monitores, el radar de programas y el comando `abrir:` en sub-módulos. |
-| **Baja** | Escribir tests unitarios para `controlador_acciones.py` (especialmente `_dividir_comandos` y `_validar_ruta`). |
-| **Baja** | Eliminar los scripts obsoletos (`a.py`, `pruebas/test_nuevo_parser.py`) y mover `limpiar.py` a herramientas CLI. |
-
----
-
-**Nota final**: El proyecto tiene una arquitectura sólida y modular, con buenas prácticas de seguridad y manejo de hilos. Sin embargo, la duplicación de estado y la falta de confirmaciones visuales son los principales puntos de mejora para garantizar la robustez y experiencia de usuario.
+### 🟢 Mejora Continua
+- **Límites de tokens**: En `controlador_acciones.py` hay truncado manual de 80k caracteres. Usar conteo de tokens real o chunking automático.
+- **Reemplazo de bloque flexible**: La lógica de Regex es frágil. Mejor usar diff (ej. difflib) o soporte de búsqueda semántica.
+- **Sonidos de inicio/fin**: Actualmente solo beep en captura. Agregar sonidos para inicio de streaming, error, tarea completada.
+- **Documentación**: El proyecto carece de documentación inline (docstrings). Agregar docstrings a todas las funciones principales.
+- **Tests**: No hay test suite. Agregar pruebas unitarias para `archivos.py`, `sistema.py`, `controlador_acciones.py`.

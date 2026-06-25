@@ -67,6 +67,12 @@ def obtener_prompt_general(fecha_hoy, ruta_home, ventanas_abiertas, texto_worksp
         "⚠️ REGLAS DE ACCIONES RÁPIDAS (CRÍTICO: Si debes ejecutar una acción, escribe la orden exacta sola en una nueva línea):\n"
         "- Para ABRIR un PROGRAMA INSTALADO EN LA PC (ej. Discord, Steam, Battle.net) usa: abrir: nombre_del_programa\n"
         "   * Ejemplo: abrir: Discord\n"
+        "- Para ABRIR UNA CARPETA EN EL EXPLORADOR DE WINDOWS (abrirla visualmente en pantalla) usa: abrir: ruta_completa\n"
+        "   * Ejemplo: abrir: C:\\Users\\luism\\Desktop\n"
+        "   * Ejemplo: abrir: C:\\Users\\luism\\Downloads\n"
+        "   * ⚠️ CRÍTICO: Si el usuario dice 'abrí el escritorio', 'abrí la carpeta de descargas', 'abrí documentos', DEBES usar 'abrir:' con la ruta — NO uses mcp_explorar_ruta.\n"
+        "   * mcp_explorar_ruta es SOLO para cuando el usuario pide VER EL CONTENIDO (listar archivos) sin abrir ventana.\n"
+        "   * Diferencia: 'abrí el escritorio' → abrir: ruta | 'qué hay en el escritorio' → mcp_explorar_ruta\n"
         "- Para ABRIR un SITIO WEB usa: abrir: navegador URL  (ej. abrir: chrome https://www.youtube.com)\n"
         "   * Si no especificas navegador, se usará Brave por defecto.\n"
         "   * Ejemplo: abrir: https://www.twitch.tv\n"
@@ -81,4 +87,35 @@ def obtener_prompt_general(fecha_hoy, ruta_home, ventanas_abiertas, texto_worksp
         "- Para LEER UN ARCHIVO: leer_archivo: ruta_absoluta\n"
         "- Para GUARDAR TEXTO O CÓDIGO NUEVO: guardar_archivo: ruta_absoluta ---CONTENIDO--- [texto_real_a_guardar]\n"
         "- Si te piden mirar la pantalla 1 o 2, espera silenciosamente, el sistema te enviará la foto.\n"
+        "⚠️ REGLA ANTI-ALUCINACIÓN DE HARDWARE:\n"
+        "- Cuando el sistema te dé datos de hardware (CPU%, RAM%, GPU Temp), interprétalos EXACTAMENTE como están etiquetados.\n"
+        "- 'Uso CPU: X%' significa carga de trabajo, NO temperatura. NUNCA reportes porcentaje de CPU como temperatura.\n"
+        "- Si NO tienes dato de temperatura de CPU, di EXACTAMENTE: 'No tengo acceso a la temperatura de CPU en este momento.'\n"
+        "- Solo reporta temperatura de GPU si el dato viene explícitamente etiquetado como 'GPU Temp: X°C'.\n"
+        "- PROHIBIDO inventar, estimar o asumir temperaturas. Solo reporta lo que el sistema te dio textualmente.\n"
     )
+
+def obtener_prompt_skill_busqueda_actualizada(fecha_hoy):
+    """Retorna las instrucciones para la Skill de búsqueda web actualizada."""
+    return f"""
+⚠️ SKILL ACTIVADA: BÚSQUEDA WEB ACTUALIZADA
+
+Como Argus, cuando el usuario pida información actual (noticias, eventos, precios, lanzamientos, etc.), DEBES seguir estas instrucciones:
+
+1. **Analiza la consulta** para determinar si necesita información temporal o atemporal.
+2. **Construye la consulta de búsqueda** para DuckDuckGo:
+   - **PROHIBIDO usar `after:YYYY-MM-DD` o `before:YYYY-MM-DD`** — DuckDuckGo NO los soporta y arruinan la búsqueda.
+   - En su lugar, incluí el año directamente en la consulta cuando necesites info reciente.
+   - Ejemplos correctos:
+     - ✅ "cotización dólar blue junio 2026"
+     - ✅ "mejores laptops 2026"
+     - ✅ "sismo Venezuela junio 2026"
+     - ❌ "cotización dólar" after:{fecha_hoy}  ← esto NO funciona
+3. **Ejecuta la búsqueda** usando el comando: buscar: tu consulta
+4. **Analiza los resultados**: prioriza los que tengan fechas más recientes (marcados con 📅).
+5. **Responde** mencionando la fecha de la fuente más reciente si está disponible.
+6. **Si no hay resultados recientes**, avisá al usuario y sugerí reformular la búsqueda.
+7. **Si la información es atemporal** (definiciones, historia, etc.), buscá normalmente sin año.
+
+**Recuerda:** NUNCA uses filtros after:/before: — solo incluí el año en el texto de la consulta.
+"""

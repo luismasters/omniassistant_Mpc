@@ -121,7 +121,7 @@ def explorar_directorio(ruta_base):
         ruta_base = ruta_base.split("@")[0].strip()
     if "||" in ruta_base:
         ruta_base = ruta_base.split("||")[0].strip()
-    print(f"👀 [EXPLORADOR] Cortana está mirando dentro de: '{ruta_base}'")
+    print(f"👀 [EXPLORADOR] Argus está mirando dentro de: '{ruta_base}'")
     try:
         usuario_real = os.path.expanduser("~")
         if "c:\\users\\luis\\" in ruta_base.lower() and "luism" not in ruta_base.lower():
@@ -511,7 +511,14 @@ def obtener_estado_pc_valores():
 def obtener_estado_pc():
     cpu, ram_percent, gpu_vram, g_temp = obtener_estado_pc_valores()
     ram_gb = round(psutil.virtual_memory().used / (1024 ** 3), 1)
-    return f"CPU: {cpu}% | RAM: {ram_percent}% ({ram_gb}GB) | GPU Temp: {g_temp}°C, VRAM: {gpu_vram}GB"
+    cpu_temp_nota = "(psutil no mide temperatura de CPU en Windows — solo carga de trabajo)"
+    gpu_temp_str = f"{g_temp}°C" if g_temp > 0 else "no disponible (nvidia-smi no respondió)"
+    return (
+        f"Uso de CPU: {cpu}% de carga {cpu_temp_nota} | "
+        f"RAM: {ram_percent}% usada ({ram_gb} GB) | "
+        f"Temperatura GPU: {gpu_temp_str} | "
+        f"VRAM usada: {gpu_vram} GB"
+    )
 
 def obtener_ventanas_activas():
     ventanas = buscar_todas_las_ventanas()
