@@ -50,8 +50,31 @@ class GestorSkills:
         RETORNA: (nombre_skill, instrucciones) o None
         """
         consulta_lower = consulta.lower()
-        
-        # Palabras clave que activan la skill de búsqueda web actualizada
+
+        # ── SKILL: control_audio ──────────────────────────────────────────────
+        palabras_clave_audio = [
+            'volumen', 'subir', 'bajar', 'silenciar', 'silencia', 'silenciá',
+            'mutear', 'mute', 'unmute', 'desmuteá', 'desmutea', 'activar audio',
+            'audio', 'sonido', 'headset', 'auriculares', 'parlantes', 'altavoces',
+            'salida de audio', 'dispositivo de audio', 'cambiar audio',
+            'a tope', 'al máximo', 'sin sonido', 'con sonido'
+        ]
+        patrones_audio = [
+            r'vol(umen)?', r'subi[r]? el (vol|son)', r'baj[ar]? el (vol|son)',
+            r'silenci[a-z]+', r'mute[a-z]*', r'sin sonido', r'ponelo al \d+',
+            r'pon[é]? (el)? vol', r'cuánto (está|esta) el vol',
+            r'qué apps (tienen|con) (audio|sonido)',
+        ]
+        es_audio = any(p in consulta_lower for p in palabras_clave_audio)
+        es_audio = es_audio or any(re.search(p, consulta_lower) for p in patrones_audio)
+
+        if es_audio and 'control_audio' in self.skills:
+            nombre = 'control_audio'
+            instrucciones = self.skills[nombre].get('instrucciones', '')
+            logger.debug(f"🔊 Skill relevante detectada: {nombre}")
+            return nombre, instrucciones
+
+        # ── SKILL: busqueda_web_actualizada ──────────────────────────────────
         palabras_clave_web = [
             'actual', 'hoy', 'reciente', 'último', 'nueva', 'noticias',
             'cotización', 'precio', 'lanzamiento', 'estreno', 'cambio',
@@ -60,25 +83,21 @@ class GestorSkills:
             'ranking', 'netflix', 'películas', 'series', 'campeón',
             'campeona', 'street fighter', 'cpt'
         ]
-        
-        # Detectar si la consulta pide información temporal
-        es_temporal = any(p in consulta_lower for p in palabras_clave_web)
-        
-        # También detectar preguntas sobre eventos o actualidad
         patrones_temporales = [
             r'cu[aá]ndo', r'fecha', r'lanzamiento', r'estreno',
             r'noticias', r'pasa', r'pasa[ndo]?', r'actualidad',
             r'cotizaci[óo]n', r'precio', r'd[óo]lar', r'euro',
             r'quien es el actual', r'quien es el campeón'
         ]
+        es_temporal = any(p in consulta_lower for p in palabras_clave_web)
         es_temporal = es_temporal or any(re.search(p, consulta_lower) for p in patrones_temporales)
-        
+
         if es_temporal and 'busqueda_web_actualizada' in self.skills:
             nombre = 'busqueda_web_actualizada'
             instrucciones = self.skills[nombre].get('instrucciones', '')
             logger.debug(f"🔍 Skill relevante detectada: {nombre}")
-            return nombre, instrucciones  # <-- DEVOLVEMOS TUPLA
-        
+            return nombre, instrucciones
+
         return None
     
     def obtener_instrucciones(self, nombre_skill: str) -> str:

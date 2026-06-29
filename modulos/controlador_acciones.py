@@ -289,6 +289,69 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                     ui_callback("⚙️ Sistema", f"📄 Archivo cargado en memoria: {ruta_corta}", "#80868B")
                 continue
 
+            # CONTROL DE AUDIO
+            if cmd_limpia.startswith("audio:"):
+                try:
+                    from modulos.skills.control_audio.audio_control import (
+                        obtener_volumen, establecer_volumen, subir_volumen, bajar_volumen,
+                        silenciar, obtener_volumen_app, establecer_volumen_app,
+                        silenciar_app, listar_apps_con_audio, listar_dispositivos_audio,
+                        cambiar_dispositivo_audio
+                    )
+                    partes_audio = cmd[cmd.lower().find("audio:") + 6:].strip().split()
+                    if not partes_audio:
+                        continue
+                    subcmd = partes_audio[0].lower()
+                    args_audio = partes_audio[1:] if len(partes_audio) > 1 else []
+
+                    resultado_audio = ""
+                    if subcmd == "obtener_volumen":
+                        resultado_audio = obtener_volumen()
+                    elif subcmd == "establecer_volumen" and args_audio:
+                        resultado_audio = establecer_volumen(int(args_audio[0]))
+                    elif subcmd == "subir_volumen":
+                        incremento = int(args_audio[0]) if args_audio else 10
+                        resultado_audio = subir_volumen(incremento)
+                    elif subcmd == "bajar_volumen":
+                        decremento = int(args_audio[0]) if args_audio else 10
+                        resultado_audio = bajar_volumen(decremento)
+                    elif subcmd == "silenciar":
+                        resultado_audio = silenciar(True)
+                    elif subcmd == "activar":
+                        resultado_audio = silenciar(False)
+                    elif subcmd == "obtener_volumen_app" and args_audio:
+                        resultado_audio = obtener_volumen_app(" ".join(args_audio))
+                    elif subcmd == "establecer_volumen_app" and len(args_audio) >= 2:
+                        nombre_app = " ".join(args_audio[:-1])
+                        pct = int(args_audio[-1])
+                        resultado_audio = establecer_volumen_app(nombre_app, pct)
+                    elif subcmd == "silenciar_app" and args_audio:
+                        resultado_audio = silenciar_app(" ".join(args_audio), True)
+                    elif subcmd == "activar_app" and args_audio:
+                        resultado_audio = silenciar_app(" ".join(args_audio), False)
+                    elif subcmd == "listar_apps":
+                        resultado_audio = listar_apps_con_audio()
+                    elif subcmd == "listar_dispositivos":
+                        resultado_audio = listar_dispositivos_audio()
+                    elif subcmd == "cambiar_dispositivo" and args_audio:
+                        resultado_audio = cambiar_dispositivo_audio(" ".join(args_audio))
+                    else:
+                        resultado_audio = f"⚠️ Comando de audio no reconocido: {subcmd}"
+
+                    if resultado_audio:
+                        CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO AUDIO]: {resultado_audio}"]})
+                        if ui_callback:
+                            ui_callback("⚙️ Sistema", f"🔊 {resultado_audio}", "#80868B")
+                except ImportError:
+                    msg = "⚠️ Skill control_audio: falta instalar pycaw. Ejecutá: pip install pycaw comtypes"
+                    if ui_callback:
+                        ui_callback("⚙️ Sistema", msg, "#FFA500")
+                except Exception as e:
+                    logger.exception(f"Error en comando de audio: {cmd}")
+                    if ui_callback:
+                        ui_callback("⚙️ Sistema", f"❌ Error en control de audio: {str(e)[:80]}", "#FF4500")
+                continue
+
             # EDICIÓN DE 1 LÍNEA
             if cmd_limpia.startswith("editar_archivo:"):
                 match = re.search(r'editar_archivo:\s*(.+?)\s*\*?\|\*?\s*buscar:\s*(.+?)\s*\*?\|\*?\s*reemplazar:\s*(.+)', cmd, re.IGNORECASE)
@@ -354,7 +417,7 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                     config.estado.pendiente_de_git = {"accion": "github", "ruta": ruta_real, "url_custom": None}
                     msg_alerta = f"⚠️ ALERTA: Vas a subir el proyecto a GitHub:\n'{ruta_real}'\n\n¿Autorizás el Push? (SÍ / NO)."
                     if ui_callback:
-                        ui_callback("🤖 Cortana", msg_alerta, "#FF4500")
+                        ui_callback("🤖 Argus", msg_alerta, "#FF4500")
                     CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg_alerta]}])
                     return "INTERRUPTED"
                 continue
@@ -367,7 +430,7 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                     config.estado.pendiente_de_git = {"accion": "github_reset", "ruta": ruta_real, "url_custom": partes[1].strip() if len(partes)>1 else None}
                     msg_alerta = f"⚠️ ALERTA CRÍTICA: Vas a DESVINCULAR y subir el repo.\n\n¿Autorizás esta operación crítica? (SÍ / NO)"
                     if ui_callback:
-                        ui_callback("🤖 Cortana", msg_alerta, "#FF4500")
+                        ui_callback("🤖 Argus", msg_alerta, "#FF4500")
                     CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg_alerta]}])
                     return "INTERRUPTED"
                 continue
@@ -380,7 +443,7 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                     config.estado.pendiente_de_git = {"accion": "git_libre", "ruta": ruta_real, "url_custom": partes[1].strip()}
                     msg_alerta = f"⚠️ ALERTA: Vas a ejecutar un comando libre en Git.\nComando: {partes[1].strip()}\n\n¿Autorizás? (SÍ / NO)"
                     if ui_callback:
-                        ui_callback("🤖 Cortana", msg_alerta, "#FF4500")
+                        ui_callback("🤖 Argus", msg_alerta, "#FF4500")
                     CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg_alerta]}])
                     return "INTERRUPTED"
                 continue
@@ -443,7 +506,7 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                             ui_callback("⚙️ Sistema", f"❌ Error en el Crawler: {e}", "#ff4500")
                 else:
                     if ui_callback:
-                        ui_callback("🤖 Cortana", "Necesito estar dentro del Modo Planificador o Programador para saber qué proyecto escanear.", "#FFA500")
+                        ui_callback("🤖 Argus", "Necesito estar dentro del Modo Planificador o Programador para saber qué proyecto escanear.", "#FFA500")
                 continue
 
             # COMANDOS DE SISTEMA

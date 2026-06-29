@@ -102,18 +102,32 @@ lista_herramientas_mcp = [
 # =====================================================================
 _PATRON_CORTE_VOZ = re.compile(r'(?<=[.!?])\s+')
 _MIN_CHARS_CHUNK_VOZ = 80
+# Patrones de comandos de acción que NO deben leerse en voz alta
+_PATRON_COMANDOS_VOZ = re.compile(
+    r'^(audio:|buscar:|abrir:|cerrar:|mover:|guardar_archivo:|leer_archivo:|'
+    r'reemplazar_bloque:|editar_archivo:|crear_carpeta:|github:|escanear_proyecto:|'
+    r'mcp_\w+)[^\n]*$',
+    re.MULTILINE | re.IGNORECASE
+)
+
+def _limpiar_para_voz(texto: str) -> str:
+    """Elimina líneas de comandos de acción del texto antes de enviarlo a Edge TTS."""
+    return _PATRON_COMANDOS_VOZ.sub('', texto).strip()
 
 def _procesar_buffer_voz(buffer: str, forzar: bool = False) -> str:
+    buffer_limpio = _limpiar_para_voz(buffer)
     while True:
-        match = _PATRON_CORTE_VOZ.search(buffer)
-        if match and len(buffer[:match.end()].strip()) >= _MIN_CHARS_CHUNK_VOZ:
-            fragmento = buffer[:match.end()].strip()
+        match = _PATRON_CORTE_VOZ.search(buffer_limpio)
+        if match and len(buffer_limpio[:match.end()].strip()) >= _MIN_CHARS_CHUNK_VOZ:
+            fragmento = buffer_limpio[:match.end()].strip()
             encolar_texto_para_hablar(fragmento)
-            buffer = buffer[match.end():]
+            corte = match.end()
+            buffer_limpio = buffer_limpio[corte:]
+            buffer = buffer[corte:] if corte < len(buffer) else ""
         else:
             break
-    if forzar and buffer.strip():
-        encolar_texto_para_hablar(buffer.strip())
+    if forzar and buffer_limpio.strip():
+        encolar_texto_para_hablar(buffer_limpio.strip())
         buffer = ""
     return buffer
 
