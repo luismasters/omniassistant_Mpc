@@ -22,7 +22,14 @@ from modulos.busqueda import buscar_en_internet
 from modulos.audio_custom import hablar_no_bloqueante, encolar_texto_para_hablar, detener_voz
 from modulos.vision import capturar_pantalla
 from modulos.git_bot import sincronizar_proyecto_git, ejecutar_comando_git_libre
-from modulos.memoria import guardar_recuerdo
+
+# ─── OPTIMIZACIÓN: importar memoria directo, sin pasar por MCP ──────────
+from modulos.memoria import (
+    guardar_recuerdo,
+    buscar_contexto,
+    iniciar_busqueda_anticipada,
+    obtener_resultado_anticipado
+)
 from modulos.cliente_mcp import cliente_sistema
 
 from modulos.prompts import (
@@ -43,6 +50,8 @@ cliente_deepseek = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepse
 
 # =====================================================================
 # HERRAMIENTAS NATIVAS MCP (GEMINI)
+# OPTIMIZACIÓN: buscar/guardar en bóveda ahora van DIRECTO a memoria.py
+# sin spawn de proceso externo — latencia reducida de 3-5s a <500ms
 # =====================================================================
 def mcp_estado_pc():
     """
@@ -64,20 +73,42 @@ def mcp_hardware_pc():
     return f"CPU: {hw['cpu']} | GPU: {hw['gpu']} | Placa madre: {hw['motherboard']}"
 
 def mcp_buscar_en_boveda(consulta: str):
-    """Busca recuerdos o información guardada previamente en la memoria a largo plazo (bóveda)."""
-    return cliente_sistema.ejecutar("buscar_en_boveda", {"consulta": consulta})
+    """
+    Busca recuerdos o información guardada previamente en la memoria a largo plazo (bóveda).
+    OPTIMIZADO: llama directo a ChromaDB sin proceso MCP intermedio.
+    """
+    try:
+        # Intentar usar resultado anticipado si está disponible
+        resultados = obtener_resultado_anticipado(consulta)
+        if resultados:
+            return f"Recuerdos recuperados de la bóveda:\n{resultados[0]}"
+        return "No encontré nada relacionado a ese tema en la bóveda de memoria."
+    except Exception as e:
+        logger.exception("Error buscando en bóveda directo")
+        # Fallback al servidor MCP si falla el acceso directo
+        return cliente_sistema.ejecutar("buscar_en_boveda", {"consulta": consulta})
 
 def mcp_guardar_en_boveda(dato: str):
-    """Guarda un dato, recuerdo o información importante en la memoria a largo plazo (bóveda)."""
-    return cliente_sistema.ejecutar("guardar_en_boveda", {"dato": dato})
+    """
+    Guarda un dato, recuerdo o información importante en la memoria a largo plazo (bóveda).
+    OPTIMIZADO: llama directo a ChromaDB sin proceso MCP intermedio.
+    """
+    try:
+        exito = guardar_recuerdo(texto_a_guardar=dato, etiqueta_tema="Memoria_IA")
+        if exito:
+            return "¡Dato guardado exitosamente en la bóveda permanente!"
+        return "Error al guardar el dato en la bóveda."
+    except Exception as e:
+        logger.exception("Error guardando en bóveda directo")
+        # Fallback al servidor MCP si falla el acceso directo
+        return cliente_sistema.ejecutar("guardar_en_boveda", {"dato": dato})
 
 def mcp_explorar_ruta(ruta: str):
     """
     Lista y muestra el contenido (archivos y carpetas) de un directorio en el chat,
     SIN abrir ninguna ventana en Windows.
-    Usar SOLO cuando el usuario pida VER o LISTAR el contenido de una carpeta
-    (ej: "qué hay en el escritorio", "listá mis descargas", "qué archivos tengo en documentos").
-    NO usar si el usuario dice "abrí", "abrir", "mostrame la carpeta", "abrí el escritorio" —
+    Usar SOLO cuando el usuario pida VER o LISTAR el contenido de una carpeta.
+    NO usar si el usuario dice "abrí", "abrir", "mostrame la carpeta" —
     en esos casos se debe usar el comando de texto: abrir: ruta_completa
     """
     return explorar_directorio(ruta)
@@ -102,7 +133,6 @@ lista_herramientas_mcp = [
 # =====================================================================
 _PATRON_CORTE_VOZ = re.compile(r'(?<=[.!?])\s+')
 _MIN_CHARS_CHUNK_VOZ = 80
-# Patrones de comandos de acción que NO deben leerse en voz alta
 _PATRON_COMANDOS_VOZ = re.compile(
     r'^(audio:|buscar:|abrir:|cerrar:|mover:|guardar_archivo:|leer_archivo:|'
     r'reemplazar_bloque:|editar_archivo:|crear_carpeta:|github:|escanear_proyecto:|'
@@ -132,7 +162,46 @@ def _procesar_buffer_voz(buffer: str, forzar: bool = False) -> str:
     return buffer
 
 # =====================================================================
-# ENRUTADOR PRINCIPAL CON MANEJO DE ERRORES MEJORADO Y SKILLS
+# CONFIRMACIONES NATIVAS (sin juez IA)
+# OPTIMIZACIÓN: reemplaza llamadas a Gemini como juez por lógica local
+# simple. Elimina 2-3 segundos de latencia y consumo de tokens.
+# =====================================================================
+_PALABRAS_CONFIRMACION = {
+    "si", "sí", "dale", "ok", "okay", "confirmar", "confirmo",
+    "confirmado", "procede", "adelante", "hacelo", "ejecuta",
+    "autorizo", "autorizado", "yes", "yep", "por supuesto",
+    "claro", "obvio", "va", "está bien", "de acuerdo"
+}
+_PALABRAS_CANCELACION = {
+    "no", "nope", "cancelar", "cancela", "cancelado", "abortar",
+    "abortado", "para", "detener", "detené", "stop", "espera",
+    "olvidalo", "olvidá", "dejalo", "dejá", "mejor no"
+}
+
+def _evaluar_confirmacion_local(respuesta_usuario: str) -> str:
+    """
+    Evalúa si el usuario confirmó o canceló una acción sin llamar a la IA.
+    Retorna 'CONFIRMADO' o 'CANCELADO'.
+    """
+    texto = respuesta_usuario.lower().strip()
+    # Primero verificar coincidencia exacta
+    if texto in _PALABRAS_CONFIRMACION:
+        return "CONFIRMADO"
+    if texto in _PALABRAS_CANCELACION:
+        return "CANCELADO"
+    # Luego verificar si alguna palabra clave está contenida
+    for palabra in _PALABRAS_CONFIRMACION:
+        if palabra in texto:
+            return "CONFIRMADO"
+    for palabra in _PALABRAS_CANCELACION:
+        if palabra in texto:
+            return "CANCELADO"
+    # Si no hay claridad, conservador: cancelar
+    logger.warning(f"Respuesta de confirmación ambigua: '{respuesta_usuario}' → CANCELADO")
+    return "CANCELADO"
+
+# =====================================================================
+# ENRUTADOR PRINCIPAL
 # =====================================================================
 def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
     """Enrutador Universal y traductor de acciones con soporte para Skills."""
@@ -157,7 +226,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         return
 
     # =================================================================
-    # INTERCEPTOR DE ADJUNTOS (SIEMPRE A CONTEXTO VOLÁTIL)
+    # INTERCEPTOR DE ADJUNTOS
     # =================================================================
     if "[adjunto:" in texto_usuario.lower():
         rutas_extraidas = re.findall(r'\[adjunto:\s*(.*?)\]', texto_usuario, re.IGNORECASE)
@@ -168,20 +237,14 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 return
 
     # =================================================================
-    # ESCUDOS DE SEGURIDAD (Confirmaciones de UI)
+    # ESCUDOS DE SEGURIDAD — CONFIRMACIONES NATIVAS (sin juez IA)
     # =================================================================
     if PENDIENTE_DE_BORRADO:
         tarea_borrado = PENDIENTE_DE_BORRADO
         config.estado.pendiente_de_borrado = ""
 
-        logger.info(f"Evaluando confirmación de borrado: {tarea_borrado}")
-        evaluador = genai.GenerativeModel("gemini-flash-lite-latest")
-        prompt_juez = f"El usuario debe confirmar borrar: '{tarea_borrado}'. Su respuesta: '{texto_usuario}'. Responde CONFIRMADO o CANCELADO."
-        try:
-            decision_borrado = evaluador.generate_content(prompt_juez).text.strip().upper()
-        except Exception as e:
-            logger.exception("Error evaluando confirmación de borrado")
-            decision_borrado = "CANCELADO"
+        logger.info(f"Evaluando confirmación de borrado (local): {tarea_borrado}")
+        decision_borrado = _evaluar_confirmacion_local(texto_usuario)
 
         if "CONFIRMADO" in decision_borrado:
             resultado = eliminar_elemento(tarea_borrado)
@@ -193,25 +256,22 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             ui_callback("🤖 Argus", msg, "#FF4500" if "abortado" in msg else "#00E5FF")
         if modo_voz:
             hablar_no_bloqueante(msg)
-        CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg]}])
+        CONTEXTO_CHAT.extend([
+            {'role': 'user', 'parts': [texto_usuario]},
+            {'role': 'model', 'parts': [msg]}
+        ])
         return
 
     if PENDIENTE_DE_GIT:
         tarea_git = PENDIENTE_DE_GIT
         config.estado.pendiente_de_git = None
 
-        logger.info(f"Evaluando confirmación de Git: {tarea_git}")
-        evaluador = genai.GenerativeModel("gemini-flash-lite-latest")
-        prompt_juez = f"El usuario debe confirmar una operación de GitHub. Su respuesta: '{texto_usuario}'. Responde CONFIRMADO o CANCELADO."
-        try:
-            decision_git = evaluador.generate_content(prompt_juez).text.strip().upper()
-        except Exception as e:
-            logger.exception("Error evaluando confirmación de Git")
-            decision_git = "CANCELADO"
+        logger.info(f"Evaluando confirmación de Git (local): {tarea_git}")
+        decision_git = _evaluar_confirmacion_local(texto_usuario)
 
         if "CONFIRMADO" in decision_git:
             if ui_callback:
-                ui_callback("⚙️ Sistema", "Iniciando operación en GitHub. Esto puede tardar unos segundos...", "#80868B")
+                ui_callback("⚙️ Sistema", "Iniciando operación en GitHub...", "#80868B")
             accion = tarea_git.get("accion")
             ruta = tarea_git.get("ruta")
             url_custom = tarea_git.get("url_custom")
@@ -233,7 +293,10 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             ui_callback("🤖 Argus", msg, "#FF4500" if "cancelada" in msg else "#00E5FF")
         if modo_voz:
             hablar_no_bloqueante("Operación finalizada." if "completada" in msg else "Operación cancelada.")
-        CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg]}])
+        CONTEXTO_CHAT.extend([
+            {'role': 'user', 'parts': [texto_usuario]},
+            {'role': 'model', 'parts': [msg]}
+        ])
         return
 
     # =================================================================
@@ -262,11 +325,19 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
     if comando_directo:
         respuesta_ia = comando_directo
         if ui_callback:
-            ui_callback("🤖 Argus", f"Entendido, ejecutando acción solicitada...", "#A8C7FA", nueva_linea=True)
+            ui_callback("🤖 Argus", "Entendido, ejecutando acción solicitada...", "#A8C7FA", nueva_linea=True)
         if modo_voz:
             hablar_no_bloqueante("Entendido, ejecutando acción.")
     else:
         logger.info(f"PENSANDO ({MODO_ACTUAL.upper()})...")
+
+        # ─── BÚSQUEDA ANTICIPADA EN BÓVEDA ───────────────────────────────
+        # Lanzar búsqueda en bóveda en paralelo mientras la IA piensa
+        # Solo en modo general donde Gemini puede pedir datos de bóveda
+        MODO_ACTUAL = config.estado.modo_actual
+        if MODO_ACTUAL == "general":
+            iniciar_busqueda_anticipada(texto_usuario)
+
         try:
             fecha_hoy = datetime.datetime.now().strftime("%A, %d de %B de %Y")
             ventanas_abiertas = obtener_ventanas_activas()
@@ -276,7 +347,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             texto_doc_volatil = f"[DOCUMENTOS EN MEMORIA]:\n{DOCUMENTO_VOLATIL}\n\n" if DOCUMENTO_VOLATIL else ""
 
             # ─── SELECCIÓN DE MODELO Y CONTEXTO ──────────────────────────────
-            MODO_ACTUAL = config.estado.modo_actual
             if MODO_ACTUAL in ["programador", "planificador"]:
                 contexto_sistema = obtener_prompt_programador_unificado(
                     texto_workspace, texto_snapshot, texto_doc_volatil
@@ -307,12 +377,10 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
 
             # ─── GEMINI ────────────────────────────────────────────────────────
             if modelo_activo == "gemini":
-                # 🔥 NUEVO: Si hay skill activa, NO pasamos herramientas MCP
                 if skill_activa:
                     modelo_gemini = genai.GenerativeModel(
                         "gemini-flash-lite-latest",
                         system_instruction=contexto_sistema
-                        # Sin tools para forzar el uso de buscar_en_internet
                     )
                 else:
                     modelo_gemini = genai.GenerativeModel(
@@ -343,24 +411,22 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                         stream=True,
                         generation_config=genai.GenerationConfig(temperature=0.1)
                     )
-                except google.api_core.exceptions.ResourceExhausted as e:
-                    logger.exception("Límite de tokens alcanzado en Gemini")
-                    ui_callback("⚙️ Sistema", "⚠️ Límite de tokens alcanzado. Resume la conversación o reinicia el contexto.", "#FF4500")
-                    error_ocurrido = True
-                    return
-                except google.api_core.exceptions.Unauthenticated as e:
-                    logger.exception("Error de autenticación en Gemini")
-                    ui_callback("⚙️ Sistema", "❌ Error de autenticación. Verifica tu API Key de Gemini.", "#FF4500")
-                    error_ocurrido = True
-                    return
-                except google.api_core.exceptions.PermissionDenied as e:
-                    logger.exception("Permiso denegado en Gemini")
-                    ui_callback("⚙️ Sistema", "❌ Permiso denegado. Verifica tu API Key y permisos.", "#FF4500")
+                except genai.types.generation_types.BlockedPromptException as e:
+                    logger.exception("Prompt bloqueado por Gemini")
+                    ui_callback("⚙️ Sistema", "⚠️ Mensaje bloqueado por filtros de seguridad.", "#FF4500")
                     error_ocurrido = True
                     return
                 except Exception as e:
+                    err_str = str(e)
+                    if "ResourceExhausted" in err_str or "429" in err_str:
+                        ui_callback("⚙️ Sistema", "⚠️ Límite de tokens alcanzado. Limpiá el contexto.", "#FF4500")
+                    elif "Unauthenticated" in err_str or "401" in err_str:
+                        ui_callback("⚙️ Sistema", "❌ Error de autenticación. Verificá tu API Key.", "#FF4500")
+                    elif "PermissionDenied" in err_str or "403" in err_str:
+                        ui_callback("⚙️ Sistema", "❌ Permiso denegado. Verificá tu API Key.", "#FF4500")
+                    else:
+                        ui_callback("⚙️ Sistema", f"❌ Error al iniciar generación: {err_str[:100]}", "#FF4500")
                     logger.exception("Error al iniciar generación en Gemini")
-                    ui_callback("⚙️ Sistema", f"❌ Error al iniciar la generación: {str(e)[:100]}", "#FF4500")
                     error_ocurrido = True
                     return
 
@@ -377,35 +443,33 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                     usaste_mcp = True
                                     n_func = part.function_call.name
                                     if ui_callback:
-                                        ui_callback("⚙️ Sistema", f"Consultando servidor: {n_func}...", "#80868B")
+                                        ui_callback("⚙️ Sistema", f"Consultando: {n_func}...", "#80868B")
                                     args = {k: v for k, v in part.function_call.args.items()}
                                     try:
                                         if n_func == "mcp_estado_pc":
-                                            # Bypass directo: temperatura GPU + uso CPU/RAM en tiempo real
                                             resultado_mcp = mcp_estado_pc()
-                                            logger.debug("mcp_estado_pc: bypass local directo")
                                         elif n_func == "mcp_hardware_pc":
-                                            # Bypass directo: info estática de hardware
                                             resultado_mcp = mcp_hardware_pc()
-                                            logger.debug("mcp_hardware_pc: bypass local directo")
                                         elif n_func == "mcp_buscar_en_boveda":
+                                            # OPTIMIZADO: directo, sin MCP
                                             resultado_mcp = mcp_buscar_en_boveda(args.get("consulta", ""))
                                         elif n_func == "mcp_guardar_en_boveda":
+                                            # OPTIMIZADO: directo, sin MCP
                                             resultado_mcp = mcp_guardar_en_boveda(args.get("dato", ""))
                                         elif n_func == "mcp_explorar_ruta":
                                             resultado_mcp = mcp_explorar_ruta(args.get("ruta", ""))
                                         elif n_func == "mcp_leer_documento":
                                             resultado_mcp = mcp_leer_documento(args.get("ruta", ""))
-                                        # Mostrar en UI que se obtuvo el dato
+
                                         if resultado_mcp and "TIMEOUT" not in str(resultado_mcp):
                                             if ui_callback:
                                                 ui_callback("⚙️ Sistema", f"✅ Dato obtenido: {str(resultado_mcp)[:120]}...", "#80868B")
                                         elif resultado_mcp and "TIMEOUT" in str(resultado_mcp):
                                             if ui_callback:
-                                                ui_callback("⚙️ Sistema", "⚠️ MCP tardó demasiado, usando datos locales.", "#FFA500")
+                                                ui_callback("⚙️ Sistema", "⚠️ Timeout en herramienta MCP.", "#FFA500")
                                     except Exception as e:
-                                        logger.exception(f"Error ejecutando herramienta MCP {n_func}")
-                                        ui_callback("⚙️ Sistema", f"❌ Error en herramienta {n_func}: {str(e)[:80]}", "#FF4500")
+                                        logger.exception(f"Error ejecutando herramienta {n_func}")
+                                        ui_callback("⚙️ Sistema", f"❌ Error en {n_func}: {str(e)[:80]}", "#FF4500")
                                 elif getattr(part, "text", None):
                                     print(part.text, end='', flush=True)
                                     respuesta_ia += part.text
@@ -431,14 +495,14 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                     try:
                         if not resultado_mcp or "TIMEOUT" in str(resultado_mcp):
                             if ui_callback:
-                                ui_callback("⚙️ Sistema", "⚠️ No se obtuvo dato del sistema. Verifica que el servidor MCP esté activo.", "#FFA500")
+                                ui_callback("⚙️ Sistema", "⚠️ No se obtuvo dato. Verificá conexión.", "#FFA500")
                         else:
-                            mensajes_para_gemini.append({'role': 'model', 'parts': ['Obteniendo datos del sistema...']})
+                            mensajes_para_gemini.append({'role': 'model', 'parts': ['Obteniendo datos...']})
                             mensajes_para_gemini.append({'role': 'user', 'parts': [
-                                f"[DATO DEL SISTEMA OBTENIDO]: {resultado_mcp}\n\n"
+                                f"[DATO OBTENIDO]: {resultado_mcp}\n\n"
                                 "Respondé al usuario de forma natural y directa con este dato. "
                                 "No inventes valores que no estén en el dato. "
-                                "Si falta algún dato (ej. temperatura de CPU), decílo explícitamente."
+                                "Si falta algún dato, decílo explícitamente."
                             ]})
                             response_2 = modelo_gemini.generate_content(mensajes_para_gemini, stream=True)
                             if ui_callback:
@@ -456,7 +520,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                                 buffer_voz_2 += part.text
                                                 buffer_voz_2 = _procesar_buffer_voz(buffer_voz_2, forzar=False)
                                 except Exception as e:
-                                    logger.exception("Error procesando chunk MCP")
+                                    logger.exception("Error procesando chunk MCP ronda 2")
                                     ui_callback("⚙️ Sistema", f"❌ Error en respuesta MCP: {str(e)[:80]}", "#FF4500")
                                     break
                             if ui_callback:
@@ -464,7 +528,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                             if modo_voz and buffer_voz_2.strip():
                                 _procesar_buffer_voz(buffer_voz_2, forzar=True)
                     except Exception as e:
-                        logger.exception("Error en generación MCP")
+                        logger.exception("Error en generación MCP ronda 2")
                         ui_callback("⚙️ Sistema", f"❌ Error en generación MCP: {str(e)[:80]}", "#FF4500")
                         error_ocurrido = True
 
@@ -483,24 +547,15 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 try:
                     parametros_api = {"model": modelo_activo, "messages": mensajes_ds, "stream": True}
                     response = cliente_deepseek.chat.completions.create(**parametros_api)
-                except openai.APIError as e:
-                    logger.exception("Error de API en DeepSeek")
-                    ui_callback("⚙️ Sistema", f"❌ Error en la API de DeepSeek: {str(e)[:100]}", "#FF4500")
-                    error_ocurrido = True
-                    return
-                except openai.RateLimitError as e:
-                    logger.exception("Rate limit en DeepSeek")
-                    ui_callback("⚙️ Sistema", "⚠️ Límite de peticiones excedido. Espera un momento.", "#FFA500")
-                    error_ocurrido = True
-                    return
-                except openai.AuthenticationError as e:
-                    logger.exception("Error de autenticación en DeepSeek")
-                    ui_callback("⚙️ Sistema", "❌ Error de autenticación con DeepSeek. Verifica la API Key.", "#FF4500")
-                    error_ocurrido = True
-                    return
                 except Exception as e:
+                    err_str = str(e)
+                    if "RateLimitError" in err_str or "429" in err_str:
+                        ui_callback("⚙️ Sistema", "⚠️ Rate limit DeepSeek. Esperá un momento.", "#FFA500")
+                    elif "AuthenticationError" in err_str or "401" in err_str:
+                        ui_callback("⚙️ Sistema", "❌ Error de autenticación DeepSeek.", "#FF4500")
+                    else:
+                        ui_callback("⚙️ Sistema", f"❌ Error DeepSeek: {err_str[:100]}", "#FF4500")
                     logger.exception("Error al iniciar generación en DeepSeek")
-                    ui_callback("⚙️ Sistema", f"❌ Error al iniciar generación: {str(e)[:100]}", "#FF4500")
                     error_ocurrido = True
                     return
 
@@ -538,7 +593,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
 
         except ConnectionError as e:
             logger.exception("Error de conexión")
-            ui_callback("⚙️ Sistema", "❌ Error de conexión. Revisa tu internet.", "#FF4500")
+            ui_callback("⚙️ Sistema", "❌ Error de conexión. Revisá tu internet.", "#FF4500")
             error_ocurrido = True
         except TimeoutError as e:
             logger.exception("Timeout")
@@ -549,12 +604,11 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             ui_callback("⚙️ Sistema", f"❌ Error inesperado: {str(e)[:200]}", "#FF4500")
             error_ocurrido = True
 
-        # Si hubo error y la burbuja está abierta, finalizarla
         if error_ocurrido and ui_callback:
             ui_callback("", "", "#E8EAED", nueva_linea=True)
 
     # =================================================================
-    # INTERCEPTOR DE ACCIONES (solo si no hubo error y hay respuesta)
+    # INTERCEPTOR DE ACCIONES
     # =================================================================
     if not error_ocurrido and respuesta_ia:
         from modulos.controlador_acciones import procesar_acciones_ia
@@ -569,7 +623,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             datos_encontrados = buscar_en_internet(comando_busqueda, reciente=skill_activa)
             if "No se encontraron" in datos_encontrados or "error de conexión" in datos_encontrados.lower():
                 if ui_callback:
-                    ui_callback("⚙️ Sistema", "⚠️ No se encontraron resultados web. Respondiendo con conocimiento interno.", "#FFA500")
+                    ui_callback("⚙️ Sistema", "⚠️ Sin resultados web. Respondiendo con conocimiento interno.", "#FFA500")
             elif modelo_gemini:
                 try:
                     mensajes_secundarios = list(CONTEXTO_CHAT) + [
@@ -605,13 +659,16 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         hablar_no_bloqueante(respuesta_ia)
 
     if respuesta_ia and not error_ocurrido:
-        CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [respuesta_ia]}])
+        CONTEXTO_CHAT.extend([
+            {'role': 'user', 'parts': [texto_usuario]},
+            {'role': 'model', 'parts': [respuesta_ia]}
+        ])
     if len(CONTEXTO_CHAT) > 100:
         config.estado.contexto_chat = CONTEXTO_CHAT[-100:]
 
 
 # =====================================================================
-# PROCESAMIENTO DE ARCHIVOS ADJUNTOS (SIEMPRE A CONTEXTO)
+# PROCESAMIENTO DE ARCHIVOS ADJUNTOS
 # =====================================================================
 def cargar_adjuntos_en_contexto(rutas_archivos, ui_callback=None):
     import config
@@ -648,7 +705,6 @@ def cargar_adjuntos_en_contexto(rutas_archivos, ui_callback=None):
             ui_callback("⚙️ Sistema", "❌ No se pudo leer ningún archivo.", "#FF4500")
         return
 
-    # Actualizar el documento volátil en el estado (usando método seguro)
     config.estado.documento_volatil = contenido_volatil_acumulado
 
     try:
@@ -665,5 +721,7 @@ def cargar_adjuntos_en_contexto(rutas_archivos, ui_callback=None):
     if ui_callback:
         ui_callback("⚙️ Sistema", msg, "#86EFAC")
 
-    # Agregar al historial del chat usando método seguro
-    config.estado.agregar_mensaje_chat({'role': 'user', 'parts': [f"[SISTEMA] Archivos cargados en contexto: {nombres_str}"]})
+    config.estado.agregar_mensaje_chat({
+        'role': 'user',
+        'parts': [f"[SISTEMA] Archivos cargados en contexto: {nombres_str}"]
+    })

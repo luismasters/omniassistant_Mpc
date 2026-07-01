@@ -266,8 +266,26 @@ def detener_voz():
 # =====================================================================
 # CAPTURA DE VOZ (Whisper)
 # =====================================================================
-def capturar_voz_micro():
-    print(f"\n[GRABANDO] Habla ahora... (Solta {TECLA_HABLAR.upper()} para terminar)")
+def capturar_voz_micro(condicion_seguir_grabando=None):
+    """
+    Graba del micrófono mientras la condición de corte siga siendo True.
+
+    condicion_seguir_grabando: función sin argumentos que retorna True
+        mientras se debe seguir grabando. Si no se pasa, usa el
+        comportamiento original (mantener F8 presionado).
+
+    Esto desacopla la captura de voz de 'keyboard' directamente, para
+    que pueda ser disparada también por el gamepad (que usa su propia
+    condición de "stick presionado") sin depender de un hook de teclado
+    que nunca se cumpliría en ese caso (BUG anterior: el loop esperaba
+    F8 sin importar qué disparó la grabación).
+    """
+    if condicion_seguir_grabando is None:
+        condicion_seguir_grabando = lambda: keyboard.is_pressed(TECLA_HABLAR)
+        print(f"\n[GRABANDO] Habla ahora... (Solta {TECLA_HABLAR.upper()} para terminar)")
+    else:
+        print(f"\n[GRABANDO] Habla ahora... (Soltá el control para terminar)")
+
     audio_data = []
 
     def callback(indata, frames, time, status):
@@ -275,7 +293,14 @@ def capturar_voz_micro():
 
     with sd.InputStream(samplerate=FS_AUDIO, channels=1, callback=callback):
         time.sleep(0.2)
-        while keyboard.is_pressed(TECLA_HABLAR):
+        # Límite de seguridad: máximo 30s de grabación continua para
+        # evitar que un error en la condición deje el stream colgado
+        # indefinidamente (protección extra ante el bug anterior).
+        inicio = time.time()
+        while condicion_seguir_grabando():
+            if time.time() - inicio > 30:
+                print("[GRABANDO] ⚠️ Límite de 30s alcanzado, cortando grabación por seguridad.")
+                break
             time.sleep(0.02)
 
     print("--- PROCESANDO VOZ ---")
