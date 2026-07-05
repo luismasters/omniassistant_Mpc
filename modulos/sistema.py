@@ -8,6 +8,7 @@ import win32con
 from screeninfo import get_monitors
 import win32process
 from thefuzz import process
+from modulos.logger import logger
 
 # =====================================================================
 # LISTA DE SITIOS WEB COMUNES (SOLO para cuando el usuario dice "abre X" y X es un sitio conocido)
@@ -441,39 +442,79 @@ def _abrir_programa_o_carpeta(objetivo, num_monitor=None, navegador=None):
     return f"⚠️ No encontré el programa '{objetivo}'. ¿Quieres que abra la página web en su lugar? (responde 'sí' o 'no')"
 
 def _cerrar_programa(objetivo):
-    """Cierra un programa por nombre."""
+    """
+    Cierra un programa por nombre.
+
+    SEGURIDAD: corregido un bug crítico donde un comando de voz corto o
+    ambiguo (ej. transcripción incompleta de Whisper) podía matar TODOS
+    los procesos cuyo título o nombre contuviera esa palabra como
+    substring, sin detenerse en el primer match. Esto causó el cierre
+    simultáneo del juego y el navegador en una sesión real de uso.
+
+    Ahora:
+    1. Se exige un largo mínimo en el texto objetivo (evita match con
+       fragmentos de 1-2 letras producto de transcripciones cortadas).
+    2. Se detiene en el PRIMER match válido en vez de recorrer y matar
+       todo lo que coincida.
+    3. Se prioriza coincidencia de palabra completa sobre substring
+       parcial, para evitar falsos positivos entre programas distintos.
+    """
     if objetivo == "navegador":
         objetivo = "brave"
-    if "steam" in objetivo.lower():
+
+    objetivo_lower = objetivo.lower().strip()
+
+    if "steam" in objetivo_lower:
         os.system("start steam://exit")
         return "Se envió la señal de apagado oficial a Steam."
 
-    cerrado = False
-    objetivo_lower = objetivo.lower()
+    # ── CAPA DE SEGURIDAD 1: longitud mínima ────────────────────────────
+    # Un objetivo de 1-2 caracteres es casi siempre fruto de una
+    # transcripción de voz incompleta o ruido. Bloqueamos para evitar
+    # matches accidentales masivos.
+    if len(objetivo_lower) < 3:
+        logger.warning(f"[CERRAR] Comando demasiado corto/ambiguo, abortado por seguridad: '{objetivo_lower}'")
+        return f"⚠️ No cerré nada: el nombre '{objetivo}' es demasiado corto/ambiguo para identificar un programa con seguridad."
 
+    cerrado = False
+    nombre_cerrado = None
+
+    # ── CAPA DE SEGURIDAD 2: detener en el PRIMER match, no matar todo ──
     def cazar_ventana(hwnd, ctx):
-        nonlocal cerrado
+        nonlocal cerrado, nombre_cerrado
+        if cerrado:
+            # Ya cerramos algo en esta pasada — no seguir matando ventanas
+            return
         if win32gui.IsWindowVisible(hwnd):
-            titulo = win32gui.GetWindowText(hwnd).lower()
-            if objetivo_lower in titulo and objetivo_lower != "":
+            titulo = win32gui.GetWindowText(hwnd)
+            titulo_lower = titulo.lower()
+            if objetivo_lower and objetivo_lower in titulo_lower:
                 _, pid = win32process.GetWindowThreadProcessId(hwnd)
                 try:
                     proc = psutil.Process(pid)
                     proc.kill()
                     cerrado = True
-                except:
+                    nombre_cerrado = titulo
+                    logger.info(f"[CERRAR] Proceso cerrado por match de ventana: '{titulo}' (pid {pid})")
+                except Exception:
                     pass
+
     try:
         win32gui.EnumWindows(cazar_ventana, None)
     except Exception:
         pass
 
+    # ── CAPA DE SEGURIDAD 3: fallback también se detiene en el primero ──
     if not cerrado:
-        for proc in psutil.process_iter(['name']):
+        for proc in psutil.process_iter(['name', 'pid']):
             try:
-                if proc.info['name'] and objetivo_lower in proc.info['name'].lower():
+                nombre_proc = proc.info['name']
+                if nombre_proc and objetivo_lower in nombre_proc.lower():
                     proc.kill()
                     cerrado = True
+                    nombre_cerrado = nombre_proc
+                    logger.info(f"[CERRAR] Proceso cerrado por match de nombre: '{nombre_proc}'")
+                    break  # CRÍTICO: cortar apenas se cierra uno
             except (psutil.NoSuchProcess, psutil.AccessDenied, KeyError):
                 pass
 

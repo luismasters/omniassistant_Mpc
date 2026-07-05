@@ -70,23 +70,12 @@ CHAT_PAD_X = 110
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
-# ─── ESTADO UNIFICADO ────────────────────────────────────────────────────────
-# OPTIMIZACIÓN: eliminamos _AppState duplicado. Ahora 'state' es un wrapper
-# que lee/escribe DIRECTO en config.estado (la única fuente de verdad).
-# Esto elimina race conditions entre ambos objetos de estado.
-
 import config as _config_module
 
 class _StateProxy:
-    """
-    Proxy liviano sobre config.EstadoGlobal.
-    Mantiene historial_por_modo (solo UI) como único campo local.
-    Todo lo demás delega a config.estado thread-safe.
-    """
     def __init__(self):
         self._historial_por_modo = {}
 
-    # ── Delegación transparente a config.estado ────────────────────────
     @property
     def modo_actual(self):
         return _config_module.estado.modo_actual
@@ -126,7 +115,6 @@ class _StateProxy:
     def documento_volatil(self, v):
         _config_module.estado.cambiar_documento_volatil(v)
 
-    # ── Historial por modo (solo UI, no necesita ir al estado global) ──
     def guardar_historial_modo(self, modo, visual, contexto):
         self._historial_por_modo[modo] = {
             "visual": visual[-50:],
@@ -145,7 +133,7 @@ _STR = r'("""[\s\S]*?"""|\'\'\'[\s\S]*?\'\'\'|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\]
 _CMT = r'(#[^\n]*)'
 _NUM = r'\b(\d+\.?\d*)\b'
 
-def _highlight_code(tw: tk.Text, code: str):
+def _highlight_code(tw, code):
     tw.configure(state="normal")
     tw.delete("1.0", "end")
     tw.insert("1.0", code)
@@ -154,13 +142,13 @@ def _highlight_code(tw: tk.Text, code: str):
             tw.tag_add(tag, f"1.0+{m.start()}c", f"1.0+{m.end()}c")
     tw.configure(state="disabled")
 
-def _strip_md(text: str) -> str:
+def _strip_md(text):
     text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
     text = re.sub(r'\*(.+?)\*',     r'\1', text)
     text = re.sub(r'`(.+?)`',       r'\1', text)
     return text.strip()
 
-def _make_inline_text(parent, text: str, wrap_px: int) -> tk.Text:
+def _make_inline_text(parent, text, wrap_px):
     t = tk.Text(parent, bg=BG_CHAT, fg=TEXT_AI, font=(_F, _TK_SIZE),
                 wrap="word", bd=0, relief="flat", highlightthickness=0,
                 state="normal", cursor="xterm", height=1, width=1,
@@ -183,7 +171,7 @@ def _make_inline_text(parent, text: str, wrap_px: int) -> tk.Text:
     t.configure(state="disabled")
     return t
 
-def _auto_height(t: tk.Text, wrap_px: int = 0):
+def _auto_height(t, wrap_px=0):
     t.update_idletasks()
     try:
         result = t.count("1.0", "end", "displaylines")
@@ -196,12 +184,12 @@ def _auto_height(t: tk.Text, wrap_px: int = 0):
         except Exception:
             pass
 
-def _pack_text(t: tk.Text, parent, pady=(1,1)):
+def _pack_text(t, parent, pady=(1,1)):
     t.pack(fill="x", pady=pady)
     t.update_idletasks()
     _auto_height(t)
 
-def _parse_table(lines: list[str]) -> list[list[str]] | None:
+def _parse_table(lines):
     rows = []
     for line in lines:
         if not line.strip().startswith("|"):
@@ -215,7 +203,7 @@ def _parse_table(lines: list[str]) -> list[list[str]] | None:
     return rows if len(rows) >= 2 else None
 
 class CodeBlock(ctk.CTkFrame):
-    def __init__(self, parent, code: str, lang: str = "", **kwargs):
+    def __init__(self, parent, code, lang="", **kwargs):
         super().__init__(parent, fg_color=BG_CODE, corner_radius=8,
                          border_width=1, border_color=BORDER_CODE, **kwargs)
         hdr = ctk.CTkFrame(self, fg_color="#0a0a18", corner_radius=0)
@@ -238,7 +226,7 @@ class CodeBlock(ctk.CTkFrame):
         self._txt.configure(height=min(code.count("\n") + 1, 30))
 
 class TableBlock(ctk.CTkFrame):
-    def __init__(self, parent, rows: list[list[str]], **kwargs):
+    def __init__(self, parent, rows, **kwargs):
         super().__init__(parent, fg_color="transparent", **kwargs)
         if not rows:
             return
@@ -265,10 +253,9 @@ class TableBlock(ctk.CTkFrame):
                              anchor="w", justify="left", wraplength=0
                              ).pack(padx=10, pady=5, fill="x")
 
-# ─── BURBUJAS ────────────────────────────────────────────────────────────────
 class UserBubble(ctk.CTkFrame):
     MAX_WIDTH_RATIO = 0.60
-    def __init__(self, parent, texto: str, **kwargs):
+    def __init__(self, parent, texto, **kwargs):
         super().__init__(parent, fg_color="transparent", **kwargs)
         self._pill = ctk.CTkFrame(self, fg_color=BG_USER_MSG, corner_radius=18,
                                   border_width=1, border_color=BORDER_COLOR)
@@ -305,7 +292,6 @@ class AIBubble(ctk.CTkFrame):
         self._wrap_px   = 600
         self._mostrando_carga = False
 
-        # Header
         hdr = ctk.CTkFrame(self, fg_color="transparent")
         hdr.pack(fill="x", padx=4, pady=(12, 4))
         ctk.CTkLabel(hdr, text="◆", font=(_F, TAMANO_BASE), text_color=ACCENT, width=20
@@ -341,16 +327,14 @@ class AIBubble(ctk.CTkFrame):
         self._stream_box.configure(state="disabled")
 
     def mostrar_carga(self):
-        """Muestra un indicador de que la IA está procesando."""
         self._mostrando_carga = True
         self._stream_box.configure(state="normal")
         self._stream_box.insert("end", " ...")
         self._stream_box.configure(state="disabled")
         self._ajustar_stream()
 
-    def append_text(self, texto: str):
+    def append_text(self, texto):
         if self._mostrando_carga:
-            # Limpiar el mensaje de carga
             self._stream_box.configure(state="normal")
             self._stream_box.delete("1.0", "end")
             self._stream_box.configure(state="disabled")
@@ -392,7 +376,7 @@ class AIBubble(ctk.CTkFrame):
         if self._raw.strip():
             self._render_markdown(self._raw)
 
-    def _render_markdown(self, text: str):
+    def _render_markdown(self, text):
         CODE_STRONG = re.compile(
             r'^(import |from \w+ import |def |class |\s+def |\s+class |'
             r'\s+return |\s+if |\s+elif |\s+else:|\s+for |\s+while |\s+try:'
@@ -400,7 +384,7 @@ class AIBubble(ctk.CTkFrame):
             r'var |const |let |function |#include|public |private |static )'
         )
 
-        def _is_code_context(block: str) -> bool:
+        def _is_code_context(block):
             strong = sum(1 for l in block.splitlines() if CODE_STRONG.match(l))
             return strong >= 2
 
@@ -480,7 +464,7 @@ class AIBubble(ctk.CTkFrame):
             else:
                 self._render_text_block(self._content, seg[1])
 
-    def _render_text_block(self, parent, text: str):
+    def _render_text_block(self, parent, text):
         lines = text.split("\n")
         i = 0
         while i < len(lines):
@@ -550,7 +534,7 @@ class AIBubble(ctk.CTkFrame):
             if para_lines:
                 self._add_text_block(parent, " ".join(para_lines))
 
-    def _add_text_block(self, parent, text: str, pady=(1, 1)):
+    def _add_text_block(self, parent, text, pady=(1, 1)):
         t = tk.Text(parent, bg=BG_CHAT, fg=TEXT_AI, font=(_F, _TK_SIZE),
                     wrap="word", bd=0, relief="flat", highlightthickness=0,
                     state="normal", cursor="xterm", height=1, width=1,
@@ -586,7 +570,7 @@ class AIBubble(ctk.CTkFrame):
         t.configure(state="disabled")
         _pack_text(t, parent, pady)
 
-    def _add_inline(self, parent, text: str):
+    def _add_inline(self, parent, text):
         pat = re.compile(r'\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`')
         has_md = bool(pat.search(text))
         if not has_md:
@@ -601,7 +585,6 @@ class AIBubble(ctk.CTkFrame):
         t = _make_inline_text(parent, text, self._wrap_px)
         _pack_text(t, parent)
 
-# ─── LOG REDIRECTOR ──────────────────────────────────────────────────────────
 class LogRedirector:
     def __init__(self, target_widget):
         self.target = target_widget
@@ -626,7 +609,6 @@ class LogRedirector:
         self.target.see("end")
         self.target.configure(state="disabled")
 
-# ─── APLICACIÓN PRINCIPAL ────────────────────────────────────────────────────
 class OmniApp(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -643,43 +625,26 @@ class OmniApp(ctk.CTk):
         self.grid_columnconfigure(2, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # ── Estado de pausa gaming ─────────────────────────────────────
         self._modo_pausa_gaming = False
 
         self._build_sidebar()
         self._build_separator()
         self._build_main_area()
 
-        self.burbuja_ia_actual: AIBubble | None = None
-        self.texto_sin_enviar: str = ""
+        self.burbuja_ia_actual = None
+        self.texto_sin_enviar  = ""
         self._stop_micro_event = threading.Event()
         threading.Thread(target=self.motor_microfono, daemon=True).start()
 
-        # ── Control por gamepad (L3+R3 push-to-talk) ────────────────────
-        # Hilo completamente aislado del de teclado — no usa 'keyboard',
-        # evita el conflicto de hooks que causaba el deadlock con PoE2.
         self._gestor_gamepad = GestorGamepad(
             callback_activar_voz=self._activar_voz_desde_gamepad
         )
-        self._gestor_gamepad.iniciar()
 
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def _activar_voz_desde_gamepad(self, condicion_sigue_presionado):
-        """
-        Se llama AL PRESIONAR el combo L3+R3 (corregido: antes se llamaba
-        al soltar, lo cual era tarde para grabar nada).
-
-        condicion_sigue_presionado: función que retorna True mientras el
-        combo siga presionado. Se la pasamos a capturar_voz_micro() para
-        que sepa cuándo cortar la grabación, en vez de depender de
-        keyboard.is_pressed('f8') como hacía antes (ese era el bug:
-        esperaba indefinidamente que se soltara una tecla que nunca
-        se había presionado).
-        """
         if audio_modulo.hablando_actualmente:
             detener_voz()
-
         texto_voz = capturar_voz_micro(condicion_seguir_grabando=condicion_sigue_presionado)
         if texto_voz:
             self.after(0, self._agregar_usuario, f"🎮 {texto_voz}")
@@ -691,13 +656,11 @@ class OmniApp(ctk.CTk):
             ).start()
 
     def on_closing(self):
-        """Detiene el hilo del micrófono, el del gamepad, libera Whisper si está cargado, y cierra limpiamente."""
         self._stop_micro_event.set()
         try:
             self._gestor_gamepad.detener()
         except Exception:
             pass
-        # Liberar VRAM de Whisper si estaba cargado
         try:
             import modulos.audio_custom as _audio
             if _audio._modelo_whisper is not None:
@@ -708,7 +671,6 @@ class OmniApp(ctk.CTk):
         time.sleep(0.2)
         self.destroy()
 
-    # ── Sidebar ────────────────────────────────────────────────────────────────
     def _build_sidebar(self):
         import config
         sb = ctk.CTkFrame(self, fg_color=BG_SIDEBAR, corner_radius=0)
@@ -726,7 +688,6 @@ class OmniApp(ctk.CTk):
         ctk.CTkFrame(sb, height=1, fg_color=SIDEBAR_LINE).grid(
             row=2, column=0, padx=0, sticky="ew")
 
-        # Sincronizar etiqueta con modo actual en config.estado
         textos_modelos = {
             "general":      "🧠 Modelo: Gemini Flash",
             "programador":  "🧠 Modelo: DeepSeek V4 (Reasoner)",
@@ -751,11 +712,20 @@ class OmniApp(ctk.CTk):
             btn.grid(row=i, column=0, padx=10, pady=2, sticky="ew")
             self.botones_ui.append(btn)
 
-        # ── Separador antes del botón de pausa ────────────────────────
+        # ── Separador ──────────────────────────────────────────────────
         ctk.CTkFrame(sb, height=1, fg_color=SIDEBAR_LINE).grid(
             row=6, column=0, padx=0, sticky="ew", pady=(8, 0))
 
-        # ── Botón Modo Gaming (pausa micrófono + libera VRAM Whisper) ──
+        # ── NUEVO: Botón Limpiar Contexto ──────────────────────────────
+        ctk.CTkButton(
+            sb, text="🧹  Limpiar contexto",
+            anchor="w", font=FONT_UI,
+            fg_color="transparent", hover_color="#16162a",
+            text_color=TEXT_DIM, corner_radius=6,
+            command=self._limpiar_contexto_directo
+        ).grid(row=7, column=0, padx=10, pady=(4, 2), sticky="ew")
+
+        # ── Botón Modo Gaming ──────────────────────────────────────────
         self.btn_gaming = ctk.CTkButton(
             sb, text="🎮  Modo Gaming: OFF",
             anchor="w", font=FONT_UI,
@@ -763,24 +733,32 @@ class OmniApp(ctk.CTk):
             text_color=TEXT_DIM, corner_radius=6,
             command=self._toggle_modo_gaming
         )
-        self.btn_gaming.grid(row=7, column=0, padx=10, pady=(4, 2), sticky="ew")
+        self.btn_gaming.grid(row=8, column=0, padx=10, pady=(4, 2), sticky="ew")
 
-        # ── Indicador de gamepad detectado ──────────────────────────────
+        # ── Indicador de gamepad ───────────────────────────────────────
         self.lbl_gamepad = ctk.CTkLabel(
-            sb, text="🎮 Mando: buscando...",
+            sb, text="🎮 Mando: inactivo",
             font=FONT_UI_SM, text_color=TEXT_DIM
         )
-        self.lbl_gamepad.grid(row=8, column=0, padx=18, pady=(2, 0), sticky="w")
-        self.after(2000, self._actualizar_estado_gamepad)
+        self.lbl_gamepad.grid(row=9, column=0, padx=18, pady=(2, 0), sticky="w")
 
         ctk.CTkLabel(
             sb, text="v0.3.1 — Optimizado",
             font=FONT_UI_SM, text_color=TEXT_DIM
-        ).grid(row=10, column=0, padx=18, pady=16, sticky="sw")
-        sb.grid_rowconfigure(10, weight=1)
+        ).grid(row=11, column=0, padx=18, pady=16, sticky="sw")
+        sb.grid_rowconfigure(11, weight=1)
+
+    # ── NUEVO: Limpiar contexto directo, sin pasar por Gemini ─────────
+    def _limpiar_contexto_directo(self):
+        """
+        Limpia el contexto DIRECTAMENTE sin pasar por Gemini.
+        Útil cuando Argus entra en loop de alucinación.
+        """
+        import config
+        config.estado.limpiar_memoria()
+        self._agregar_sistema("🧹 Contexto limpiado. Argus empieza desde cero.")
 
     def _actualizar_estado_gamepad(self):
-        """Revisa periódicamente si hay un mando conectado y actualiza el indicador."""
         try:
             if hasattr(self, '_gestor_gamepad') and self._gestor_gamepad._disponible:
                 nombre = self._gestor_gamepad._joystick.get_name() if self._gestor_gamepad._joystick else "Conectado"
@@ -793,48 +771,118 @@ class OmniApp(ctk.CTk):
         self.after(3000, self._actualizar_estado_gamepad)
 
     def _toggle_modo_gaming(self):
-        """
-        Activa/desactiva el modo gaming:
-        - Pausa el polling del micrófono (reduce CPU y elimina conflictos anti-cheat)
-        - Libera la VRAM de Whisper (libera 2-3GB para el juego)
-        - Se puede reactivar con el mismo botón cuando terminás de jugar
-        """
         import modulos.audio_custom as _audio
 
-        self._modo_pausa_gaming = not self._modo_pausa_gaming
+        if not self._modo_pausa_gaming:
+            try:
+                mandos = GestorGamepad.listar_mandos_disponibles()
+            except Exception as e:
+                self._agregar_sistema(f"🎮 Error al escanear mandos: {e}. Intentá reconectar el control.")
+                return
 
-        if self._modo_pausa_gaming:
-            # Liberar VRAM de Whisper
+            if not mandos:
+                self._agregar_sistema("🎮 No se detectó ningún mando conectado. Conectá uno y volvé a intentar.")
+                return
+
+            indice_elegido = 0
+            if len(mandos) > 1:
+                indice_elegido = self._mostrar_selector_mando(mandos)
+                if indice_elegido is None:
+                    return
+            else:
+                indice_elegido = mandos[0]["indice"]
+                self._agregar_sistema(f"🎮 Mando detectado: {mandos[0]['nombre']}")
+
+            self._gestor_gamepad.detener()
+            self._gestor_gamepad._stop_event.clear()
+            self._gestor_gamepad.iniciar_con_indice(indice_elegido)
+
             if _audio._modelo_whisper is not None:
                 try:
                     del _audio._modelo_whisper
                     _audio._modelo_whisper = None
-                    self._agregar_sistema("🎮 Modo Gaming ON — Whisper descargado de VRAM. Micrófono en pausa.")
+                    self._agregar_sistema("🎮 Modo Gaming ON — Whisper descargado de VRAM. Micrófono de teclado en pausa.")
                 except Exception as e:
                     self._agregar_sistema(f"🎮 Modo Gaming ON — Micrófono en pausa. (VRAM: {e})")
             else:
-                self._agregar_sistema("🎮 Modo Gaming ON — Micrófono en pausa.")
+                self._agregar_sistema("🎮 Modo Gaming ON — Usá L3+R3 para hablar.")
 
+            self._modo_pausa_gaming = True
             self.btn_gaming.configure(
                 text="🎮  Modo Gaming: ON",
                 text_color="#86efac",
                 fg_color=ACCENT_SOFT
             )
+            self.after(500, self._actualizar_estado_gamepad)
+
         else:
-            # Reactivar — Whisper se cargará lazy al primer uso de voz
-            self._agregar_sistema("🎮 Modo Gaming OFF — Micrófono reactivado. Whisper se cargará al primer uso de voz.")
+            self._gestor_gamepad.detener()
+            self._agregar_sistema("🎮 Modo Gaming OFF — Control desconectado. Micrófono de teclado reactivado.")
+            self._modo_pausa_gaming = False
             self.btn_gaming.configure(
                 text="🎮  Modo Gaming: OFF",
                 text_color=TEXT_DIM,
                 fg_color="transparent"
             )
+            self.lbl_gamepad.configure(text="🎮 Mando: inactivo", text_color=TEXT_DIM)
+
+    def _mostrar_selector_mando(self, mandos):
+        dialogo = ctk.CTkToplevel(self)
+        dialogo.title("Elegir mando")
+        dialogo.geometry("360x200")
+        dialogo.resizable(False, False)
+        dialogo.configure(fg_color=BG_SIDEBAR)
+        dialogo.grab_set()
+        dialogo.lift()
+        dialogo.focus_force()
+
+        resultado = {"indice": None}
+
+        ctk.CTkLabel(
+            dialogo,
+            text="¿Qué mando querés usar?",
+            font=(_F, TAMANO_BASE, "bold"),
+            text_color=TEXT_PRIMARY
+        ).pack(pady=(20, 10), padx=20)
+
+        for mando in mandos:
+            nombre_corto = (mando["nombre"][:38] + "…") if len(mando["nombre"]) > 38 else mando["nombre"]
+            def _elegir(idx=mando["indice"], nombre=mando["nombre"]):
+                resultado["indice"] = idx
+                self._agregar_sistema(f"🎮 Mando seleccionado: {nombre}")
+                dialogo.destroy()
+
+            ctk.CTkButton(
+                dialogo,
+                text=nombre_corto,
+                anchor="w",
+                font=FONT_UI,
+                fg_color=ACCENT_SOFT,
+                hover_color=ACCENT,
+                text_color=TEXT_PRIMARY,
+                corner_radius=6,
+                command=_elegir
+            ).pack(fill="x", padx=20, pady=4)
+
+        ctk.CTkButton(
+            dialogo,
+            text="Cancelar",
+            font=FONT_UI,
+            fg_color="transparent",
+            hover_color="#16162a",
+            text_color=TEXT_DIM,
+            corner_radius=6,
+            command=dialogo.destroy
+        ).pack(pady=(4, 16))
+
+        self.wait_window(dialogo)
+        return resultado["indice"]
 
     def _cambiar_modo(self, nuevo_modo):
         import config
         if nuevo_modo == state.modo_actual:
             return
 
-        # 1. Verificar workspace para modo programador
         if nuevo_modo in ["planificador", "programador"]:
             if not state.workspace_actual:
                 ruta = filedialog.askdirectory(
@@ -842,7 +890,6 @@ class OmniApp(ctk.CTk):
                 )
                 if not ruta:
                     return
-                # OPTIMIZACIÓN: state.workspace_actual ya escribe directo en config.estado
                 state.workspace_actual = ruta
                 nombre_proj = os.path.basename(ruta)
                 estructura = []
@@ -859,7 +906,6 @@ class OmniApp(ctk.CTk):
                 state.snapshot_actual = arbol
                 iniciar_radar_proyecto(ruta, ui_callback=self.callback_ia)
 
-        # 2. Guardar historial visual del modo actual
         visual = []
         for widget in self.chat_scroll.winfo_children():
             if isinstance(widget, UserBubble):
@@ -883,10 +929,8 @@ class OmniApp(ctk.CTk):
         if visual:
             state.guardar_historial_modo(state.modo_actual, visual, state.contexto_chat)
 
-        # 3. Cambiar modo — escribe directo en config.estado via proxy
         state.modo_actual = nuevo_modo
 
-        # 4. Actualizar etiqueta del modelo en sidebar
         textos_modelos = {
             "general":      "🧠 Modelo: Gemini Flash",
             "programador":  "🧠 Modelo: DeepSeek V4 (Reasoner)",
@@ -896,10 +940,8 @@ class OmniApp(ctk.CTk):
             text=textos_modelos.get(nuevo_modo, textos_modelos["general"])
         )
 
-        # 5. Mensaje de sistema
         self._agregar_sistema(f"🔁 Cambiado a modo {nuevo_modo.upper()}")
 
-        # 6. Bienvenida si el chat está vacío
         if not any(isinstance(w, (UserBubble, AIBubble)) for w in self.chat_scroll.winfo_children()):
             ruta_corta = os.path.basename(state.workspace_actual) if state.workspace_actual else ""
             mensajes = {
@@ -968,7 +1010,7 @@ class OmniApp(ctk.CTk):
         bar.grid_columnconfigure(0, weight=1)
         bar.grid_columnconfigure(1, weight=0)
         bar.grid_columnconfigure(2, weight=0)
-        bar.grid_columnconfigure(3, weight=0)  # botón guardar
+        bar.grid_columnconfigure(3, weight=0)
 
         self.entry = ctk.CTkTextbox(bar, height=48, fg_color="transparent",
                                     font=FONT_CHAT, text_color=TEXT_PRIMARY,
@@ -980,7 +1022,6 @@ class OmniApp(ctk.CTk):
         self._texto_real = ""
         self._set_placeholder()
 
-        # 📎 Botón adjuntar (carga en contexto)
         self.btn_attach = ctk.CTkButton(
             bar, text="📎", width=38, height=38,
             corner_radius=8, fg_color="transparent",
@@ -989,7 +1030,6 @@ class OmniApp(ctk.CTk):
             command=self._adjuntar_archivo)
         self.btn_attach.grid(row=0, column=1, padx=(0,2), pady=6)
 
-        # 💾 Botón guardar en memoria (archivos -> bóveda)
         self.btn_save_memory = ctk.CTkButton(
             bar, text="💾", width=38, height=38,
             corner_radius=8, fg_color="transparent",
@@ -998,7 +1038,6 @@ class OmniApp(ctk.CTk):
             command=self._guardar_archivos_en_memoria)
         self.btn_save_memory.grid(row=0, column=2, padx=(0,2), pady=6)
 
-        # ▲ Botón enviar
         self.btn_send = ctk.CTkButton(bar, text="▲", width=42, height=42,
                                       corner_radius=10, fg_color=ACCENT,
                                       hover_color=ACCENT_HOVER,
@@ -1035,7 +1074,6 @@ class OmniApp(ctk.CTk):
             self._texto_real = contenido
 
     def _adjuntar_archivo(self):
-        """Carga archivos en contexto volátil (NO en bóveda)."""
         rutas = filedialog.askopenfilenames(
             title="Adjuntar archivos (contexto)",
             filetypes=[
@@ -1052,7 +1090,6 @@ class OmniApp(ctk.CTk):
                 self.entry.insert("end", f"[adjunto: {ruta}]")
 
     def _guardar_archivos_en_memoria(self):
-        """Guarda archivos seleccionados directamente en la bóveda RAG (memoria permanente)."""
         rutas = filedialog.askopenfilenames(
             title="Guardar archivos en memoria",
             filetypes=[
@@ -1073,7 +1110,6 @@ class OmniApp(ctk.CTk):
             if contenido.startswith("ERROR"):
                 self._agregar_sistema(f"❌ No se pudo leer {nombre}: {contenido}")
                 continue
-            # Guardar en bóveda
             exito = guardar_recuerdo(
                 texto_a_guardar=contenido,
                 etiqueta_tema=f"Archivo: {nombre} (guardado manual)"
@@ -1092,16 +1128,9 @@ class OmniApp(ctk.CTk):
     def _on_shift_enter(self, event):
         return
 
-    # ── Micrófono ──────────────────────────────────────────────────────────────
     def motor_microfono(self):
-        """
-        Loop de escucha de teclado.
-        OPTIMIZACIÓN: polling reducido de 50hz a 20hz cuando no hay actividad.
-        Se detiene completamente cuando modo_pausa_gaming está activo.
-        """
         while not self._stop_micro_event.is_set():
             try:
-                # ── PAUSA GAMING: detener polling completamente ──────────────
                 if self._modo_pausa_gaming:
                     time.sleep(0.1)
                     continue
@@ -1127,12 +1156,10 @@ class OmniApp(ctk.CTk):
                     while keyboard.is_pressed(TECLA_HABLAR):
                         time.sleep(0.05)
 
-                # OPTIMIZACIÓN: 50ms en vez de 20ms → CPU de polling -60%
                 time.sleep(0.05)
             except Exception:
                 pass
 
-    # ── Envío ──────────────────────────────────────────────────────────────────
     def enviar_mensaje(self):
         if self._placeholder_active:
             return
@@ -1153,8 +1180,7 @@ class OmniApp(ctk.CTk):
         except Exception as e:
             self._agregar_sistema(f"Error al enviar mensaje: {e}")
 
-    # ── Callback IA ───────────────────────────────────────────────────────────
-    def callback_ia(self, remitente, texto: str, color=None, nueva_linea=True):
+    def callback_ia(self, remitente, texto, color=None, nueva_linea=True):
         def _update():
             if hasattr(self,"_welcome_label") and self._welcome_label.winfo_exists():
                 self._welcome_label.destroy()
@@ -1182,13 +1208,13 @@ class OmniApp(ctk.CTk):
             self.after(50, self._scroll_abajo)
         self.after(0, _update)
 
-    def _agregar_sistema(self, texto: str):
+    def _agregar_sistema(self, texto):
         lbl = ctk.CTkLabel(self.chat_scroll, text=f"⚙ {texto}",
                            font=FONT_UI_SM, text_color=TEXT_DIM,
                            anchor="w", justify="left", wraplength=0)
         lbl.pack(fill="x", padx=CHAT_PAD_X + 20, pady=(2,2))
 
-    def _agregar_usuario(self, texto: str):
+    def _agregar_usuario(self, texto):
         if hasattr(self,"_welcome_label") and self._welcome_label.winfo_exists():
             self._welcome_label.destroy()
         burbuja = UserBubble(self.chat_scroll, texto)

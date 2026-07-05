@@ -1,19 +1,14 @@
 """
 gamepad_control.py
 ===================
-Lectura de gamepad (Xbox / DualSense) vía pygame.joystick.
+Lectura de gamepad (Xbox / DualSense) via pygame.joystick.
 
-DISEÑO CRÍTICO: este módulo NO usa la librería 'keyboard' ni ningún hook
-global de Windows. pygame.joystick lee el estado del dispositivo via
-XInput/DirectInput de forma directa, sin instalar hooks de bajo nivel
-que puedan competir con el input thread de juegos como PoE2 (Unreal Engine).
+NO usa la libreria 'keyboard' ni hooks globales de Windows.
+pygame.joystick lee el dispositivo via XInput/DirectInput directamente,
+evitando el conflicto que causaba el deadlock con PoE2.
 
-Esto es justamente lo que evita el "Deadlock detected" que se daba con
-el polling de teclado.is_pressed() compitiendo con el hook del juego.
-
-Combo de activación: L3 + R3 mantenidos (push-to-talk, igual que F8).
-Funciona indistintamente con mando Xbox One y DualSense (PS5), ya que
-Windows expone ambos de forma unificada vía XInput.
+Combo de activacion: L3 + R3 mantenidos (push-to-talk).
+Compatible con Xbox One y DualSense simultaneamente.
 """
 
 import threading
@@ -28,54 +23,33 @@ except ImportError:
 from modulos.logger import logger
 
 # =====================================================================
-# MAPEO DE BOTONES — detección automática por tipo de mando
+# MAPEO DE BOTONES — deteccion automatica por tipo de mando
 # =====================================================================
-# Confirmado en pruebas reales:
-#   - DualSense (PS5):    L3=7, R3=8
-#   - Xbox One:            L3=8, R3=9
-# pygame no reporta el mismo índice para ambos porque cada uno usa un
-# driver distinto en Windows (DualSense suele ir por DirectInput,
-# Xbox por XInput nativo). Por eso identificamos el mando por su NOMBRE
-# y elegimos el mapeo correcto automáticamente, sin prueba y error.
+# Confirmado en pruebas reales del usuario:
+#   DualSense (PS5): L3=7, R3=8
+#   Xbox One:        L3=8, R3=9
 
 MAPEO_POR_TIPO = {
-    "dualsense": (7, 8),
-    "ps5":       (7, 8),
-    "wireless controller": (7, 8),  # nombre genérico que reporta DualSense en algunos drivers
-    "xbox":      (8, 9),
-    "xinput":    (8, 9),
+    "dualsense":           (7, 8),
+    "ps5":                 (7, 8),
+    "wireless controller": (7, 8),
+    "xbox":                (8, 9),
+    "xinput":              (8, 9),
 }
-
-# Fallback si el nombre no matchea ninguno de los anteriores
 MAPEO_DEFECTO = (8, 9)
+MAPEOS_ALTERNATIVOS = [(7, 8), (8, 9), (9, 10)]
 
-# Se mantienen como alternativas por si en el futuro aparece un mando
-# con nombre no reconocido y hay que probar a ciegas.
-MAPEOS_ALTERNATIVOS = [
-    (7, 8),
-    (8, 9),
-    (9, 10),
-]
-
-BOTON_L3 = 8   # Se sobreescribe dinámicamente en _detectar_mapeo_l3_r3()
-BOTON_R3 = 9   # Se sobreescribe dinámicamente en _detectar_mapeo_l3_r3()
+BOTON_L3 = 8
+BOTON_R3 = 9
 
 
 class GestorGamepad:
     """
-    Gestiona la detección de mando y el combo L3+R3 push-to-talk.
-    Corre en su propio hilo, completamente aislado del hilo de teclado.
+    Gestiona la deteccion de mando y el combo L3+R3 push-to-talk.
+    Corre en su propio hilo, aislado del hilo de teclado.
     """
 
     def __init__(self, callback_activar_voz, callback_pausa_activa=None):
-        """
-        callback_activar_voz: función a llamar cuando se suelta el combo
-                               (igual que se llama al soltar F8).
-        callback_pausa_activa: función que retorna True si el modo gaming
-                                pausa también debe pausar el gamepad
-                                (por defecto, el gamepad sigue activo
-                                incluso en modo gaming, ya que es seguro).
-        """
         self._callback_activar_voz = callback_activar_voz
         self._callback_pausa_activa = callback_pausa_activa
         self._stop_event = threading.Event()
@@ -85,50 +59,117 @@ class GestorGamepad:
         self._combo_r3 = BOTON_R3
         self._combo_presionado = False
         self._disponible = False
+        self._indice_preferido = 0  # Se sobreescribe con iniciar_con_indice()
+
+    # ------------------------------------------------------------------
+    # API publica
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def listar_mandos_disponibles() -> list:
+        """
+        Escanea y retorna los mandos conectados.
+        NUNCA lanza excepción — siempre retorna lista (vacía si no hay mandos
+        o si pygame falla). El llamador debe manejar la lista vacía.
+        """
+        try:
+            if not pygame.get_init():
+                pygame.init()
+        except Exception as e:
+            logger.error(f"[GAMEPAD] No se pudo inicializar pygame: {e}")
+            return []
+
+        try:
+            pygame.joystick.init()
+        except Exception as e:
+            logger.error(f"[GAMEPAD] No se pudo inicializar joystick: {e}")
+            return []
+
+        mandos = []
+        try:
+            cantidad = pygame.joystick.get_count()
+            for i in range(cantidad):
+                try:
+                    joy = pygame.joystick.Joystick(i)
+                    joy.init()
+                    mandos.append({"indice": i, "nombre": joy.get_name()})
+                    joy.quit()
+                except Exception as e:
+                    logger.warning(f"[GAMEPAD] Error leyendo mando {i}: {e}")
+        except Exception as e:
+            logger.error(f"[GAMEPAD] Error listando mandos: {e}")
+
+        logger.info(f"[GAMEPAD] Mandos encontrados: {[m['nombre'] for m in mandos]}")
+        return mandos
+
+    def iniciar_con_indice(self, indice: int):
+        """
+        Inicia el hilo usando el mando del indice elegido por el usuario.
+        Detiene cualquier hilo anterior antes de arrancar uno nuevo.
+        """
+        logger.info(f"[GAMEPAD] Iniciando con indice preferido: {indice}")
+        self._indice_preferido = indice
+        # Resetear estado por si habia un hilo anterior
+        self._stop_event.clear()
+        self._disponible = False
+        self._joystick = None
+        self.iniciar()
 
     def iniciar(self):
-        """Arranca el hilo de escucha del gamepad. Seguro de llamar aunque no haya mando conectado."""
+        """Arranca el hilo de escucha. Seguro de llamar sin mando conectado."""
         if not _PYGAME_DISPONIBLE:
-            logger.warning("[GAMEPAD] pygame no disponible, control por mando deshabilitado.")
+            logger.warning("[GAMEPAD] pygame no disponible.")
             return
-
         if self._hilo and self._hilo.is_alive():
+            logger.debug("[GAMEPAD] Hilo ya corriendo, ignorando iniciar().")
             return
-
         self._stop_event.clear()
         self._hilo = threading.Thread(target=self._loop_escucha, daemon=True)
         self._hilo.start()
+        logger.info(f"[GAMEPAD] Hilo iniciado (indice preferido: {self._indice_preferido})")
 
     def detener(self):
         """Detiene el hilo de escucha de forma limpia."""
         self._stop_event.set()
         if self._hilo:
-            self._hilo.join(timeout=1.0)
+            self._hilo.join(timeout=2.0)
+        self._disponible = False
+        self._joystick = None
+        logger.info("[GAMEPAD] Hilo detenido.")
+
+    # ------------------------------------------------------------------
+    # Internos
+    # ------------------------------------------------------------------
 
     def _inicializar_pygame_joystick(self):
-        """Inicializa el subsistema de joystick de pygame de forma aislada."""
         try:
             if not pygame.get_init():
                 pygame.init()
             pygame.joystick.init()
             return True
         except Exception as e:
-            logger.error(f"[GAMEPAD] Error inicializando pygame.joystick: {e}")
+            logger.error(f"[GAMEPAD] Error inicializando pygame: {e}")
             return False
 
     def _conectar_mando(self):
-        """Intenta conectar el primer mando disponible. Retorna True si lo logra."""
+        """
+        Conecta el mando segun _indice_preferido.
+        CRITICO: no reinicializa pygame.joystick aqui para evitar que los
+        indices se reordenen despues de que el usuario eligio uno especifico.
+        """
         try:
-            pygame.joystick.quit()
-            pygame.joystick.init()
             cantidad = pygame.joystick.get_count()
+            logger.info(f"[GAMEPAD] Mandos disponibles: {cantidad}, indice preferido: {self._indice_preferido}")
             if cantidad == 0:
                 return False
 
-            self._joystick = pygame.joystick.Joystick(0)
+            # Usar el indice elegido; si ya no existe usar el primero
+            indice = self._indice_preferido if self._indice_preferido < cantidad else 0
+
+            self._joystick = pygame.joystick.Joystick(indice)
             self._joystick.init()
             nombre = self._joystick.get_name()
-            logger.info(f"[GAMEPAD] Mando detectado: {nombre}")
+            logger.info(f"[GAMEPAD] Conectado indice {indice}: '{nombre}'")
             self._detectar_mapeo_l3_r3()
             self._disponible = True
             return True
@@ -138,69 +179,47 @@ class GestorGamepad:
             return False
 
     def _detectar_mapeo_l3_r3(self):
-        """
-        Identifica el mapeo correcto de L3/R3 según el TIPO de mando,
-        no a ciegas. Esto resuelve el problema de que DualSense reporta
-        L3/R3 en índices distintos a Xbox One en el mismo sistema.
-        """
+        """Elige el mapeo L3/R3 segun el nombre del mando."""
         if not self._joystick:
             return
-
         nombre = self._joystick.get_name().lower()
         total_botones = self._joystick.get_numbuttons()
 
-        # 1. Intentar matchear por nombre del dispositivo (método preferido)
-        mapeo_encontrado = None
         for clave, mapeo in MAPEO_POR_TIPO.items():
             if clave in nombre:
-                mapeo_encontrado = mapeo
-                logger.info(f"[GAMEPAD] Tipo detectado por nombre ('{clave}' en '{nombre}') → mapeo {mapeo}")
-                break
+                l3, r3 = mapeo
+                if l3 < total_botones and r3 < total_botones:
+                    self._combo_l3 = l3
+                    self._combo_r3 = r3
+                    logger.info(f"[GAMEPAD] Mapeo por nombre '{clave}': L3={l3}, R3={r3}")
+                    return
+                else:
+                    logger.warning(f"[GAMEPAD] Mapeo ({l3},{r3}) supera {total_botones} botones.")
 
-        if mapeo_encontrado:
-            l3, r3 = mapeo_encontrado
-            if l3 < total_botones and r3 < total_botones:
-                self._combo_l3 = l3
-                self._combo_r3 = r3
-                logger.info(f"[GAMEPAD] Mapeo L3/R3 confirmado por tipo de mando: ({l3}, {r3})")
-                return
-            else:
-                logger.warning(
-                    f"[GAMEPAD] Mapeo esperado ({l3},{r3}) excede los {total_botones} "
-                    f"botones reportados. Probando alternativas."
-                )
-
-        # 2. Fallback: el nombre no matcheó nada conocido, probar alternativas
-        logger.warning(f"[GAMEPAD] Mando no reconocido por nombre ('{nombre}'). Probando mapeos alternativos.")
+        # Fallback por alternativas
         for l3, r3 in MAPEOS_ALTERNATIVOS:
             if l3 < total_botones and r3 < total_botones:
                 self._combo_l3 = l3
                 self._combo_r3 = r3
-                logger.warning(f"[GAMEPAD] Mapeo alternativo asignado: ({l3}, {r3}) de {total_botones} botones")
+                logger.warning(f"[GAMEPAD] Mapeo alternativo: L3={l3}, R3={r3}")
                 return
 
-        # 3. Último recurso: mapeo por defecto sin garantías
         self._combo_l3, self._combo_r3 = MAPEO_DEFECTO
-        logger.error(
-            f"[GAMEPAD] No se pudo determinar mapeo confiable para '{nombre}'. "
-            f"Usando default {MAPEO_DEFECTO} — puede no funcionar correctamente."
-        )
+        logger.error(f"[GAMEPAD] Usando mapeo default para '{nombre}'")
 
     def _loop_escucha(self):
-        """
-        Loop principal — corre en hilo propio, separado del de teclado.
-        Reintenta conexión de mando periódicamente si no hay ninguno.
-        """
+        """Loop principal en hilo propio."""
         if not self._inicializar_pygame_joystick():
             return
 
-        intentos_reconexion = 0
+        # Conectar inmediatamente al indice elegido, sin esperar
+        if not self._conectar_mando():
+            logger.warning("[GAMEPAD] No se pudo conectar al inicio, reintentando cada 3s...")
 
         while not self._stop_event.is_set():
             try:
                 if not self._disponible or not self._joystick:
                     if not self._conectar_mando():
-                        intentos_reconexion += 1
                         time.sleep(3.0)
                         continue
 
@@ -208,27 +227,20 @@ class GestorGamepad:
 
                 total_botones = self._joystick.get_numbuttons()
                 if self._combo_l3 >= total_botones or self._combo_r3 >= total_botones:
+                    logger.warning(f"[GAMEPAD] Indice de boton invalido, reconectando...")
                     self._disponible = False
                     self._joystick = None
                     time.sleep(1.0)
                     continue
 
-                l3_estado = self._joystick.get_button(self._combo_l3)
-                r3_estado = self._joystick.get_button(self._combo_r3)
-                combo_activo = bool(l3_estado and r3_estado)
+                l3 = self._joystick.get_button(self._combo_l3)
+                r3 = self._joystick.get_button(self._combo_r3)
+                combo_activo = bool(l3 and r3)
 
-                # ── CORREGIDO: disparar AL PRESIONAR, no al soltar ──────────
-                # Antes esperaba a que se soltara el combo para recién ahí
-                # llamar a capturar_voz_micro(), lo cual era demasiado tarde:
-                # la grabación arrancaba cuando ya no había nada que grabar.
-                # Ahora se dispara la captura EN PARALELO al presionar, y la
-                # condición de corte (_combo_sigue_presionado) se consulta
-                # en tiempo real mientras se graba, deteniéndose al soltar.
                 if combo_activo and not self._combo_presionado:
                     self._combo_presionado = True
+                    logger.debug(f"[GAMEPAD] Combo L3+R3 detectado, iniciando captura...")
                     if self._callback_activar_voz:
-                        # Se dispara en un hilo nuevo para no bloquear este
-                        # loop de lectura del gamepad mientras se graba.
                         threading.Thread(
                             target=self._callback_activar_voz,
                             args=(self._combo_sigue_presionado,),
@@ -237,23 +249,19 @@ class GestorGamepad:
                 elif not combo_activo:
                     self._combo_presionado = False
 
-                time.sleep(0.03)  # ~33hz para detectar la suelta con precisión
+                time.sleep(0.03)
 
             except pygame.error as e:
-                logger.warning(f"[GAMEPAD] Mando desconectado: {e}")
+                logger.warning(f"[GAMEPAD] Error pygame: {e}")
                 self._disponible = False
                 self._joystick = None
                 time.sleep(1.0)
             except Exception as e:
-                logger.exception(f"[GAMEPAD] Error inesperado en loop de escucha")
+                logger.exception("[GAMEPAD] Error inesperado en loop")
                 time.sleep(1.0)
 
     def _combo_sigue_presionado(self) -> bool:
-        """
-        Condición de corte que consulta capturar_voz_micro() en tiempo real
-        para saber si debe seguir grabando. Retorna True mientras L3+R3
-        sigan ambos presionados.
-        """
+        """Condicion de corte para capturar_voz_micro: True mientras L3+R3 sigan presionados."""
         try:
             if not self._joystick:
                 return False
@@ -262,5 +270,4 @@ class GestorGamepad:
             r3 = self._joystick.get_button(self._combo_r3)
             return bool(l3 and r3)
         except Exception:
-            # Si el mando se desconecta a mitad de grabación, cortar grabación
             return False

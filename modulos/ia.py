@@ -218,11 +218,23 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
     config.RUTA_WORKSPACE_ACTUAL = WORKSPACE_ACTUAL
     texto_usuario_lower = texto_usuario.lower().strip()
 
-    # ─── LIMPIAR MEMORIA ────────────────────────────────────────────────────
-    if texto_usuario_lower in ["limpiar memoria", "olvidar contexto"]:
+    # ─── LIMPIAR CONTEXTO (interceptor pre-IA, Gemini no puede bloquearlo) ─
+    _FRASES_LIMPIAR = {
+        "limpiar memoria", "olvidar contexto", "limpiar contexto",
+        "resetear contexto", "reset contexto", "borrar contexto",
+        "limpiar chat", "borrar chat", "nueva conversacion",
+        "nueva conversación", "empezar de nuevo", "reiniciar contexto",
+        "olvidar todo", "limpia el contexto", "limpia la memoria",
+        "borra el contexto", "reseteá el contexto"
+    }
+    if texto_usuario_lower in _FRASES_LIMPIAR or any(
+        frase in texto_usuario_lower for frase in _FRASES_LIMPIAR
+    ):
         config.estado.limpiar_memoria()
         if ui_callback:
-            ui_callback("⚙️ Sistema", "🧹 Contexto y caché limpiados.", "#80868B")
+            ui_callback("⚙️ Sistema", "🧹 Contexto limpiado. Argus empieza desde cero.", "#80868B")
+        if modo_voz:
+            hablar_no_bloqueante("Contexto limpiado, empezamos de nuevo.")
         return
 
     # =================================================================

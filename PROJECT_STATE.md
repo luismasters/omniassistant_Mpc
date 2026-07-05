@@ -2,102 +2,78 @@
 
 ## 1. Resumen Ejecutivo
 
-**Argus** (código interno: OmniAssistant) es un asistente de IA de escritorio para Windows con interfaz gráfica (`customtkinter`), control por voz y gamepad, capaz de interactuar con múltiples modelos de lenguaje (Gemini Flash, DeepSeek Reasoner), gestionar memoria a largo plazo (bóveda vectorial ChromaDB), ejecutar acciones locales (archivos, sistema, Git, audio) y realizar búsquedas web actualizadas. Su propósito es actuar como copiloto integral de productividad, programación y gaming, integrando voz, visión y automatización del sistema.
+**Argus** es un asistente de IA multimodal integrado al escritorio de Windows, diseñado para operar en tres modos (General, Programador y Planificador) con cambio dinámico de modelo de lenguaje (Gemini Flash para el modo General, DeepSeek Reasoner para modos avanzados). Su núcleo es una **interfaz gráfica en CustomTkinter** con soporte de voz (Edge TTS + Whisper), búsqueda web (DuckDuckGo), control de sistema (ventanas, procesos, audio), gestión de archivos con sandbox de seguridad, memoria persistente vía ChromaDB, control de gamepad (L3+R3 push‑to‑talk), y un sistema extensible de **Skills** (inyección contextual). Está en **fase activa de expansión**, con integración continua de nuevas capacidades (audio, monitoreo de hardware, recordatorios).
 
 ## 2. Arquitectura
 
-### Módulos principales
-
-| Módulo | Archivo(s) | Propósito |
-|---|---|---|
-| **Configuración global** | `config.py` | Variables de entorno, API keys, estado global thread-safe (`EstadoGlobal`), límites de seguridad, rutas de sandbox. |
-| **Interfaz gráfica** | `main_gui.py` | Aplicación con sidebar, chat, input bar, tabs de logs. Maneja modo gaming, gamepad, envío de mensajes y renderizado Markdown. |
-| **Orquestador IA** | `modulos/ia.py` | Enrutador principal: recibe input, selecciona modelo (Gemini / DeepSeek), gestiona streaming, ejecuta herramientas MCP (memoria, sistema, archivos, web) y encola acciones. |
-| **Controlador de acciones** | `modulos/controlador_acciones.py` | Parsea la respuesta de la IA, detecta comandos (leer_archivo, guardar_archivo, reemplazar_bloque, audio:, buscar:, github:, etc.) y los ejecuta. |
-| **Archivos y sistema** | `modulos/archivos.py`, `modulos/sistema.py` | Operaciones seguras sobre archivos (lectura/escritura/eliminación) con verificación de sandbox; comandos de sistema (abrir, cerrar, mover ventanas, explorar directorios, estado PC). |
-| **Memoria persistente** | `modulos/memoria.py` | Bóveda ChromaDB con embeddings `all-MiniLM-L6-v2`. Guardado/búsqueda de recuerdos, snapshots de proyecto, radar watchdog con debounce. |
-| **Audio** | `modulos/audio_custom.py` | Síntesis Edge TTS, captura de voz con Whisper (lazy loading), cola de reproducción con Pygame. |
-| **Búsqueda web** | `modulos/busqueda.py` | Búsqueda DuckDuckGo con retrys y limpieza de filtros incompatibles. |
-| **Git** | `modulos/git_bot.py` | Sincronización Git (init, add, commit, pull, push) y comandos libres. |
-| **Gamepad** | `modulos/gamepad_control.py` | Detección de mando vía pygame.joystick, combo L3+R3 push-to-talk sin hooks de teclado (evita conflictos con juegos). |
-| **Visión** | `modulos/vision.py` | Captura de pantalla por monitor usando Pillow y screeninfo. |
-| **Prompts** | `modulos/prompts.py` | Construcción de system prompts para modos general, programador/planificador. |
-| **Gestor de skills** | `modulos/skills/gestor_skills.py` | Detección y activación de skills por palabras clave. |
-| **Skills implementadas** | `modulos/skills/busqueda_web_actualizada/`, `modulos/skills/control_audio/` | Búsqueda web actualizada (instrucciones + ejemplos) y control de audio via pycaw (instrucciones + implementación real). |
-| **Cliente MCP** | `modulos/cliente_mcp.py` | Puente síncrono para herramientas MCP (estado PC, hardware, bóveda, exploración). |
-| **Gestor de bóveda** | `gestor_boveda.py` | CLI para listar, borrar y resetear la bóveda ChromaDB. |
-| **Logger** | `modulos/logger.py` | Logging a archivo y consola. |
-
-### Flujo de datos típico
-
-1. Usuario envía input (texto/voz/gamepad).
-2. `ia.py` recibe, ejecuta confirmaciones locales (sin IA para borrado/Git), inyecta skills relevantes y envía al modelo correspondiente.
-3. Durante streaming, la IA puede invocar herramientas MCP (bóveda, sistema, archivos) o emitir comandos de acción.
-4. `controlador_acciones.py` parsea la respuesta y ejecuta las acciones (audio, Git, archivos, búsqueda web).
-5. Si hay búsqueda web, se realiza una segunda llamada al modelo para integrar resultados.
+| Archivo / Módulo | Propósito |
+|---|---|
+| `config.py` | Cargar variables de entorno, parches para memoria y GPU (Whisper/chromadb), clase `EstadoGlobal` thread‑safe que centraliza el estado de la aplicación (modo, workspace, contexto, archivos en memoria, pendientes de Git/borrado). |
+| `main_gui.py` | Interfaz gráfica principal con CustomTkinter: sidebar de modos, área de chat con renderizado de markdown (código, tablas, listas), barra de entrada con placeholder, botones adjuntar/guardar en memoria. Maneja hilos de micrófono, gamepad y callbacks de IA. |
+| `modulos/ia.py` | Enrutador universal de mensajes: selecciona modelo (Gemini o DeepSeek), inyecta prompts según modo y skills, maneja streaming de respuesta y voz en paralelo, ejecuta confirmaciones nativas sin juez IA, procesa acciones de archivo/audio/git/sistema. |
+| `modulos/prompts.py` | Contiene las plantillas de system prompt para cada modo: `obtener_prompt_general`, `obtener_prompt_programador_unificado`, y el prompt dinámico para la skill de búsqueda web. |
+| `modulos/audio_custom.py` | Captura de voz con Whisper (lazy loading), síntesis y reproducción con Edge TTS + pygame, cola de reproducción thread‑safe, limpieza de texto para voz. |
+| `modulos/memoria.py` | Capa de persistencia vía ChromaDB: guardar/buscar recuerdos, caché de embeddings con TTL, búsqueda anticipada en hilo paralelo, snapshot de proyecto (JSON), y radar de cambios (watchdog con debounce). |
+| `modulos/controlador_acciones.py` | Parsea la salida de la IA para ejecutar acciones de sistema: lectura/escritura/edición de archivos (soporta formatos Markdown y XML), control de audio, comandos Git, snapshot, búsqueda web, creación de carpetas, escaneo de proyecto completo. |
+| `modulos/sistema.py` | Gestión de ventanas (Win32 API), radar inteligente de programas (fuzzy matching con thefuzz), ejecución de comandos `abrir:` / `navegar:` / `cerrar:` / `mover:` / `explorar:`, escaneo de hardware con PowerShell, telemetría de PC (CPU%, RAM, GPU temp con nvidia‑smi). |
+| `modulos/archivos.py` | Funciones de I/O con sandbox: `leer_contenido_archivo`, `escribir_archivo`, `crear_carpeta`, `eliminar_elemento`, `listar_contenido`, `buscar_archivo_local`. Incluye validación de tamaño, espacio en disco y seguridad de rutas. |
+| `modulos/busqueda.py` | Búsqueda en DuckDuckGo vía `ddgs` con retry automático, limpieza de filtros incompatibles (`after:`), y formateo de resultados con fechas. |
+| `modulos/vision.py` | Captura de pantalla con PIL + screeninfo; soporte multi‑monitor. |
+| `modulos/git_bot.py` | Automatización Git: init, add, commit, pull con rebase, push. Soporta reset de remoto y comandos libres (`git status`, etc.). |
+| `modulos/crawler.py` | Recorre un proyecto entero ignorando carpetas no deseadas y concatena el código de archivos `.py`, `.md`, `.json`, `.txt` para generar el `PROJECT_STATE.md`. |
+| `modulos/gamepad_control.py` | Lectura de gamepad vía pygame.joystick, detección automática de mapeo L3/R3 (DualSense → 7‑8, Xbox → 8‑9), hilo de escucha aislado del teclado. |
+| `modulos/cliente_mcp.py` | Cliente MCP (Model Context Protocol) para ejecución síncrona con timeout de herramientas del servidor `servidor_sistema_mcp.py`. |
+| `modulos/servidor_sistema_mcp.py` | Servidor MCP que expone herramientas: `reporte_estado_pc`, `reporte_hardware`, `buscar_en_boveda`, `guardar_en_boveda`, `explorar_ruta`, `leer_documento`. Se comunica vía stdio JSON‑RPC. |
+| `modulos/logger.py` | Configura logging a archivo (`logs/omniassistant.log`) y consola con formato estandarizado. |
+| `modulos/limpiar.py` | Script standalone para vaciar completamente la base de datos de ChromaDB. |
+| `modulos/skills/gestor_skills.py` | Gestor de Skills: carga dinámica de carpetas `modulos/skills/<skill>/`, detecta relevancia por palabras clave y patrones regex, retorna instrucciones para inyectar en el prompt de la IA. |
+| `modulos/skills/busqueda_web_actualizada/` | Skill de búsqueda web con prioridad de resultados recientes (instrucciones, ejemplos, metadatos). |
+| `modulos/skills/control_audio/` | Skill de control de audio maestro y por aplicación (`audio_control.py` con pycaw), cambio de dispositivo de salida. |
+| `config.py` (re‑listado) | Además de lo anterior, define límites de seguridad (tamaño de archivo, contenido, páginas PDF, espacio mínimo), API Keys, y constantes de audio/Whisper. |
+| `requirements.txt` | Dependencias del proyecto: chromadb, customtkinter, faster‑whisper, edge‑tts, pygame, psutil, thefuzz, watchdog, etc. |
+| `plan_accion_skills_futuro.md` | Roadmap de próximas skills con prioridades y orden de implementación sugerido. |
+| `gestor_boveda.py` | Herramienta CLI standalone para listar/borrar/formatear la bóveda de ChromaDB. |
+| `mapeo_control_prueba.py` | Script de diagnóstico para identificar índices de botones L3 y R3 en gamepads. |
 
 ## 3. Estado Actual
 
-### Funcionalidades construidas y operativas
-
-| Funcionalidad | Estado | Detalle |
-|---|---|---|
-| **Chat multimodal** | ✅ Operativo | Entrada texto, voz (F8), gamepad (L3+R3) y adjuntos. Streaming de IA con renderizado Markdown (código, tablas, listas). |
-| **Modelos duales** | ✅ Operativo | Gemini Flash (modo general), DeepSeek Reasoner (modo programador/planificador). |
-| **Memoria persistente** | ✅ Operativo | ChromaDB con embeddings; guardado/búsqueda directa sin MCP, caché de embeddings, búsqueda anticipada. |
-| **Radar watchdog** | ✅ Operativo | Vigilancia de cambios en workspace con debounce de 500 ms; invalida caché de archivos modificados. |
-| **Control de audio** | ✅ Operativo | Volumen maestro, volumen por app, silenciar, listar apps. Requiere `pycaw`. |
-| **Búsqueda web actualizada** | ✅ Operativo | DuckDuckGo con retry automático; skill activable por palabras clave. |
-| **Acciones de sistema** | ✅ Operativo | Abrir/cerrar programas, mover ventanas a monitores, explorar directorios, estado PC (CPU, RAM, GPU). |
-| **Git** | ✅ Operativo | Init, add, commit, pull, push; comandos libres. Confirmación nativa sin juez IA. |
-| **Control por gamepad** | ✅ Operativo | Combo L3+R3 para push-to-talk; detección automática de mapeo por nombre (DualSense/Xbox). |
-| **Adjuntos de archivos** | ✅ Operativo | Carga en contexto volátil con resumen automático. |
-| **Snapshot de proyecto** | ✅ Operativo | Guardado/carga de estado del workspace en `.cortana/snapshot.json`. |
-| **Modo gaming** | ✅ Operativo | Pausa de micrófono + liberación de VRAM de Whisper. |
-| **Gestor de bóveda** | ✅ Operativo | CLI para listar, eliminar o resetear recuerdos. |
-
-### Bugs conocidos / limitaciones
-
-- **Temperatura CPU:** `psutil` no reporta temperatura en Windows; se depende de LibreHardwareMonitor (no implementado aún).
-- **Confirmaciones GUI:** Las confirmaciones de borrado/Git se hacen por texto en el chat, no por popup nativo (`CTkDialog`).
-- **SDK Gemini deprecado:** Se usa `google.generativeai`; migración a `google.genai` pendiente.
-- **Detección de skills:** Por palabras clave hardcodeadas; no usa embeddings semánticos.
-- **Historial por modo:** Se guarda en `_historial_por_modo` (solo en UI) pero no persiste entre reinicios.
-- **Archivos temporales de audio:** No se limpian en caso de cierre abrupto.
+- **Interfaz gráfica completa**: Chat con renderizado de markdown, selección de modo, adjuntar archivos, guardar en memoria, botón de limpiar contexto, modo gaming con gamepad.
+- **Voz funcional**: Captura con Whisper (lazy loading, GPU), síntesis con Edge TTS, reproducción con cola thread‑safe y corte por tecla Esc/espacio.
+- **Selección de modelo automática**: Gemini Flash en modo General, DeepSeek Reasoner en modos Programador/Planificador.
+- **Memoria persistente (ChromaDB)**: Guardado y búsqueda de recuerdos con caché de embeddings y pre‑fetch anticipado.
+- **Control de sistema**: Abrir/cerrar/mover ventanas, explorar directorios, apagar PC con tiempos, búsqueda inteligente de programas (fuzzy match).
+- **Control de audio**: Volumen maestro y por aplicación (pycaw), listado de apps con audio, cambio de dispositivo de salida (requiere módulo AudioDeviceCmdlets para algunos casos).
+- **Git integrado**: Push/pull con confirmación nativa, comandos libres, reset de remoto.
+- **Gamepad**: Soporte DualSense y Xbox One, combo L3+R3 push‑to‑talk, selector de mando en GUI.
+- **Skills operativas**:
+  - `busqueda_web_actualizada` v1.0 (detecta consultas temporales, inyecta instrucciones de búsqueda, limpia filtros after/before).
+  - `control_audio` v1.0 (detecta comandos de audio, ejecuta funciones via `audio_control.py`).
+- **Seguridad**: Sandbox de archivos, confirmaciones nativas (sin gasto de tokens), límites de tamaño/contenido.
+- **Logging**: Archivo `logs/omniassistant.log` con rotación potencial.
+- **Búsqueda web**: DuckDuckGo con retry y formateo de fechas.
+- **Captura de pantalla**: Multi‑monitor, integrada con comandos de voz "capturá la pantalla X".
 
 ## 4. Deuda Técnica / Próximos Pasos
 
-### Prioridad Alta (impacto diario inmediato)
+### Urgente
+- **Migración a `google.genai`** (nuevo SDK): El SDK actual `google.generativeai` está deprecado. Cambiar inicialización del cliente y paso de herramientas.
+- **Skill `control_audio` — dependencia externa `pycaw`**: Documentar instalación explícita (`pip install pycaw comtypes`). El cambio de dispositivo de salida falla sin el módulo PowerShell `AudioDeviceCmdlets`.
 
-- **Migración al nuevo SDK de Gemini** (`google.genai`). Urgente: el actual está deprecado.
-- **Skills faltantes del roadmap:** `recordatorios` (threading.Timer + notificación), `monitor_hardware` (LibreHardwareMonitor + WMI).
-- **Confirmaciones nativas GUI:** Reemplazar el texto de confirmación por popup `CTkDialog` para borrados y Git.
+### Alta prioridad
+- **Skill `monitor_hardware`**: Falta implementar (pendiente de LibreHardwareMonitor + WMI). Hoy `mcp_estado_pc` no reporta temperatura de CPU en Windows.
+- **Skill `recordatorios`**: Código no implementado aún. Plan detallado en `plan_accion_skills_futuro.md`.
+- **Confirmaciones GUI**: Reemplazar el mecanismo de confirmación de acciones (borrado, Git) por un popup nativo de CustomTkinter (`CTkDialog`) en lugar del texto en chat con evaluación local.
 
-### Prioridad Media (próximas semanas)
+### Media prioridad
+- **Inicio automático de LibreHardwareMonitor**: Al activar la skill de monitoreo, lanzar el proceso en segundo plano.
+- **Detección de skills por embeddings**: Reemplazar palabras clave hardcodeadas por similitud semántica con `all‑MiniLM‑L6‑v2` (ya cargado por ChromaDB).
+- **Mejorar robustez de Whisper**: Manejar errores de GPU más allá del lazy loading (si se agota VRAM en gaming, Whisper falla silenciosamente).
+- **Performance del chat**: La renderización de markdown puede ser lenta con mensajes muy largos. Considerar virtualización o procesamiento en hilo separado.
+- **Cobertura de pruebas**: No hay tests unitarios ni de integración. Vulnerable a regresiones.
 
-- **Detección de skills por embeddings:** Usar el mismo modelo MiniLM de ChromaDB en lugar de palabras clave.
-- **Clima/tiempo:** Skill liviana usando `wttr.in`.
-- **Steam integration:** Consultar biblioteca y horas vía Steam Web API.
-- **Portapapeles inteligente:** Historial de clips con `pyperclip`.
-
-### Prioridad Baja (mejoras y refactors)
-
-- **Unificar estado global:** Eliminar `_AppState` en `main_gui.py` y usar solo `config.EstadoGlobal` con locks.
-- **Inicio automático de LibreHardwareMonitor:** Como parte de la skill `monitor_hardware`.
-- **Resumen de contenido web/YouTube:** Usar `yt-dlp` y `trafilatura`.
-- **Monitoreo de procesos:** Listar/matar procesos con `psutil`.
-- **Traductor:** Usar `deep-translator` o llamada directa a DeepSeek.
-
-### Deuda técnica identificada
-
-1. **Duplicación de estado:** `_StateProxy` en UI vs `config.estado` — fuente de potenciales race conditions.
-2. **MCP como proceso externo:** Aunque la bóveda ya se accede directo, otras herramientas MCP siguen spawniendo un proceso Python cada vez (latencia ~3s).
-3. **Hardcodeo de user path:** `"C:\\Users\\luism"` aparece en `sistema.py`; debería usar `os.path.expanduser("~")`.
-4. **Sin tests automatizados:** El proyecto no cuenta con suite de pruebas unitarias ni de integración.
-5. **Dependencias sin fijar:** `chromadb==1.5.9` vs versiones posteriores; `pygame` sin versión específica.
-6. **Archivos temporales:** Los WAV/MP3 de voz se guardan en `tempfile.gettempdir()` pero no se asegura limpieza si el proceso se mata.
-
----
-
-*Documento generado por el Arquitecto Principal del proyecto.*  
-*Versión: v0.3.1 — Basado en el código completo proporcionado.*
+### Baja prioridad / Futuro
+- **Skill `steam_integration`**, `clima_tiempo`, `portapapeles_inteligente`, `resumen_contenido`, `traductor`, `monitor_procesos` — todas en el roadmap.
+- **Unificar estado global**: Eliminar `_StateProxy` en `main_gui.py` y usar directamente `config.EstadoGlobal` para evitar duplicidad.
+- **Internacionalización**: Actualmente solo español. Podría ampliarse a otros idiomas.
+- **Documentación de usuario**: Falta un README.md y guía de instalación.
+- **Limpieza de código**: Algunos módulos (`prompts.py`, `controlador_acciones.py`) tienen funciones largas que podrían dividirse. Las instrucciones de `servidor_sistema_mcp.py` son redundantes con la capa directa en `ia.py` (búsqueda en bóveda ya va directo a ChromaDB).
