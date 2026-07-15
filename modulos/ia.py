@@ -119,8 +119,13 @@ def mcp_leer_documento(ruta: str):
     Usar cuando el usuario pida leer, ver o abrir el contenido de un archivo específico.
     """
     contenido = leer_contenido_archivo(ruta)
-    if contenido == "CODIGO_ERROR_NO_ENCONTRADO" or contenido.startswith("CODIGO_ERROR_LECTURA:"):
-        return f"Error: No se pudo encontrar o abrir el archivo '{ruta}'. Verificá que la ruta sea correcta."
+    # FIX: el check anterior comparaba contra "CODIGO_ERROR_NO_ENCONTRADO" /
+    # "CODIGO_ERROR_LECTURA:", strings que archivos.py ya no devuelve (usa
+    # el formato "ERROR: ...") desde hace tiempo. Como resultado, un archivo
+    # inexistente o sin permisos pasaba el filtro y se le entregaba a la IA
+    # como si fuera contenido real. Ahora se chequea el formato real.
+    if contenido.startswith("ERROR:"):
+        return f"Error: No se pudo encontrar o abrir el archivo '{ruta}'. Detalle: {contenido}"
     return f"Contenido del archivo:\n{contenido}"
 
 lista_herramientas_mcp = [
@@ -699,9 +704,13 @@ def cargar_adjuntos_en_contexto(rutas_archivos, ui_callback=None):
         identificador_unico = f"{carpeta_padre}/{nombre_archivo}"
         try:
             contenido = leer_contenido_archivo(ruta)
-            if contenido == "CODIGO_ERROR_NO_ENCONTRADO" or contenido.startswith("CODIGO_ERROR_LECTURA:"):
+            # FIX: mismo problema que en mcp_leer_documento — el check
+            # comparaba contra un formato de error obsoleto que archivos.py
+            # ya no produce, dejando pasar errores reales como si fueran
+            # contenido válido del archivo adjunto.
+            if contenido.startswith("ERROR:"):
                 if ui_callback:
-                    ui_callback("⚙️ Sistema", f"❌ No se pudo leer: {identificador_unico}", "#FF4500")
+                    ui_callback("⚙️ Sistema", f"❌ No se pudo leer: {identificador_unico} ({contenido})", "#FF4500")
                 continue
         except Exception as e:
             logger.exception(f"Error leyendo archivo adjunto: {ruta}")

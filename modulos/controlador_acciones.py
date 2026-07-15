@@ -77,6 +77,43 @@ def _validar_ruta(ruta: str, workspace: str, modo: str) -> tuple[bool, str]:
         logger.warning(f"Intento de acceder fuera del workspace: {ruta_norm} (workspace: {workspace})")
         return False, f"Ruta fuera del workspace: {ruta_norm}"
 
+def _frasear_resultado_audio_para_voz(resultado: str) -> str:
+    """
+    Convierte el resultado técnico de un comando de audio (pensado para
+    mostrarse en pantalla) en una frase corta y natural para leer en voz.
+    FIX: antes se leía el string crudo tal cual — con emojis, dos puntos,
+    paréntesis, y en los casos de error hasta instrucciones técnicas de
+    instalación de varias líneas (ej. "Install-Module -Name
+    AudioDeviceCmdlets"). Sonaba robótico y desproporcionadamente largo
+    para lo que debería ser una simple confirmación hablada. El texto en
+    pantalla no se toca — sigue siendo técnico y preciso a propósito,
+    solo cambia lo que efectivamente se lee en voz.
+    """
+    texto = resultado.strip()
+    for simbolo in ("✅", "⚠️", "❌", "🔊"):
+        texto = texto.replace(simbolo, "")
+    texto = texto.strip()
+
+    # Solo se lee la primera línea/oración; el detalle técnico (cómo
+    # instalar un módulo, etc.) queda disponible en pantalla nada más.
+    primera_linea = texto.split("\n")[0].strip()
+
+    # Reformulaciones puntuales para sonar más conversacional
+    reemplazos = {
+        "Dispositivo cambiado a:": "Listo, cambié la salida a",
+        "Dispositivo de audio cambiado": "Listo, cambié el dispositivo de audio",
+        "Audio maestro silenciado": "Listo, silencié el audio",
+        "Audio maestro activado": "Listo, activé el audio",
+        "Volumen maestro establecido al": "Listo, volumen al",
+    }
+    for viejo, nuevo in reemplazos.items():
+        if primera_linea.startswith(viejo):
+            primera_linea = primera_linea.replace(viejo, nuevo, 1)
+            break
+
+    return primera_linea.strip()
+
+
 def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
     """
     Controlador centralizado para parsear y ejecutar acciones solicitadas por la IA.
@@ -302,7 +339,15 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                     if not partes_audio:
                         continue
                     subcmd = partes_audio[0].lower()
-                    args_audio = partes_audio[1:] if len(partes_audio) > 1 else []
+                    # FIX: el modelo suele emitir nombres entre comillas, ej.
+                    # `audio: cambiar_dispositivo "Altavoces (JBL Go4 Lu)"` o
+                    # `audio: silenciar_app "Discord"`. El .split() de arriba
+                    # separa por espacios pero NO despoja las comillas, así
+                    # que quedaban pegadas como parte literal del argumento
+                    # (ej. '"Altavoces' y 'Lu)"'), rompiendo cualquier
+                    # comparación por nombre en las funciones de audio_control.py.
+                    # Se limpian acá, una sola vez, para todos los subcomandos.
+                    args_audio = [a.strip('"').strip("'") for a in partes_audio[1:]] if len(partes_audio) > 1 else []
 
                     resultado_audio = ""
                     if subcmd == "obtener_volumen":
@@ -342,6 +387,18 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                         CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO AUDIO]: {resultado_audio}"]})
                         if ui_callback:
                             ui_callback("⚙️ Sistema", f"🔊 {resultado_audio}", "#80868B")
+                        # FIX: antes el resultado REAL del comando de audio solo se
+                        # mostraba como texto de sistema, nunca se anunciaba por voz.
+                        # Como el modelo ya venía narrando una confirmación provisional
+                        # ("Aplicando el cambio...") mientras streameaba, sin esto el
+                        # usuario en modo voz se quedaba sin saber si la acción
+                        # realmente funcionó o falló — tenía que mirar la pantalla.
+                        if modo_voz:
+                            try:
+                                from modulos.audio_custom import hablar_no_bloqueante
+                                hablar_no_bloqueante(_frasear_resultado_audio_para_voz(resultado_audio))
+                            except Exception:
+                                logger.exception("Error anunciando por voz el resultado de audio")
                 except ImportError:
                     msg = "⚠️ Skill control_audio: falta instalar pycaw. Ejecutá: pip install pycaw comtypes"
                     if ui_callback:

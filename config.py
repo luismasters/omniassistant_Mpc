@@ -54,6 +54,15 @@ WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "float16")
 TECLA_HABLAR = 'f8'
 FS_AUDIO = 16000
 
+# Límite de seguridad para grabación continua de voz (en segundos).
+# Es solo una red de seguridad ante un fallo en la condición de corte
+# (ej. el callback del gamepad o del teclado deja de reportar el estado
+# real del botón). NO debería alcanzarse en uso normal: el corte real
+# ocurre al soltar la tecla/stick. Antes estaba hardcodeado a 30s dentro
+# de audio_custom.py, lo cual cortaba explicaciones largas de forma
+# prematura aunque el botón siguiera presionado.
+MAX_GRABACION_SEGUNDOS = 180
+
 # =========================================================
 # ESTADO GLOBAL CON THREAD SAFETY (VERSIÓN SIMPLIFICADA)
 # =========================================================
@@ -79,6 +88,21 @@ class EstadoGlobal:
             self.contexto_chat.append(mensaje)
             if len(self.contexto_chat) > 100:
                 self.contexto_chat = self.contexto_chat[-100:]
+
+    def reemplazar_contexto_chat(self, nuevo_contexto):
+        """
+        Reemplaza la lista completa de contexto_chat de forma thread-safe.
+        FIX: antes, tanto memoria.py (radar de cambios, corre en hilo de
+        watchdog) como main_gui.py (_StateProxy.contexto_chat setter, usado
+        en _cambiar_modo) asignaban directamente `config.estado.contexto_chat = X`,
+        saltándose por completo el lock. Esto es una condición de carrera real:
+        si el radar de cambios dispara justo cuando el hilo principal está
+        agregando un mensaje (agregar_mensaje_chat, que sí usa el lock), la
+        lista puede quedar en un estado inconsistente. Usar este método
+        centraliza la escritura y la protege con el mismo lock.
+        """
+        with self._lock:
+            self.contexto_chat = nuevo_contexto
 
     def agregar_archivo_memoria(self, ruta):
         """Añade un archivo a la caché de memoria de forma thread-safe."""

@@ -19,9 +19,17 @@ logger = logging.getLogger(__name__)
 def es_ruta_segura(ruta: str) -> bool:
     """Verifica que la ruta esté dentro del sandbox o en el Workspace anclado."""
     try:
-        # --- NUEVO: SANDBOX INTELIGENTE (Libertad para Modo General) ---
-        modo = getattr(config, 'MODO_ACTUAL', 'general')
-        if modo == "general":
+        # --- SANDBOX INTELIGENTE (Libertad para Modo General) ---
+        # FIX CRÍTICO: antes se leía `getattr(config, 'MODO_ACTUAL', 'general')`,
+        # un atributo a nivel de MÓDULO que nunca se asigna en ningún lado del
+        # proyecto (el modo real vive en config.estado.modo_actual, dentro de
+        # EstadoGlobal). Como resultado, esta función SIEMPRE caía al default
+        # 'general' y devolvía True sin importar el modo real de la app —
+        # el sandbox de rutas estaba inerte incluso en modo Programador con
+        # workspace anclado. Ahora se lee el estado real.
+        modo = getattr(config, "estado", None)
+        modo_actual = modo.modo_actual if modo is not None else "general"
+        if modo_actual == "general":
             return True
         # ---------------------------------------------------------------
         
@@ -31,9 +39,13 @@ def es_ruta_segura(ruta: str) -> bool:
         rutas_permitidas = list(config.RUTAS_SEGURAS)
         if getattr(config, 'RUTA_WORKSPACE_ACTUAL', None):
             rutas_permitidas.append(config.RUTA_WORKSPACE_ACTUAL)
+        if getattr(config.estado, 'workspace_actual', None):
+            rutas_permitidas.append(config.estado.workspace_actual)
             
         # 2. Verificamos si la ruta cae dentro de ALGUNA de las rutas permitidas
         for ruta_base in rutas_permitidas:
+            if not ruta_base:
+                continue
             base_norm = str(Path(os.path.abspath(ruta_base)).resolve())
             
             if abs_ruta.startswith(base_norm):

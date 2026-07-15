@@ -261,7 +261,14 @@ class ManejadorCambiosProyecto(FileSystemEventHandler):
                     and f"[CONTENIDO DE '{ruta_abs}']:" in msg['parts'][0]
                 )
             ]
-            config.estado.contexto_chat = nuevo_contexto
+            # FIX: antes era `config.estado.contexto_chat = nuevo_contexto`,
+            # una asignación directa que se salta el lock de EstadoGlobal.
+            # Esto corre dentro de un hilo de threading.Timer (debounce del
+            # watchdog), así que si el hilo principal está en medio de un
+            # agregar_mensaje_chat() (que sí usa el lock) al mismo tiempo,
+            # hay una condición de carrera real sobre la misma lista.
+            # Ahora se usa el método thread-safe centralizado.
+            config.estado.reemplazar_contexto_chat(nuevo_contexto)
 
             msg_log = f"Caché limpia para: {nombre_archivo}. Argus leerá los cambios nuevos."
             print(f"💡 [RADAR] {msg_log}")

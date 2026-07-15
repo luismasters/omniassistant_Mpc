@@ -60,9 +60,15 @@ audio: cambiar_dispositivo Parlantes
 
 ## Respuesta al usuario
 
-Después de emitir el comando de audio, confirmá brevemente la acción ejecutada. Ejemplo:
-- "Listo, volumen al 75%."
-- "Discord silenciado."
-- "Volumen bajado a 40%."
+**CRÍTICO — NO afirmes el resultado como un hecho.** Cuando redactás esta respuesta, el comando `audio:` todavía NO se ejecutó — se ejecuta recién después de que termine tu mensaje completo. Si decís "Listo, cambiado" y la acción real falla (por ejemplo, cambiar de dispositivo puede fallar por permisos o falta de un módulo), Argus le habrá mentido al usuario con voz y todo.
 
-**No expliques el proceso interno. Solo emití el comando y confirmá.**
+Por eso, usá **siempre** una frase en modo provisional, nunca categórica:
+- ✅ "Aplicando el cambio de volumen..."
+- ✅ "Cambiando la salida de audio a JBL Go4 Lu..."
+- ✅ "Silenciando Discord..."
+- ❌ "Listo, volumen al 75%." (todavía no se sabe si funcionó)
+- ❌ "Discord silenciado." (afirmación de un hecho no confirmado)
+
+El resultado REAL (éxito o error) se le informa al usuario por separado, automáticamente, una vez que el comando se ejecuta de verdad — no necesitás (ni debés) redactarlo vos.
+
+**No expliques el proceso interno.** Solo emití el comando y una frase corta en modo provisional.

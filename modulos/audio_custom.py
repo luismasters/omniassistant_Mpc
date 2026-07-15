@@ -15,7 +15,7 @@ import pygame
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 
 from config import WHISPER_MODEL_SIZE, WHISPER_DEVICE, WHISPER_COMPUTE_TYPE
-from config import TECLA_HABLAR, FS_AUDIO
+from config import TECLA_HABLAR, FS_AUDIO, MAX_GRABACION_SEGUNDOS
 
 hablando_actualmente = False
 
@@ -162,16 +162,70 @@ def _vaciar_cola():
             pass
 
 def _asegurar_reproductor_activo():
-    global _hilo_reproductor_activo
+    """
+    Arranca el hilo reproductor si no está activo, y reinicia el
+    contador de secuencia usado para garantizar el orden de lectura
+    (ver bloque CONTROL DE ORDEN más abajo). Se resetea acá porque
+    este es el punto de entrada de una nueva "sesión de habla":
+    si no reseteáramos, una respuesta nueva podría arrastrar índices
+    de la anterior y quedar esperando fragmentos que ya no van a llegar.
+    """
+    global _hilo_reproductor_activo, _contador_secuencia, _siguiente_a_reproducir, _buffer_pendientes
     if not _hilo_reproductor_activo:
+        with _secuencia_lock:
+            _contador_secuencia = 0
+            _siguiente_a_reproducir = 0
+            _buffer_pendientes = {}
         _hilo_reproductor_activo = True
         threading.Thread(target=_hilo_reproductor_global, daemon=True).start()
+
+# =====================================================================
+# CONTROL DE ORDEN PARA REPRODUCCIÓN EN STREAMING
+# =====================================================================
+# BUG ORIGINAL: encolar_texto_para_hablar() lanzaba un hilo por cada
+# fragmento de texto que llegaba durante el streaming de la IA. Cada
+# hilo hacía su propia llamada de red a Edge TTS, y la latencia de esa
+# llamada varía por fragmento. Como el reproductor consume la cola en
+# el orden en que los archivos llegan a ella (no en el orden en que
+# fueron generados), un fragmento posterior podía terminar de
+# sintetizarse antes que uno anterior y colarse primero — produciendo
+# lectura fuera de orden en textos largos.
+#
+# FIX: cada fragmento recibe un número de secuencia al momento de ser
+# encolado para síntesis. Cuando termina de sintetizarse, se guarda en
+# un buffer temporal (_buffer_pendientes) en vez de ir directo a la
+# cola de reproducción. Solo se despachan a la cola los fragmentos que
+# están en orden estricto empezando por _siguiente_a_reproducir. Esto
+# preserva el paralelismo de síntesis (todo se sigue generando en
+# paralelo) pero serializa la salida para respetar el orden original.
+_secuencia_lock = threading.Lock()
+_contador_secuencia = 0
+_siguiente_a_reproducir = 0
+_buffer_pendientes = {}  # {indice: ruta_archivo_o_None}
+
+def _despachar_en_orden():
+    """Empuja a la cola de reproducción los fragmentos ya listos,
+    respetando estrictamente el orden original del texto."""
+    global _siguiente_a_reproducir
+    with _secuencia_lock:
+        while _siguiente_a_reproducir in _buffer_pendientes:
+            archivo = _buffer_pendientes.pop(_siguiente_a_reproducir)
+            if archivo is not None:
+                _cola_reproduccion.put(archivo)
+            _siguiente_a_reproducir += 1
 
 # =====================================================================
 # FUNCIONES PUBLICAS
 # =====================================================================
 def encolar_texto_para_hablar(texto):
-    global hablando_actualmente
+    """
+    Usada durante el streaming de la respuesta de la IA (ver
+    _procesar_buffer_voz en ia.py). Genera el audio de cada fragmento
+    en un hilo separado (para no bloquear el streaming), pero garantiza
+    que la reproducción respete el orden original del texto mediante
+    un número de secuencia (ver bloque CONTROL DE ORDEN arriba).
+    """
+    global hablando_actualmente, _contador_secuencia
     texto_limpio = limpiar_texto_para_voz(texto)
     if not texto_limpio:
         return
@@ -179,12 +233,18 @@ def encolar_texto_para_hablar(texto):
     hablando_actualmente = True
     _asegurar_reproductor_activo()
 
-    def _generar_y_encolar():
+    with _secuencia_lock:
+        indice_propio = _contador_secuencia
+        _contador_secuencia += 1
+
+    def _generar_y_encolar(indice=indice_propio, texto_local=texto_limpio):
         inicio = time.time()
-        archivo = _sintetizar_sincrono(texto_limpio)
+        archivo = _sintetizar_sincrono(texto_local)
+        with _secuencia_lock:
+            _buffer_pendientes[indice] = archivo
+        _despachar_en_orden()
         if archivo is not None:
-            _cola_reproduccion.put(archivo)
-            print(f"[EDGE] '{texto_limpio[:45]}' → {time.time() - inicio:.2f}s")
+            print(f"[EDGE] '{texto_local[:45]}' → {time.time() - inicio:.2f}s (orden {indice})")
 
     threading.Thread(target=_generar_y_encolar, daemon=True).start()
 
@@ -293,13 +353,15 @@ def capturar_voz_micro(condicion_seguir_grabando=None):
 
     with sd.InputStream(samplerate=FS_AUDIO, channels=1, callback=callback):
         time.sleep(0.2)
-        # Límite de seguridad: máximo 30s de grabación continua para
-        # evitar que un error en la condición deje el stream colgado
-        # indefinidamente (protección extra ante el bug anterior).
+        # Límite de seguridad: máximo MAX_GRABACION_SEGUNDOS de grabación
+        # continua para evitar que un error en la condición deje el
+        # stream colgado indefinidamente. Antes estaba hardcodeado a 30s,
+        # lo que cortaba la grabación de forma prematura aunque el botón
+        # siguiera presionado; ahora se controla desde config.py.
         inicio = time.time()
         while condicion_seguir_grabando():
-            if time.time() - inicio > 30:
-                print("[GRABANDO] ⚠️ Límite de 30s alcanzado, cortando grabación por seguridad.")
+            if time.time() - inicio > MAX_GRABACION_SEGUNDOS:
+                print(f"[GRABANDO] ⚠️ Límite de {MAX_GRABACION_SEGUNDOS}s alcanzado, cortando grabación por seguridad.")
                 break
             time.sleep(0.02)
 

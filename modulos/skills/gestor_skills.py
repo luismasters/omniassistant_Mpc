@@ -59,11 +59,16 @@ class GestorSkills:
             'salida de audio', 'dispositivo de audio', 'cambiar audio',
             'a tope', 'al máximo', 'sin sonido', 'con sonido'
         ]
+        # FIX: se agregaron bordes de palabra (\b) a los patrones que antes
+        # matcheaban como substring libre. Ej: r'vol(umen)?' sin \b matcheaba
+        # "devolver", "revolver", "volver", etc. — cualquier palabra que
+        # contuviera "vol" activaba la skill de audio sin que la consulta
+        # tuviera nada que ver con volumen/sonido.
         patrones_audio = [
-            r'vol(umen)?', r'subi[r]? el (vol|son)', r'baj[ar]? el (vol|son)',
-            r'silenci[a-z]+', r'mute[a-z]*', r'sin sonido', r'ponelo al \d+',
-            r'pon[é]? (el)? vol', r'cuánto (está|esta) el vol',
-            r'qué apps (tienen|con) (audio|sonido)',
+            r'\bvol(umen)?\b', r'\bsubi[r]?\b el (vol|son)', r'\bbaj[ar]?\b el (vol|son)',
+            r'\bsilenci[a-z]+\b', r'\bmute[a-z]*\b', r'\bsin sonido\b', r'\bponelo al \d+\b',
+            r'\bpon[é]?\b (el)? vol', r'\bcuánto\b (está|esta) el vol',
+            r'\bqué apps\b (tienen|con) (audio|sonido)',
         ]
         es_audio = any(p in consulta_lower for p in palabras_clave_audio)
         es_audio = es_audio or any(re.search(p, consulta_lower) for p in patrones_audio)
@@ -83,11 +88,13 @@ class GestorSkills:
             'ranking', 'netflix', 'películas', 'series', 'campeón',
             'campeona', 'street fighter', 'cpt'
         ]
+        # FIX: mismo problema de falsos positivos — r'pasa' sin borde de
+        # palabra matcheaba "pasajero", "pasado", "traspasar", etc.
         patrones_temporales = [
-            r'cu[aá]ndo', r'fecha', r'lanzamiento', r'estreno',
-            r'noticias', r'pasa', r'pasa[ndo]?', r'actualidad',
-            r'cotizaci[óo]n', r'precio', r'd[óo]lar', r'euro',
-            r'quien es el actual', r'quien es el campeón'
+            r'\bcu[aá]ndo\b', r'\bfecha\b', r'\blanzamiento\b', r'\bestreno\b',
+            r'\bnoticias\b', r'\bpasa\b', r'\bpasa[ndo]?\b', r'\bactualidad\b',
+            r'\bcotizaci[óo]n\b', r'\bprecio\b', r'\bd[óo]lar\b', r'\beuro\b',
+            r'\bquien es el actual\b', r'\bquien es el campeón\b'
         ]
         es_temporal = any(p in consulta_lower for p in palabras_clave_web)
         es_temporal = es_temporal or any(re.search(p, consulta_lower) for p in patrones_temporales)

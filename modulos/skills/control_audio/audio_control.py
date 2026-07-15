@@ -35,6 +35,29 @@ def _set_master_volume_powershell(porcentaje: int) -> bool:
         return False
 
 
+def _obtener_com_device_activatable(dev):
+    """
+    Intenta extraer el puntero COM real (IMMDevice, con método .Activate)
+    de un objeto AudioDevice de pycaw, sin importar la versión instalada.
+    FIX: distintas versiones de pycaw exponen el puntero COM crudo bajo
+    distintos nombres de atributo interno (`_dev`, `dev`, etc.), o incluso
+    lo entregan directo sin envolver. Antes el código asumía siempre `_dev`
+    en el camino principal, y en el fallback (AudioUtilities.GetSpeakers())
+    asumía que el objeto devuelto YA era el puntero COM crudo — ninguna de
+    las dos suposiciones se cumplía en todas las versiones, y terminaba en
+    AttributeError: 'AudioDevice' object has no attribute 'Activate'.
+    """
+    if dev is None:
+        return None
+    if hasattr(dev, "Activate"):
+        return dev
+    for attr in ("_dev", "dev", "_device"):
+        raw = getattr(dev, attr, None)
+        if raw is not None and hasattr(raw, "Activate"):
+            return raw
+    return None
+
+
 def _get_master_volume_interface():
     """
     Devuelve la interfaz IAudioEndpointVolume.
@@ -52,27 +75,37 @@ def _get_master_volume_interface():
 
     from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
-    # pycaw 20251023+: GetAllDevices retorna objetos AudioDevice con ._dev
+    # Intento 1: recorrer todos los dispositivos activos y usar el real por defecto
     try:
         all_devices = AudioUtilities.GetAllDevices()
         for dev in all_devices:
             if getattr(dev, 'state', None) == 1:  # ACTIVE
-                raw = getattr(dev, '_dev', None)
+                raw = _obtener_com_device_activatable(dev)
                 if raw is not None:
                     try:
                         iface = raw.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
                         vol = cast(iface, POINTER(IAudioEndpointVolume))
-                        vol.GetMasterVolumeLevelScalar()  # test
+                        vol.GetMasterVolumeLevelScalar()  # test de que responde
                         return vol
                     except Exception:
                         continue
     except Exception:
         pass
 
-    # Fallback: API clásica (pycaw < 2023)
-    devices = AudioUtilities.GetSpeakers()
-    iface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-    return cast(iface, POINTER(IAudioEndpointVolume))
+    # Intento 2 (fallback): API clásica, con la misma extracción robusta
+    try:
+        speakers = AudioUtilities.GetSpeakers()
+        raw = _obtener_com_device_activatable(speakers)
+        if raw is not None:
+            iface = raw.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+            return cast(iface, POINTER(IAudioEndpointVolume))
+    except Exception:
+        pass
+
+    raise RuntimeError(
+        "No se pudo obtener la interfaz de volumen maestro con la versión de "
+        "pycaw instalada. Probá: pip install --upgrade pycaw"
+    )
 
 
 # ─── VOLUMEN MAESTRO ─────────────────────────────────────────────────────────
@@ -276,6 +309,98 @@ def listar_apps_con_audio() -> str:
         return f"Error al listar apps: {e}"
 
 
+# ─── CAMBIO NATIVO DE DISPOSITIVO POR DEFECTO (sin PowerShell externo) ───────
+# IPolicyConfig es una interfaz COM NO documentada oficialmente por Microsoft,
+# pero estable desde Windows 7 y es la misma que usan internamente herramientas
+# reales como EarTrumpet, SoundSwitch, NAudio y el propio AudioDeviceCmdlets.
+# Se implementa acá directo con comtypes para no depender de que el usuario
+# instale el módulo de PowerShell AudioDeviceCmdlets.
+#
+# ADVERTENCIA: no fue posible probar esto en un entorno Windows real durante
+# su creación. Por eso se usa como PRIMER intento en una cadena de fallbacks
+# (nativo → pycaw.SetAsDefault → PowerShell), nunca como único camino.
+
+def _fabricar_policy_config():
+    import comtypes
+    from comtypes import GUID, COMMETHOD, HRESULT, IUnknown, CoCreateInstance, CLSCTX_ALL
+    from ctypes import c_wchar_p, c_int, c_void_p, c_longlong, POINTER
+
+    CLSID_POLICY_CONFIG = GUID("{870af99c-171d-4f9e-af0d-e63df40c2bc9}")
+    IID_IPOLICY_CONFIG = GUID("{f8679f50-850a-41cf-9c72-430f290290c8}")
+
+    class IPolicyConfig(IUnknown):
+        _case_insensitive_ = True
+        _iid_ = IID_IPOLICY_CONFIG
+        _methods_ = [
+            COMMETHOD([], HRESULT, 'GetMixFormat',
+                      (['in'], c_wchar_p, 'device_id'),
+                      (['out'], POINTER(c_void_p), 'device_format')),
+            COMMETHOD([], HRESULT, 'GetDeviceFormat',
+                      (['in'], c_wchar_p, 'device_id'),
+                      (['in'], c_int, 'default'),
+                      (['out'], POINTER(c_void_p), 'ppformat')),
+            COMMETHOD([], HRESULT, 'ResetDeviceFormat',
+                      (['in'], c_wchar_p, 'device_id')),
+            COMMETHOD([], HRESULT, 'SetDeviceFormat',
+                      (['in'], c_wchar_p, 'device_id'),
+                      (['in'], c_void_p, 'endpoint_format'),
+                      (['in'], c_void_p, 'mix_format')),
+            COMMETHOD([], HRESULT, 'GetProcessingPeriod',
+                      (['in'], c_wchar_p, 'device_id'),
+                      (['in'], c_int, 'default'),
+                      (['out'], POINTER(c_longlong), 'default_period'),
+                      (['out'], POINTER(c_longlong), 'minimum_period')),
+            COMMETHOD([], HRESULT, 'SetProcessingPeriod',
+                      (['in'], c_wchar_p, 'device_id'),
+                      (['in'], c_longlong, 'period')),
+            COMMETHOD([], HRESULT, 'GetShareMode',
+                      (['in'], c_wchar_p, 'device_id'),
+                      (['out'], POINTER(c_void_p), 'mode')),
+            COMMETHOD([], HRESULT, 'SetShareMode',
+                      (['in'], c_wchar_p, 'device_id'),
+                      (['in'], c_void_p, 'mode')),
+            COMMETHOD([], HRESULT, 'GetPropertyValue',
+                      (['in'], c_wchar_p, 'device_id'),
+                      (['in'], c_int, 'fx_store'),
+                      (['in'], c_void_p, 'key'),
+                      (['out'], c_void_p, 'pv')),
+            COMMETHOD([], HRESULT, 'SetPropertyValue',
+                      (['in'], c_wchar_p, 'device_id'),
+                      (['in'], c_int, 'fx_store'),
+                      (['in'], c_void_p, 'key'),
+                      (['in'], c_void_p, 'pv')),
+            COMMETHOD([], HRESULT, 'SetDefaultEndpoint',
+                      (['in'], c_wchar_p, 'device_id'),
+                      (['in'], c_int, 'role')),
+            COMMETHOD([], HRESULT, 'SetEndpointVisibility',
+                      (['in'], c_wchar_p, 'device_id'),
+                      (['in'], c_int, 'visible')),
+        ]
+
+    try:
+        comtypes.CoInitialize()
+    except OSError:
+        pass
+
+    return CoCreateInstance(CLSID_POLICY_CONFIG, IPolicyConfig, CLSCTX_ALL)
+
+
+def _establecer_dispositivo_nativo(device_id: str) -> bool:
+    """
+    Establece el dispositivo por defecto para los 3 roles de Windows
+    (eConsole=0, eMultimedia=1, eCommunications=2) usando IPolicyConfig
+    directo, sin depender de AudioDeviceCmdlets.
+    """
+    try:
+        policy_config = _fabricar_policy_config()
+        for role in (0, 1, 2):
+            policy_config.SetDefaultEndpoint(device_id, role)
+        return True
+    except Exception:
+        logger.exception("Error estableciendo dispositivo vía IPolicyConfig nativo")
+        return False
+
+
 # ─── DISPOSITIVOS DE SALIDA ───────────────────────────────────────────────────
 
 def listar_dispositivos_audio() -> str:
@@ -298,23 +423,128 @@ def listar_dispositivos_audio() -> str:
         return f"Error al listar dispositivos: {e}"
 
 
+def _buscar_dispositivo_powershell(nombre_o_indice: str):
+    """
+    Busca un dispositivo usando la MISMA fuente de datos que
+    listar_dispositivos_audio() (AudioDeviceCmdlets vía PowerShell).
+    FIX: antes cambiar_dispositivo_audio buscaba el dispositivo con pycaw
+    (AudioUtilities.GetAllDevices()), una fuente DISTINTA a la que usa el
+    listado. pycaw suele exponer el FriendlyName crudo del endpoint (ej.
+    "JBL Go4 Lu"), mientras que AudioDeviceCmdlets/Windows le agrega el
+    prefijo "Altavoces (" al nombre que el usuario ve en pantalla — la
+    búsqueda por substring nunca coincidía, y el índice que el usuario veía
+    en el listado tampoco correspondía al orden interno de pycaw. Usando acá
+    la misma fuente que el listado, índice y nombre siempre coinciden con
+    lo que el usuario efectivamente vio.
+    Devuelve (indice_powershell, nombre_dispositivo) o (None, None).
+    """
+    try:
+        result = subprocess.run(
+            ["powershell", "-Command",
+             "Get-AudioDevice -List | Where-Object {$_.Type -eq 'Playback'} | "
+             "ForEach-Object { '{0}|{1}' -f $_.Index, $_.Name }"],
+            capture_output=True, text=True, timeout=5
+        )
+        # DIAGNÓSTICO: antes esta función fallaba en silencio (sin excepción)
+        # cuando returncode != 0 o stdout venía vacío, sin dejar rastro en el
+        # log. Ahora se registra siempre el resultado crudo para poder ver
+        # exactamente qué devolvió PowerShell en el caso de fallo.
+        logger.info(
+            f"[AUDIO] PowerShell returncode={result.returncode} "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            logger.warning(f"[AUDIO] PowerShell no devolvió datos usables (returncode={result.returncode})")
+            return None, None
+
+        filas = [l.strip() for l in result.stdout.strip().splitlines() if "|" in l]
+        objetivo = nombre_o_indice.strip()
+
+        # Búsqueda por índice exacto (el mismo número que ve el usuario en el listado)
+        if objetivo.isdigit():
+            for fila in filas:
+                idx, nombre = fila.split("|", 1)
+                if idx.strip() == objetivo:
+                    return idx.strip(), nombre.strip()
+            logger.warning(f"[AUDIO] Índice '{objetivo}' no encontrado entre las filas: {filas}")
+            return None, None
+
+        # Búsqueda por nombre parcial, case-insensitive
+        objetivo_lower = objetivo.lower()
+        for fila in filas:
+            idx, nombre = fila.split("|", 1)
+            if objetivo_lower in nombre.strip().lower():
+                return idx.strip(), nombre.strip()
+
+        logger.warning(f"[AUDIO] Nombre '{objetivo}' no coincidió con ninguna fila: {filas}")
+        return None, None
+    except Exception:
+        logger.exception("Error buscando dispositivo vía PowerShell/AudioDeviceCmdlets")
+        return None, None
+
+
+def _limpiar_nombre_dispositivo(texto: str) -> str:
+    """
+    Quita comillas simples/dobles que suelen quedar pegadas al nombre del
+    dispositivo. FIX: el modelo emite comandos como
+    `audio: cambiar_dispositivo "Altavoces (JBL Go4 Lu)"`, y el parser de
+    controlador_acciones.py separa los argumentos con `.split()` por espacios
+    sin despojar las comillas — así que el nombre le llegaba a esta función
+    literalmente como `"Altavoces (JBL Go4 Lu)"` (con las comillas incluidas),
+    y por eso NUNCA coincidía por substring contra el nombre real reportado
+    por PowerShell/pycaw (que no tiene comillas). Esta limpieza es la causa
+    real de los fallos anteriores — no era un problema de PowerShell ni pycaw.
+    """
+    return texto.strip().strip('"').strip("'").strip()
+
+
 def cambiar_dispositivo_audio(nombre_o_indice: str) -> str:
     """
     Cambia el dispositivo de salida de audio predeterminado.
     Acepta el nombre del dispositivo o su índice numérico (de listar_dispositivos).
+
+    ORDEN DE INTENTOS:
+    1. AudioDeviceCmdlets (PowerShell) — MISMA fuente de datos que
+       listar_dispositivos_audio, así que el índice/nombre que el usuario
+       vio en el listado es garantizado el mismo acá. Prioridad #1 si el
+       módulo está instalado (evita el desajuste entre pycaw y PowerShell
+       que causaba falsos "no encontrado").
+    2. pycaw + IPolicyConfig nativo — si AudioDeviceCmdlets no está disponible.
+    3. pycaw SetAsDefault() — si la versión instalada lo expone.
     """
+    nombre_o_indice = _limpiar_nombre_dispositivo(nombre_o_indice)
+
+    # Intento 1: AudioDeviceCmdlets, misma fuente que el listado
+    idx_ps, nombre_ps = _buscar_dispositivo_powershell(nombre_o_indice)
+    if idx_ps is not None:
+        try:
+            result = subprocess.run(
+                ["powershell", "-Command", f"Set-AudioDevice -Index {idx_ps}"],
+                capture_output=True, text=True, timeout=8
+            )
+            logger.info(
+                f"[AUDIO] Set-AudioDevice -Index {idx_ps} -> returncode={result.returncode} "
+                f"stdout={result.stdout!r} stderr={result.stderr!r}"
+            )
+            if result.returncode == 0:
+                return f"✅ Dispositivo cambiado a: {nombre_ps}"
+        except Exception:
+            logger.exception("Error ejecutando Set-AudioDevice")
+    else:
+        logger.warning(f"[AUDIO] _buscar_dispositivo_powershell no encontró coincidencia para '{nombre_o_indice}'")
+
+    # Intentos 2 y 3: pycaw como respaldo, si AudioDeviceCmdlets no está
+    # instalado o falló por algún motivo
     import comtypes
     try:
         comtypes.CoInitialize()
     except OSError:
         pass
 
-    # Intentar primero con pycaw si tiene el método disponible
     try:
         from pycaw.pycaw import AudioUtilities
         devices = AudioUtilities.GetAllDevices()
 
-        # Si es un número, buscar por índice (base 1, igual que listar_dispositivos)
         target = None
         if nombre_o_indice.strip().isdigit():
             idx = int(nombre_o_indice.strip()) - 1
@@ -322,55 +552,28 @@ def cambiar_dispositivo_audio(nombre_o_indice: str) -> str:
             if 0 <= idx < len(activos):
                 target = activos[idx]
         else:
-            # Buscar por nombre parcial
             nombre_lower = nombre_o_indice.lower()
             for d in devices:
                 if d.state == 1 and nombre_lower in d.FriendlyName.lower():
                     target = d
                     break
 
-        if target and hasattr(target, 'SetAsDefault'):
-            target.SetAsDefault()
-            return f"✅ Dispositivo cambiado a: {target.FriendlyName}"
-        elif target:
-            nombre_dispositivo = target.FriendlyName
-            # Intentar via PowerShell con el nombre exacto
-            result = subprocess.run(
-                ["powershell", "-Command",
-                 f"Set-AudioDevice -Name '{nombre_dispositivo}'"],
-                capture_output=True, text=True, timeout=8
-            )
-            if result.returncode == 0:
-                return f"✅ Dispositivo cambiado a: {nombre_dispositivo}"
+        if target:
+            device_id = getattr(target, 'id', None)
+            if device_id and _establecer_dispositivo_nativo(device_id):
+                return f"✅ Dispositivo cambiado a: {target.FriendlyName}"
+            if hasattr(target, 'SetAsDefault'):
+                try:
+                    target.SetAsDefault()
+                    return f"✅ Dispositivo cambiado a: {target.FriendlyName}"
+                except Exception:
+                    pass
     except Exception:
-        pass
+        logger.exception("Error cambiando dispositivo de audio vía pycaw")
 
-    # Fallback: PowerShell por índice
-    try:
-        idx_str = nombre_o_indice.strip()
-        if idx_str.isdigit():
-            result = subprocess.run(
-                ["powershell", "-Command",
-                 f"Set-AudioDevice -Index {idx_str}"],
-                capture_output=True, text=True, timeout=8
-            )
-            if result.returncode == 0:
-                return f"✅ Dispositivo de audio cambiado (índice {idx_str})"
-
-        result = subprocess.run(
-            ["powershell", "-Command",
-             f"Set-AudioDevice -Name '{nombre_o_indice}'"],
-            capture_output=True, text=True, timeout=8
-        )
-        if result.returncode == 0:
-            return f"✅ Dispositivo cambiado a: {nombre_o_indice}"
-
-        return (
-            f"No se pudo cambiar al dispositivo '{nombre_o_indice}'. "
-            "Para habilitar el cambio de dispositivo instalá el módulo PowerShell:\n"
-            "PowerShell (admin): Install-Module -Name AudioDeviceCmdlets\n"
-            "Luego podés usar el índice o nombre del dispositivo listado."
-        )
-    except Exception as e:
-        logger.exception("Error cambiando dispositivo de audio")
-        return f"Error al cambiar dispositivo: {e}"
+    return (
+        f"⚠️ No se pudo cambiar al dispositivo '{nombre_o_indice}' por ninguno de los "
+        "métodos disponibles. Verificá el nombre/índice exacto con 'listar_dispositivos'. "
+        "Si el problema persiste, instalá:\n"
+        "PowerShell (admin): Install-Module -Name AudioDeviceCmdlets"
+    )

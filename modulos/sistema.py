@@ -430,8 +430,13 @@ def _abrir_programa_o_carpeta(objetivo, num_monitor=None, navegador=None):
     # Buscar archivo o carpeta
     ruta_elemento = buscar_archivo_o_carpeta(objetivo)
     if ruta_elemento:
-        if ruta_elemento.endswith('.py') or ruta_elemento.endswith('.scr'):
-            pass
+        # FIX: antes, si encontraba un .py/.scr, hacía `pass` (no abría nada)
+        # pero seguía de largo sin retornar, cayendo en el mensaje genérico
+        # de "no encontré el programa" más abajo — un mensaje engañoso,
+        # porque en realidad sí lo había encontrado y decidió no abrirlo
+        # por seguridad. Ahora se informa el motivo real.
+        if ruta_elemento.endswith(('.py', '.scr')):
+            return f"⚠️ Encontré '{objetivo}' ({ruta_elemento}) pero no lo abro automáticamente por seguridad (es un script ejecutable)."
         else:
             os.startfile(ruta_elemento)
             return f"Elemento '{objetivo}' encontrado y abierto."

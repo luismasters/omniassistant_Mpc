@@ -32,6 +32,7 @@ BG_TABLE_ALT   = "#0f0f1c"
 ACCENT         = "#7c3aed"
 ACCENT_HOVER   = "#6d28d9"
 ACCENT_SOFT    = "#3b1f6e"
+ACCENT_SECUNDARIO = "#5eead4"   # cian suave — jerarquía secundaria (hints, firma visual)
 TEXT_PRIMARY   = "#f0f0f0"
 TEXT_DIM       = "#4a4a5a"
 TEXT_USER      = "#e8e8f0"
@@ -65,7 +66,20 @@ _TK_SIZE_CO  = -(TAMANO_BASE - 1)
 MAX_USER_LINES    = 5
 LINE_HEIGHT_PX    = 24
 USER_BUBBLE_MAX_H = MAX_USER_LINES * LINE_HEIGHT_PX + 20
-CHAT_PAD_X = 110
+
+# ─── Padding horizontal del chat: RESPONSIVO ─────────────────────────────────
+# Antes era una constante fija (CHAT_PAD_X = 110), que a ventana completa se ve
+# bien (~22% del ancho) pero al achicar la ventana hacia el minsize se comía
+# ~34% del ancho disponible, dejando el chat angosto. Ahora se calcula como un
+# porcentaje del ancho actual de la ventana, con piso y techo para que nunca
+# quede ni pegado al borde ni absurdamente ancho en pantallas grandes.
+CHAT_PAD_X_MIN   = 24
+CHAT_PAD_X_MAX   = 140
+CHAT_PAD_X_RATIO = 0.09
+CHAT_PAD_X       = 110  # valor de referencia usado antes del primer cálculo dinámico
+
+def calcular_chat_pad_x(ancho_ventana: int) -> int:
+    return max(CHAT_PAD_X_MIN, min(CHAT_PAD_X_MAX, int(ancho_ventana * CHAT_PAD_X_RATIO)))
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -102,7 +116,13 @@ class _StateProxy:
         return _config_module.estado.contexto_chat
     @contexto_chat.setter
     def contexto_chat(self, v):
-        _config_module.estado.contexto_chat = v
+        # FIX: antes asignaba directo (`_config_module.estado.contexto_chat = v`),
+        # saltándose el lock de EstadoGlobal. Se usa en _cambiar_modo() al
+        # restaurar el historial de un modo guardado — si eso coincide con
+        # otro hilo escribiendo contexto_chat (ej. el radar de cambios de
+        # memoria.py), había condición de carrera. Ahora pasa por el método
+        # thread-safe centralizado.
+        _config_module.estado.reemplazar_contexto_chat(v)
 
     @property
     def archivos_en_memoria(self):
@@ -268,6 +288,13 @@ class UserBubble(ctk.CTkFrame):
         self._tb.insert("1.0", texto)
         self._tb.configure(state="disabled")
         self.after(10, self._ajustar)
+
+    def reajustar(self):
+        """Alias público: permite recalcular el ancho de la burbuja cuando
+        la ventana cambia de tamaño después de que la burbuja ya existe.
+        Antes, el ancho se calculaba una única vez al crearse, y quedaba
+        obsoleto si el usuario agrandaba/achicaba la ventana después."""
+        self._ajustar()
 
     def _ajustar(self):
         parent_w = self.winfo_width() or self.master.winfo_width()
@@ -618,7 +645,11 @@ class OmniApp(ctk.CTk):
         self.title("Argus")
         self.configure(fg_color=BG_MAIN)
         self.resizable(True, True)
-        self.minsize(640, 420)
+        # Antes 640x420: era tan angosto que, sumado al sidebar (215px fijo)
+        # y al padding del chat, dejaba prácticamente sin aire el área de
+        # conversación. Se sube un poco el piso para que la ventana siga
+        # siendo usable incluso en su tamaño mínimo.
+        self.minsize(720, 460)
 
         self.grid_columnconfigure(0, weight=0, minsize=215)
         self.grid_columnconfigure(1, weight=0, minsize=1)
@@ -626,6 +657,12 @@ class OmniApp(ctk.CTk):
         self.grid_rowconfigure(0, weight=1)
 
         self._modo_pausa_gaming = False
+
+        # ─── Padding responsivo del chat ─────────────────────────────────
+        # Se recalcula dinámicamente según el ancho real de la ventana en
+        # vez de usar una constante fija (ver calcular_chat_pad_x arriba).
+        self.chat_pad_x = calcular_chat_pad_x(ancho)
+        self._resize_job = None
 
         self._build_sidebar()
         self._build_separator()
@@ -641,6 +678,53 @@ class OmniApp(ctk.CTk):
         )
 
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        # Se registra DESPUÉS de construir la UI para que el primer evento
+        # de <Configure> (que dispara CTk al crear la ventana) no intente
+        # tocar widgets que todavía no existen.
+        self.bind("<Configure>", self._on_window_resize)
+
+    def _on_window_resize(self, event):
+        """
+        Handler de resize de la ventana principal. Filtra eventos de
+        widgets hijos (bind en Tkinter dispara <Configure> también para
+        cambios internos de layout, no solo para la ventana), y aplica
+        debounce con self.after() para no recalcular en cada píxel
+        mientras el usuario arrastra el borde de la ventana.
+        """
+        if event.widget is not self:
+            return
+        if self._resize_job is not None:
+            try:
+                self.after_cancel(self._resize_job)
+            except Exception:
+                pass
+        self._resize_job = self.after(80, self._aplicar_padding_responsivo)
+
+    def _aplicar_padding_responsivo(self):
+        self._resize_job = None
+        nuevo_pad = calcular_chat_pad_x(self.winfo_width())
+        if nuevo_pad == self.chat_pad_x:
+            return
+        self.chat_pad_x = nuevo_pad
+
+        # Barra de entrada
+        if hasattr(self, "_input_bar_frame") and self._input_bar_frame.winfo_exists():
+            self._input_bar_frame.grid_configure(padx=self.chat_pad_x)
+
+        # Burbujas y mensajes ya existentes en el chat
+        for widget in self.chat_scroll.winfo_children():
+            try:
+                if isinstance(widget, (UserBubble, AIBubble)):
+                    widget.pack_configure(padx=self.chat_pad_x)
+                    if isinstance(widget, UserBubble):
+                        widget.reajustar()
+                elif isinstance(widget, ctk.CTkLabel):
+                    texto = widget.cget("text")
+                    if texto.startswith("⚙"):
+                        widget.pack_configure(padx=self.chat_pad_x + 20)
+            except Exception:
+                pass
 
     def _activar_voz_desde_gamepad(self, condicion_sigue_presionado):
         if audio_modulo.hablando_actualmente:
@@ -993,11 +1077,36 @@ class OmniApp(ctk.CTk):
         self.chat_scroll.pack(fill="both", expand=True)
         self.chat_scroll.grid_columnconfigure(0, weight=1)
 
-        self._welcome_label = ctk.CTkLabel(
-            self.chat_scroll, text="¿En qué puedo ayudarte hoy?",
-            font=(_F, TAMANO_BASE + 11, "bold"), text_color="#2a2a3e")
-        self._welcome_label.pack(expand=True, pady=(120,0))
+        self._welcome_label = self._crear_bienvenida(
+            self.chat_scroll,
+            titulo="¿En qué puedo ayudarte hoy?",
+            hint=f"Presioná {TECLA_HABLAR.upper()} o L3+R3 en tu mando para hablar"
+        )
         self._build_input_bar()
+
+    def _crear_bienvenida(self, parent, titulo, subtitulo=None, hint=None):
+        """
+        Pantalla de estado vacío del chat. Antes era un único CTkLabel con
+        texto genérico ("¿En qué puedo ayudarte hoy?") que no reflejaba que
+        Argus es, ante todo, un asistente de VOZ — cualquier chatbot de IA
+        podría mostrar ese mismo texto. Ahora reutiliza el mismo acento "◆"
+        que ya se usa en el header de las burbujas de Argus (firma visual
+        consistente) y agrega el atajo real de activación por voz como
+        contenido concreto del propio producto, no relleno decorativo.
+        """
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
+        ctk.CTkLabel(frame, text="◆", font=(_F, TAMANO_BASE + 20),
+                     text_color=ACCENT).pack(pady=(0, 10))
+        ctk.CTkLabel(frame, text=titulo, font=(_F, TAMANO_BASE + 9, "bold"),
+                     text_color="#3a3a4a", justify="center").pack()
+        if subtitulo:
+            ctk.CTkLabel(frame, text=subtitulo, font=FONT_UI,
+                         text_color=TEXT_DIM, justify="center").pack(pady=(8, 0))
+        if hint:
+            ctk.CTkLabel(frame, text=hint, font=FONT_UI_SM,
+                         text_color=ACCENT_SECUNDARIO, justify="center").pack(pady=(16, 0))
+        frame.pack(expand=True, pady=(90, 0))
+        return frame
 
     def _build_input_bar(self):
         outer = ctk.CTkFrame(self, fg_color=BG_MAIN, corner_radius=0)
@@ -1006,7 +1115,8 @@ class OmniApp(ctk.CTk):
 
         bar = ctk.CTkFrame(outer, fg_color=BG_INPUT, corner_radius=16,
                            border_width=1, border_color=BORDER_INPUT)
-        bar.grid(row=0, column=0, padx=CHAT_PAD_X, pady=(12,4), sticky="ew")
+        bar.grid(row=0, column=0, padx=self.chat_pad_x, pady=(12,4), sticky="ew")
+        self._input_bar_frame = bar  # referencia para actualizar el padding en resize
         bar.grid_columnconfigure(0, weight=1)
         bar.grid_columnconfigure(1, weight=0)
         bar.grid_columnconfigure(2, weight=0)
@@ -1199,7 +1309,7 @@ class OmniApp(ctk.CTk):
 
             if not self.burbuja_ia_actual:
                 self.burbuja_ia_actual = AIBubble(self.chat_scroll)
-                self.burbuja_ia_actual.pack(fill="x", padx=CHAT_PAD_X, pady=(2,6))
+                self.burbuja_ia_actual.pack(fill="x", padx=self.chat_pad_x, pady=(2,6))
                 self.burbuja_ia_actual.mostrar_carga()
 
             if texto:
@@ -1212,13 +1322,13 @@ class OmniApp(ctk.CTk):
         lbl = ctk.CTkLabel(self.chat_scroll, text=f"⚙ {texto}",
                            font=FONT_UI_SM, text_color=TEXT_DIM,
                            anchor="w", justify="left", wraplength=0)
-        lbl.pack(fill="x", padx=CHAT_PAD_X + 20, pady=(2,2))
+        lbl.pack(fill="x", padx=self.chat_pad_x + 20, pady=(2,2))
 
     def _agregar_usuario(self, texto):
         if hasattr(self,"_welcome_label") and self._welcome_label.winfo_exists():
             self._welcome_label.destroy()
         burbuja = UserBubble(self.chat_scroll, texto)
-        burbuja.pack(fill="x", padx=CHAT_PAD_X, pady=(6,2))
+        burbuja.pack(fill="x", padx=self.chat_pad_x, pady=(6,2))
         self.update_idletasks()
         self._scroll_abajo()
 
