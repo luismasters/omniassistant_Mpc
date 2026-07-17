@@ -39,7 +39,7 @@
 
 - **Interfaz gráfica completa**: Chat con renderizado de markdown, selección de modo, adjuntar archivos, guardar en memoria, botón de limpiar contexto, modo gaming con gamepad.
 - **Voz funcional**: Captura con Whisper (lazy loading, GPU), síntesis con Edge TTS, reproducción con cola thread‑safe y corte por tecla Esc/espacio.
-- **Selección de modelo automática**: Gemini Flash en modo General, DeepSeek Reasoner en modos Programador/Planificador.
+- **Selección de modelo automática**: Gemini 2.5 Flash en modo General, DeepSeek Reasoner en modos Programador/Planificador.
 - **Memoria persistente (ChromaDB)**: Guardado y búsqueda de recuerdos con caché de embeddings y pre‑fetch anticipado.
 - **Control de sistema**: Abrir/cerrar/mover ventanas, explorar directorios, apagar PC con tiempos, búsqueda inteligente de programas (fuzzy match).
 - **Control de audio**: Volumen maestro y por aplicación (pycaw), listado de apps con audio, cambio de dispositivo de salida (requiere módulo AudioDeviceCmdlets para algunos casos).
@@ -55,8 +55,11 @@
 
 ## 4. Deuda Técnica / Próximos Pasos
 
+### ✅ Completado (Migraciones)
+- **Migración a `google.genai`** (nuevo SDK): Migrado de `google.generativeai` deprecado al nuevo SDK `google.genai`. Cliente inicializado en `modulos/ia.py` línea 49 (`genai.Client`). Incluye uso de `google.genai.types` para herramientas nativas.
+- **Memoria directa a ChromaDB**: Optimizada para evitar el overhead del servidor MCP en búsqueda/guardado en bóveda. `mcp_buscar_en_boveda()` y `mcp_guardar_en_boveda()` ahora llaman directo a `modulos.memoria` en lugar de `cliente_sistema.ejecutar()`. Latencia reducida de 3-5s a <500ms.
+
 ### Urgente
-- **Migración a `google.genai`** (nuevo SDK): El SDK actual `google.generativeai` está deprecado. Cambiar inicialización del cliente y paso de herramientas.
 - **Skill `control_audio` — dependencia externa `pycaw`**: Documentar instalación explícita (`pip install pycaw comtypes`). El cambio de dispositivo de salida falla sin el módulo PowerShell `AudioDeviceCmdlets`.
 
 ### Alta prioridad

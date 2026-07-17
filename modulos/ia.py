@@ -3,7 +3,8 @@ import datetime
 import winsound
 import re
 import difflib
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from openai import OpenAI
 import config
 
@@ -43,13 +44,13 @@ from modulos.prompts import (
 gestor_skills = gestor
 
 # =====================================================================
-# INICIALIZACIÓN DE CLIENTES IA
+# INICIALIZACIÓN DE CLIENTES IA (NUEVO SDK google-genai)
 # =====================================================================
-genai.configure(api_key=GEMINI_API_KEY)
+cliente_genai = genai.Client(api_key=GEMINI_API_KEY)
 cliente_deepseek = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
 
 # =====================================================================
-# HERRAMIENTAS NATIVAS MCP (GEMINI)
+# HERRAMIENTAS NATIVAS (GEMINI)
 # OPTIMIZACIÓN: buscar/guardar en bóveda ahora van DIRECTO a memoria.py
 # sin spawn de proceso externo — latencia reducida de 3-5s a <500ms
 # =====================================================================
@@ -119,11 +120,6 @@ def mcp_leer_documento(ruta: str):
     Usar cuando el usuario pida leer, ver o abrir el contenido de un archivo específico.
     """
     contenido = leer_contenido_archivo(ruta)
-    # FIX: el check anterior comparaba contra "CODIGO_ERROR_NO_ENCONTRADO" /
-    # "CODIGO_ERROR_LECTURA:", strings que archivos.py ya no devuelve (usa
-    # el formato "ERROR: ...") desde hace tiempo. Como resultado, un archivo
-    # inexistente o sin permisos pasaba el filtro y se le entregaba a la IA
-    # como si fuera contenido real. Ahora se chequea el formato real.
     if contenido.startswith("ERROR:"):
         return f"Error: No se pudo encontrar o abrir el archivo '{ruta}'. Detalle: {contenido}"
     return f"Contenido del archivo:\n{contenido}"
@@ -146,7 +142,6 @@ _PATRON_COMANDOS_VOZ = re.compile(
 )
 
 def _limpiar_para_voz(texto: str) -> str:
-    """Elimina líneas de comandos de acción del texto antes de enviarlo a Edge TTS."""
     return _PATRON_COMANDOS_VOZ.sub('', texto).strip()
 
 def _procesar_buffer_voz(buffer: str, forzar: bool = False) -> str:
@@ -168,8 +163,6 @@ def _procesar_buffer_voz(buffer: str, forzar: bool = False) -> str:
 
 # =====================================================================
 # CONFIRMACIONES NATIVAS (sin juez IA)
-# OPTIMIZACIÓN: reemplaza llamadas a Gemini como juez por lógica local
-# simple. Elimina 2-3 segundos de latencia y consumo de tokens.
 # =====================================================================
 _PALABRAS_CONFIRMACION = {
     "si", "sí", "dale", "ok", "okay", "confirmar", "confirmo",
@@ -184,26 +177,67 @@ _PALABRAS_CANCELACION = {
 }
 
 def _evaluar_confirmacion_local(respuesta_usuario: str) -> str:
-    """
-    Evalúa si el usuario confirmó o canceló una acción sin llamar a la IA.
-    Retorna 'CONFIRMADO' o 'CANCELADO'.
-    """
     texto = respuesta_usuario.lower().strip()
-    # Primero verificar coincidencia exacta
     if texto in _PALABRAS_CONFIRMACION:
         return "CONFIRMADO"
     if texto in _PALABRAS_CANCELACION:
         return "CANCELADO"
-    # Luego verificar si alguna palabra clave está contenida
     for palabra in _PALABRAS_CONFIRMACION:
         if palabra in texto:
             return "CONFIRMADO"
     for palabra in _PALABRAS_CANCELACION:
         if palabra in texto:
             return "CANCELADO"
-    # Si no hay claridad, conservador: cancelar
     logger.warning(f"Respuesta de confirmación ambigua: '{respuesta_usuario}' → CANCELADO")
     return "CANCELADO"
+
+# =====================================================================
+# HELPER: construir lista de contents para el nuevo SDK
+# FIX: en el nuevo SDK, PIL Images se pasan directamente como contenido,
+# NO se envuelven en Part.from_image() (que no existe).
+# =====================================================================
+def _convertir_contexto_a_contents(contexto_chat):
+    """
+    Convierte el formato de contexto_chat (lista de dicts con 'role' y 'parts')
+    al formato que espera el nuevo SDK google-genai.
+    Retorna una lista de types.Content (para mensajes de historial) o
+    una lista plana de Part/str/PIL.Image (para el mensaje del usuario actual).
+    IMPORTANTE: PIL Images se pasan DIRECTAMENTE sin wrapper, el SDK las maneja.
+    """
+    from PIL import Image
+    contents = []
+    for msg in contexto_chat:
+        role = msg.get('role', 'user')
+        parts_raw = msg.get('parts', [])
+        parts = []
+        for part in parts_raw:
+            if isinstance(part, str):
+                parts.append(types.Part.from_text(text=part))
+            elif isinstance(part, Image.Image):
+                # PIL Image se pasa directamente como contenido,
+                # el SDK google-genai maneja Image nativamente
+                parts.append(part)
+            else:
+                parts.append(types.Part.from_text(text=str(part)))
+        contents.append(types.Content(role=role, parts=parts))
+    return contents
+
+def _extraer_funciones_de_respuesta(response):
+    """
+    Extrae function_calls de una respuesta de streaming del nuevo SDK.
+    """
+    try:
+        if hasattr(response, 'function_calls') and response.function_calls:
+            return response.function_calls
+        if hasattr(response, 'candidates') and response.candidates:
+            candidate = response.candidates[0]
+            if hasattr(candidate, 'content') and candidate.content:
+                for part in (candidate.content.parts or []):
+                    if hasattr(part, 'function_call') and part.function_call:
+                        return [part.function_call]
+    except Exception:
+        pass
+    return None
 
 # =====================================================================
 # ENRUTADOR PRINCIPAL
@@ -223,7 +257,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
     config.RUTA_WORKSPACE_ACTUAL = WORKSPACE_ACTUAL
     texto_usuario_lower = texto_usuario.lower().strip()
 
-    # ─── LIMPIAR CONTEXTO (interceptor pre-IA, Gemini no puede bloquearlo) ─
+    # ─── LIMPIAR CONTEXTO ────────────────────────────────────────────────
     _FRASES_LIMPIAR = {
         "limpiar memoria", "olvidar contexto", "limpiar contexto",
         "resetear contexto", "reset contexto", "borrar contexto",
@@ -254,21 +288,18 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 return
 
     # =================================================================
-    # ESCUDOS DE SEGURIDAD — CONFIRMACIONES NATIVAS (sin juez IA)
+    # ESCUDOS DE SEGURIDAD — CONFIRMACIONES NATIVAS
     # =================================================================
     if PENDIENTE_DE_BORRADO:
         tarea_borrado = PENDIENTE_DE_BORRADO
         config.estado.pendiente_de_borrado = ""
-
         logger.info(f"Evaluando confirmación de borrado (local): {tarea_borrado}")
         decision_borrado = _evaluar_confirmacion_local(texto_usuario)
-
         if "CONFIRMADO" in decision_borrado:
             resultado = eliminar_elemento(tarea_borrado)
             msg = f"Protocolo autorizado. {resultado}"
         else:
             msg = "Protocolo abortado. Archivos a salvo."
-
         if ui_callback:
             ui_callback("🤖 Argus", msg, "#FF4500" if "abortado" in msg else "#00E5FF")
         if modo_voz:
@@ -282,10 +313,8 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
     if PENDIENTE_DE_GIT:
         tarea_git = PENDIENTE_DE_GIT
         config.estado.pendiente_de_git = None
-
         logger.info(f"Evaluando confirmación de Git (local): {tarea_git}")
         decision_git = _evaluar_confirmacion_local(texto_usuario)
-
         if "CONFIRMADO" in decision_git:
             if ui_callback:
                 ui_callback("⚙️ Sistema", "Iniciando operación en GitHub...", "#80868B")
@@ -305,7 +334,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 msg = f"❌ Error en Git: {str(e)[:200]}"
         else:
             msg = "Operación en GitHub cancelada de forma segura."
-
         if ui_callback:
             ui_callback("🤖 Argus", msg, "#FF4500" if "cancelada" in msg else "#00E5FF")
         if modo_voz:
@@ -335,7 +363,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
     respuesta_ia = ""
     usaste_mcp = False
     resultado_mcp = ""
-    modelo_gemini = None
     error_ocurrido = False
     skill_activa = False
 
@@ -348,9 +375,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
     else:
         logger.info(f"PENSANDO ({MODO_ACTUAL.upper()})...")
 
-        # ─── BÚSQUEDA ANTICIPADA EN BÓVEDA ───────────────────────────────
-        # Lanzar búsqueda en bóveda en paralelo mientras la IA piensa
-        # Solo en modo general donde Gemini puede pedir datos de bóveda
         MODO_ACTUAL = config.estado.modo_actual
         if MODO_ACTUAL == "general":
             iniciar_busqueda_anticipada(texto_usuario)
@@ -363,7 +387,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             texto_snapshot = f"[ESTADO DEL PROYECTO]:\n{SNAPSHOT_ACTUAL}\n\n" if SNAPSHOT_ACTUAL else ""
             texto_doc_volatil = f"[DOCUMENTOS EN MEMORIA]:\n{DOCUMENTO_VOLATIL}\n\n" if DOCUMENTO_VOLATIL else ""
 
-            # ─── SELECCIÓN DE MODELO Y CONTEXTO ──────────────────────────────
             if MODO_ACTUAL in ["programador", "planificador"]:
                 contexto_sistema = obtener_prompt_programador_unificado(
                     texto_workspace, texto_snapshot, texto_doc_volatil
@@ -377,7 +400,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 )
                 modelo_activo = "gemini"
 
-            # ─── INYECCIÓN DE SKILLS RELEVANTES ──────────────────────────────
+            # ─── INYECCIÓN DE SKILLS ──────────────────────────────────────────
             skill_info = gestor_skills.obtener_skill_relevante(texto_usuario)
             if skill_info:
                 nombre_skill, instrucciones = skill_info
@@ -392,22 +415,33 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             logger.debug(f"Modelo activo: {modelo_activo}")
             print(f"\n🤖 Argus dice:\n---")
 
-            # ─── GEMINI ────────────────────────────────────────────────────────
+            # ─── GEMINI (NUEVO SDK google-genai) ──────────────────────────────
             if modelo_activo == "gemini":
-                if skill_activa:
-                    modelo_gemini = genai.GenerativeModel(
-                        "gemini-flash-lite-latest",
-                        system_instruction=contexto_sistema
-                    )
-                else:
-                    modelo_gemini = genai.GenerativeModel(
-                        "gemini-flash-lite-latest",
-                        system_instruction=contexto_sistema,
-                        tools=lista_herramientas_mcp
-                    )
+                # FIX: En el SDK google-genai v2, las PIL Images se pasan
+                # directamente como elementos de la lista contents, NO envueltas
+                # en Part ni en Content aparte.
+                gemini_config = types.GenerateContentConfig(
+                    system_instruction=contexto_sistema,
+                    temperature=0.1,
+                    max_output_tokens=8192,
+                    safety_settings=[
+                        types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HARASSMENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                        types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                        types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                        types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                        types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                        types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_JAILBREAK, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                    ]
+                )
+                if not skill_activa:
+                    gemini_config.tools = lista_herramientas_mcp
 
-                mensajes_para_gemini = list(CONTEXTO_CHAT)
-                partes_usuario = [texto_usuario]
+                # Convertir historial al formato del nuevo SDK
+                mensajes_para_gemini = _convertir_contexto_a_contents(CONTEXTO_CHAT)
+
+                # Construir partes del mensaje del usuario
+                partes_usuario = [types.Part.from_text(text=texto_usuario)]
+                from PIL import Image as PIL_Image
 
                 verbos_vision = ["captura", "capturá", "capturar", "mirar", "ves"]
                 objetivos_vision = ["pantalla", "monitor", "1", "2", "uno", "dos", "la 1", "el 1", "la 2", "el 2"]
@@ -418,31 +452,51 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                     num_pantalla = 2 if any(p in texto_usuario_lower for p in ["1", "uno", "la 1", "el 1"]) else 1
                     img = capturar_pantalla(num_pantalla)
                     if img:
+                        # En el nuevo SDK, PIL Images se pasan directamente
                         partes_usuario.append(img)
 
-                mensajes_para_gemini.append({'role': 'user', 'parts': partes_usuario})
+                mensajes_para_gemini.append(types.Content(role='user', parts=partes_usuario))
 
                 try:
-                    response = modelo_gemini.generate_content(
-                        mensajes_para_gemini,
-                        stream=True,
-                        generation_config=genai.GenerationConfig(temperature=0.1)
+                    response_stream = cliente_genai.models.generate_content_stream(
+                        model="gemini-2.5-flash",
+                        contents=mensajes_para_gemini,
+                        config=gemini_config
                     )
-                except genai.types.generation_types.BlockedPromptException as e:
-                    logger.exception("Prompt bloqueado por Gemini")
-                    ui_callback("⚙️ Sistema", "⚠️ Mensaje bloqueado por filtros de seguridad.", "#FF4500")
+                except genai.errors.ClientError as e:
+                    err_str = str(e)
+                    logger.exception(f"Error de cliente Gemini: {err_str[:200]}")
+                    if "blocked" in err_str.lower() or "safety" in err_str.lower():
+                        if ui_callback:
+                            ui_callback("⚙️ Sistema", "⚠️ Mensaje bloqueado por filtros de seguridad.", "#FF4500")
+                    elif "429" in err_str or "ResourceExhausted" in err_str:
+                        if ui_callback:
+                            ui_callback("⚙️ Sistema", "⚠️ Límite de tokens alcanzado. Limpiá el contexto.", "#FF4500")
+                    elif "401" in err_str or "Unauthenticated" in err_str:
+                        if ui_callback:
+                            ui_callback("⚙️ Sistema", "❌ Error de autenticación. Verificá tu API Key.", "#FF4500")
+                    elif "403" in err_str or "PermissionDenied" in err_str:
+                        if ui_callback:
+                            ui_callback("⚙️ Sistema", "❌ Permiso denegado. Verificá tu API Key.", "#FF4500")
+                    else:
+                        if ui_callback:
+                            ui_callback("⚙️ Sistema", f"❌ Error en Gemini: {err_str[:100]}", "#FF4500")
                     error_ocurrido = True
                     return
                 except Exception as e:
                     err_str = str(e)
                     if "ResourceExhausted" in err_str or "429" in err_str:
-                        ui_callback("⚙️ Sistema", "⚠️ Límite de tokens alcanzado. Limpiá el contexto.", "#FF4500")
+                        if ui_callback:
+                            ui_callback("⚙️ Sistema", "⚠️ Límite de tokens alcanzado. Limpiá el contexto.", "#FF4500")
                     elif "Unauthenticated" in err_str or "401" in err_str:
-                        ui_callback("⚙️ Sistema", "❌ Error de autenticación. Verificá tu API Key.", "#FF4500")
+                        if ui_callback:
+                            ui_callback("⚙️ Sistema", "❌ Error de autenticación. Verificá tu API Key.", "#FF4500")
                     elif "PermissionDenied" in err_str or "403" in err_str:
-                        ui_callback("⚙️ Sistema", "❌ Permiso denegado. Verificá tu API Key.", "#FF4500")
+                        if ui_callback:
+                            ui_callback("⚙️ Sistema", "❌ Permiso denegado. Verificá tu API Key.", "#FF4500")
                     else:
-                        ui_callback("⚙️ Sistema", f"❌ Error al iniciar generación: {err_str[:100]}", "#FF4500")
+                        if ui_callback:
+                            ui_callback("⚙️ Sistema", f"❌ Error al iniciar generación: {err_str[:100]}", "#FF4500")
                     logger.exception("Error al iniciar generación en Gemini")
                     error_ocurrido = True
                     return
@@ -453,25 +507,35 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 buffer_voz = ""
 
                 try:
-                    for chunk in response:
+                    for chunk in response_stream:
                         try:
-                            for part in chunk.parts:
-                                if getattr(part, "function_call", None):
+                            # DEBUG: Loggear finish_reason cuando sea SAFETY o RECITATION
+                            if hasattr(chunk, 'candidates') and chunk.candidates:
+                                candidate = chunk.candidates[0]
+                                if hasattr(candidate, 'finish_reason') and candidate.finish_reason:
+                                    fr_name = candidate.finish_reason.name if hasattr(candidate.finish_reason, 'name') else str(candidate.finish_reason)
+                                    fr_val = candidate.finish_reason.value if hasattr(candidate.finish_reason, 'value') else str(candidate.finish_reason)
+                                    # SAFETY=2, RECITATION=4, OTHER=5 son los problemáticos
+                                    if fr_val in (2, 4, 5):
+                                        logger.warning(f"⚠️ Gemini finish_reason={fr_name} (SAFETY=2, RECITATION=4, OTHER=5)")
+                                        if ui_callback:
+                                            ui_callback("⚙️ Sistema", f"⚠️ Gemini finalizó con {fr_name}", "#FFA500")
+                            func_calls = _extraer_funciones_de_respuesta(chunk)
+                            if func_calls:
+                                for fc in func_calls:
                                     usaste_mcp = True
-                                    n_func = part.function_call.name
+                                    n_func = fc.name
                                     if ui_callback:
                                         ui_callback("⚙️ Sistema", f"Consultando: {n_func}...", "#80868B")
-                                    args = {k: v for k, v in part.function_call.args.items()}
+                                    args = dict(fc.args) if fc.args else {}
                                     try:
                                         if n_func == "mcp_estado_pc":
                                             resultado_mcp = mcp_estado_pc()
                                         elif n_func == "mcp_hardware_pc":
                                             resultado_mcp = mcp_hardware_pc()
                                         elif n_func == "mcp_buscar_en_boveda":
-                                            # OPTIMIZADO: directo, sin MCP
                                             resultado_mcp = mcp_buscar_en_boveda(args.get("consulta", ""))
                                         elif n_func == "mcp_guardar_en_boveda":
-                                            # OPTIMIZADO: directo, sin MCP
                                             resultado_mcp = mcp_guardar_en_boveda(args.get("dato", ""))
                                         elif n_func == "mcp_explorar_ruta":
                                             resultado_mcp = mcp_explorar_ruta(args.get("ruta", ""))
@@ -486,59 +550,90 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                                 ui_callback("⚙️ Sistema", "⚠️ Timeout en herramienta MCP.", "#FFA500")
                                     except Exception as e:
                                         logger.exception(f"Error ejecutando herramienta {n_func}")
-                                        ui_callback("⚙️ Sistema", f"❌ Error en {n_func}: {str(e)[:80]}", "#FF4500")
-                                elif getattr(part, "text", None):
-                                    print(part.text, end='', flush=True)
-                                    respuesta_ia += part.text
-                                    if ui_callback:
-                                        ui_callback("", part.text, "#E8EAED", nueva_linea=False)
-                                    if modo_voz and not usaste_mcp:
-                                        buffer_voz += part.text
-                                        buffer_voz = _procesar_buffer_voz(buffer_voz, forzar=False)
+                                        if ui_callback:
+                                            ui_callback("⚙️ Sistema", f"❌ Error en {n_func}: {str(e)[:80]}", "#FF4500")
+                            # Extraer texto del chunk: probar varias ubicaciones posibles
+                            texto_chunk = None
+                            if hasattr(chunk, 'text') and chunk.text:
+                                texto_chunk = chunk.text
+                            elif (hasattr(chunk, 'candidates') and chunk.candidates 
+                                  and hasattr(chunk.candidates[0], 'content') and chunk.candidates[0].content
+                                  and hasattr(chunk.candidates[0].content, 'parts') and chunk.candidates[0].content.parts):
+                                for part in chunk.candidates[0].content.parts:
+                                    if hasattr(part, 'text') and part.text:
+                                        texto_chunk = (texto_chunk or "") + part.text
+                            if texto_chunk:
+                                print(texto_chunk, end='', flush=True)
+                                respuesta_ia += texto_chunk
+                                if ui_callback:
+                                    ui_callback("", texto_chunk, "#E8EAED", nueva_linea=False)
+                                if modo_voz and not usaste_mcp:
+                                    buffer_voz += texto_chunk
+                                    buffer_voz = _procesar_buffer_voz(buffer_voz, forzar=False)
                         except Exception as e:
                             logger.exception("Error procesando chunk de Gemini")
-                            ui_callback("⚙️ Sistema", f"❌ Error en streaming: {str(e)[:80]}", "#FF4500")
+                            if ui_callback:
+                                ui_callback("⚙️ Sistema", f"❌ Error en streaming: {str(e)[:80]}", "#FF4500")
                             break
                 except Exception as e:
                     logger.exception("Error en el bucle de streaming de Gemini")
-                    ui_callback("⚙️ Sistema", f"❌ Error en el streaming: {str(e)[:80]}", "#FF4500")
+                    if ui_callback:
+                        ui_callback("⚙️ Sistema", f"❌ Error en el streaming: {str(e)[:80]}", "#FF4500")
                     error_ocurrido = True
                 finally:
                     if modo_voz and buffer_voz.strip() and not usaste_mcp:
                         _procesar_buffer_voz(buffer_voz, forzar=True)
 
                 # ─── MCP SEGUNDA RONDA ────────────────────────────────────────
-                if usaste_mcp and modelo_gemini and not error_ocurrido and not skill_activa:
+                if usaste_mcp and not error_ocurrido and not skill_activa:
                     try:
                         if not resultado_mcp or "TIMEOUT" in str(resultado_mcp):
                             if ui_callback:
                                 ui_callback("⚙️ Sistema", "⚠️ No se obtuvo dato. Verificá conexión.", "#FFA500")
                         else:
-                            mensajes_para_gemini.append({'role': 'model', 'parts': ['Obteniendo datos...']})
-                            mensajes_para_gemini.append({'role': 'user', 'parts': [
-                                f"[DATO OBTENIDO]: {resultado_mcp}\n\n"
-                                "Respondé al usuario de forma natural y directa con este dato. "
-                                "No inventes valores que no estén en el dato. "
-                                "Si falta algún dato, decílo explícitamente."
-                            ]})
-                            response_2 = modelo_gemini.generate_content(mensajes_para_gemini, stream=True)
+                            mensajes_para_gemini.append(types.Content(role='model', parts=[types.Part.from_text(text='Obteniendo datos...')]))
+                            mensajes_para_gemini.append(types.Content(role='user', parts=[types.Part.from_text(
+                                text=f"[DATO OBTENIDO]: {resultado_mcp}\n\n"
+                                    "Respondé al usuario de forma natural y directa con este dato. "
+                                    "No inventes valores que no estén en el dato. "
+                                    "Si falta algún dato, decílo explícitamente."
+                            )]))
+
+                            config_segunda_ronda = types.GenerateContentConfig(
+                                system_instruction=contexto_sistema,
+                                temperature=0.1,
+                                max_output_tokens=8192,
+                                safety_settings=[
+                                    types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HARASSMENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                                    types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                                    types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                                    types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                                    types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                                ]
+                            )
+                            response_2 = cliente_genai.models.generate_content_stream(
+                                model="gemini-2.5-flash",
+                                contents=mensajes_para_gemini,
+                                config=config_segunda_ronda
+                            )
                             if ui_callback:
                                 ui_callback("🤖 Argus", "", "#A8C7FA", nueva_linea=True)
                             buffer_voz_2 = ""
                             for chunk_2 in response_2:
                                 try:
-                                    for part in chunk_2.parts:
-                                        if getattr(part, "text", None):
-                                            print(part.text, end='', flush=True)
-                                            respuesta_ia += part.text
-                                            if ui_callback:
-                                                ui_callback("", part.text, "#E8EAED", nueva_linea=False)
-                                            if modo_voz:
-                                                buffer_voz_2 += part.text
-                                                buffer_voz_2 = _procesar_buffer_voz(buffer_voz_2, forzar=False)
+                                    if hasattr(chunk_2, 'text') and chunk_2.text:
+                                        texto_chunk = chunk_2.text
+                                        print(texto_chunk, end='', flush=True)
+                                        respuesta_ia += texto_chunk
+                                        if ui_callback:
+                                            ui_callback("", texto_chunk, "#E8EAED", nueva_linea=False)
+                                        if modo_voz:
+                                            buffer_voz_2 += texto_chunk
+                                            buffer_voz_2 = _procesar_buffer_voz(buffer_voz_2, forzar=False)
                                 except Exception as e:
                                     logger.exception("Error procesando chunk MCP ronda 2")
-                                    ui_callback("⚙️ Sistema", f"❌ Error en respuesta MCP: {str(e)[:80]}", "#FF4500")
+                                    if ui_callback:
+                                        ui_callback("⚙️ Sistema", f"❌ Error en respuesta MCP: {str(e)[:80]}", "#FF4500")
                                     break
                             if ui_callback:
                                 ui_callback("", "", "#E8EAED", nueva_linea=True)
@@ -546,7 +641,8 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                 _procesar_buffer_voz(buffer_voz_2, forzar=True)
                     except Exception as e:
                         logger.exception("Error en generación MCP ronda 2")
-                        ui_callback("⚙️ Sistema", f"❌ Error en generación MCP: {str(e)[:80]}", "#FF4500")
+                        if ui_callback:
+                            ui_callback("⚙️ Sistema", f"❌ Error en generación MCP: {str(e)[:80]}", "#FF4500")
                         error_ocurrido = True
 
             # ─── DEEPSEEK ──────────────────────────────────────────────────────
@@ -567,11 +663,14 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 except Exception as e:
                     err_str = str(e)
                     if "RateLimitError" in err_str or "429" in err_str:
-                        ui_callback("⚙️ Sistema", "⚠️ Rate limit DeepSeek. Esperá un momento.", "#FFA500")
+                        if ui_callback:
+                            ui_callback("⚙️ Sistema", "⚠️ Rate limit DeepSeek. Esperá un momento.", "#FFA500")
                     elif "AuthenticationError" in err_str or "401" in err_str:
-                        ui_callback("⚙️ Sistema", "❌ Error de autenticación DeepSeek.", "#FF4500")
+                        if ui_callback:
+                            ui_callback("⚙️ Sistema", "❌ Error de autenticación DeepSeek.", "#FF4500")
                     else:
-                        ui_callback("⚙️ Sistema", f"❌ Error DeepSeek: {err_str[:100]}", "#FF4500")
+                        if ui_callback:
+                            ui_callback("⚙️ Sistema", f"❌ Error DeepSeek: {err_str[:100]}", "#FF4500")
                     logger.exception("Error al iniciar generación en DeepSeek")
                     error_ocurrido = True
                     return
@@ -594,11 +693,13 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                     buffer_voz_ds = _procesar_buffer_voz(buffer_voz_ds, forzar=False)
                         except Exception as e:
                             logger.exception("Error procesando chunk de DeepSeek")
-                            ui_callback("⚙️ Sistema", f"❌ Error en streaming: {str(e)[:80]}", "#FF4500")
+                            if ui_callback:
+                                ui_callback("⚙️ Sistema", f"❌ Error en streaming: {str(e)[:80]}", "#FF4500")
                             break
                 except Exception as e:
                     logger.exception("Error en el bucle de streaming de DeepSeek")
-                    ui_callback("⚙️ Sistema", f"❌ Error en el streaming: {str(e)[:80]}", "#FF4500")
+                    if ui_callback:
+                        ui_callback("⚙️ Sistema", f"❌ Error en el streaming: {str(e)[:80]}", "#FF4500")
                     error_ocurrido = True
                 finally:
                     if modo_voz and buffer_voz_ds.strip():
@@ -610,15 +711,18 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
 
         except ConnectionError as e:
             logger.exception("Error de conexión")
-            ui_callback("⚙️ Sistema", "❌ Error de conexión. Revisá tu internet.", "#FF4500")
+            if ui_callback:
+                ui_callback("⚙️ Sistema", "❌ Error de conexión. Revisá tu internet.", "#FF4500")
             error_ocurrido = True
         except TimeoutError as e:
             logger.exception("Timeout")
-            ui_callback("⚙️ Sistema", "⏱️ Timeout. La respuesta está tardando demasiado.", "#FFA500")
+            if ui_callback:
+                ui_callback("⚙️ Sistema", "⏱️ Timeout. La respuesta está tardando demasiado.", "#FFA500")
             error_ocurrido = True
         except Exception as e:
             logger.exception("Error crítico en ia.py")
-            ui_callback("⚙️ Sistema", f"❌ Error inesperado: {str(e)[:200]}", "#FF4500")
+            if ui_callback:
+                ui_callback("⚙️ Sistema", f"❌ Error inesperado: {str(e)[:200]}", "#FF4500")
             error_ocurrido = True
 
         if error_ocurrido and ui_callback:
@@ -641,18 +745,34 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             if "No se encontraron" in datos_encontrados or "error de conexión" in datos_encontrados.lower():
                 if ui_callback:
                     ui_callback("⚙️ Sistema", "⚠️ Sin resultados web. Respondiendo con conocimiento interno.", "#FFA500")
-            elif modelo_gemini:
+            else:
                 try:
-                    mensajes_secundarios = list(CONTEXTO_CHAT) + [
-                        {'role': 'user', 'parts': [texto_usuario]},
-                        {'role': 'model', 'parts': [respuesta_ia]},
-                        {'role': 'user', 'parts': [f"Resultados web:\n{datos_encontrados}\n\nRespondé usando esto."]}
+                    config_web = types.GenerateContentConfig(
+                        system_instruction=contexto_sistema,
+                        temperature=0.1,
+                        max_output_tokens=8192,
+                        safety_settings=[
+                            types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HARASSMENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                            types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                            types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                            types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                            types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                        ]
+                    )
+                    mensajes_secundarios = _convertir_contexto_a_contents(CONTEXTO_CHAT) + [
+                        types.Content(role='user', parts=[types.Part.from_text(text=texto_usuario)]),
+                        types.Content(role='model', parts=[types.Part.from_text(text=respuesta_ia)]),
+                        types.Content(role='user', parts=[types.Part.from_text(text=f"Resultados web:\n{datos_encontrados}\n\nRespondé usando esto.")])
                     ]
-                    segunda_respuesta = modelo_gemini.generate_content(mensajes_secundarios, stream=True)
+                    segunda_respuesta = cliente_genai.models.generate_content_stream(
+                        model="gemini-2.5-flash",
+                        contents=mensajes_secundarios,
+                        config=config_web
+                    )
                     respuesta_final = ""
                     buffer_voz_web = ""
                     for chunk in segunda_respuesta:
-                        if getattr(chunk, 'text', None):
+                        if hasattr(chunk, 'text') and chunk.text:
                             respuesta_final += chunk.text
                             if ui_callback:
                                 ui_callback("", chunk.text, "#E8EAED", nueva_linea=False)
@@ -670,7 +790,8 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                     return
                 except Exception as e:
                     logger.exception("Error en búsqueda web secundaria")
-                    ui_callback("⚙️ Sistema", f"❌ Error al procesar resultados web: {str(e)[:100]}", "#FF4500")
+                    if ui_callback:
+                        ui_callback("⚙️ Sistema", f"❌ Error al procesar resultados web: {str(e)[:100]}", "#FF4500")
 
     if modo_voz and comando_directo:
         hablar_no_bloqueante(respuesta_ia)
@@ -704,10 +825,6 @@ def cargar_adjuntos_en_contexto(rutas_archivos, ui_callback=None):
         identificador_unico = f"{carpeta_padre}/{nombre_archivo}"
         try:
             contenido = leer_contenido_archivo(ruta)
-            # FIX: mismo problema que en mcp_leer_documento — el check
-            # comparaba contra un formato de error obsoleto que archivos.py
-            # ya no produce, dejando pasar errores reales como si fueran
-            # contenido válido del archivo adjunto.
             if contenido.startswith("ERROR:"):
                 if ui_callback:
                     ui_callback("⚙️ Sistema", f"❌ No se pudo leer: {identificador_unico} ({contenido})", "#FF4500")
@@ -729,9 +846,11 @@ def cargar_adjuntos_en_contexto(rutas_archivos, ui_callback=None):
     config.estado.documento_volatil = contenido_volatil_acumulado
 
     try:
-        resumen = genai.GenerativeModel("gemini-flash-lite-latest").generate_content(
-            f"Resume en 2 líneas el contenido de estos archivos:\n\n{contenido_volatil_acumulado[:8000]}"
-        ).text.strip()
+        resumen_response = cliente_genai.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=f"Resume en 2 líneas el contenido de estos archivos:\n\n{contenido_volatil_acumulado[:8000]}"
+        )
+        resumen = resumen_response.text.strip()
     except Exception as e:
         logger.exception("Error generando resumen de adjuntos")
         resumen = "Documentos cargados en contexto."

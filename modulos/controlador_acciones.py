@@ -541,12 +541,17 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
 
         Responde ÚNICAMENTE con el Markdown final estructurado. No uses saludos, ni confirmaciones."""
                         if ui_callback:
-                            ui_callback("⚙️ Sistema", "🧠 Analizando arquitectura global con DeepSeek...", "#80868B")
-                        response = motor_ia.cliente_deepseek.chat.completions.create(
-                            model="deepseek-reasoner",
-                            messages=[{"role": "user", "content": prompt_analisis}]
+                            ui_callback("⚙️ Sistema", "🧠 Analizando arquitectura global con Gemini Flash...", "#80868B")
+                        # Usar Gemini Flash Lite (google-genai SDK) para el análisis.
+                        # Más rápido y económico que DeepSeek Reasoner para esta tarea.
+                        from google.genai import types
+                        config_crawler = types.GenerateContentConfig(temperature=0.2)
+                        response = motor_ia.cliente_genai.models.generate_content(
+                            model="gemini-3.1-flash-lite",
+                            contents=prompt_analisis,
+                            config=config_crawler
                         )
-                        estado_md = response.choices[0].message.content
+                        estado_md = response.text.strip() if response.text else ""
                         if estado_md.startswith("```markdown"):
                             estado_md = estado_md.split("```markdown")[1].rsplit("```", 1)[0].strip()
                         elif estado_md.startswith("```"):
