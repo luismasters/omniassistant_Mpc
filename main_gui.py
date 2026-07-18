@@ -135,6 +135,13 @@ class _StateProxy:
     def documento_volatil(self, v):
         _config_module.estado.cambiar_documento_volatil(v)
 
+    @property
+    def modelo_seleccionado(self):
+        return _config_module.estado.modelo_seleccionado
+    @modelo_seleccionado.setter
+    def modelo_seleccionado(self, v):
+        _config_module.estado.cambiar_modelo_seleccionado(v)
+
     def guardar_historial_modo(self, modo, visual, contexto):
         self._historial_por_modo[modo] = {
             "visual": visual[-50:],
@@ -813,10 +820,34 @@ class OmniApp(ctk.CTk):
             sb, text="🧠 Modelo: Gemini Flash",
             font=FONT_UI_SM, text_color="#86efac"
         )
-        self.lbl_modelo_activo.grid(row=1, column=0, padx=18, pady=(0,14), sticky="w")
+        self.lbl_modelo_activo.grid(row=1, column=0, padx=18, pady=(0,4), sticky="w")
+
+        self.opt_modelo = ctk.CTkOptionMenu(
+            sb,
+            values=[
+                "Por Defecto",
+                "Gemini 3.1 Flash Lite",
+                "DeepSeek Reasoner",
+                "Groq Llama 3.3 70B",
+                "Groq Llama 3.1 8B",
+                "Groq Qwen 3.6 27B",
+                "Groq GPT-OSS 120B"
+            ],
+            command=self._on_modelo_changed,
+            font=FONT_UI_SM,
+            fg_color="#1a1a2e",
+            button_color="#23233c",
+            button_hover_color="#303054",
+            dropdown_fg_color="#131324",
+            dropdown_hover_color="#23233c",
+            dropdown_text_color=TEXT_PRIMARY,
+            height=28
+        )
+        self.opt_modelo.grid(row=2, column=0, padx=18, pady=(0, 14), sticky="ew")
+        self.opt_modelo.set("Por Defecto")
 
         ctk.CTkFrame(sb, height=1, fg_color=SIDEBAR_LINE).grid(
-            row=2, column=0, padx=0, sticky="ew")
+            row=3, column=0, padx=0, sticky="ew")
 
         textos_modelos = {
             "general":      "🧠 Modelo: Gemini Flash",
@@ -832,7 +863,7 @@ class OmniApp(ctk.CTk):
             ("💻  Modo Programador", lambda: self._cambiar_modo("programador")),
         ]
         self.botones_ui = []
-        for i, (txt, cmd) in enumerate(botones, start=3):
+        for i, (txt, cmd) in enumerate(botones, start=4):
             btn = ctk.CTkButton(
                 sb, text=txt, anchor="w", font=FONT_UI,
                 fg_color="transparent", hover_color="#16162a",
@@ -844,7 +875,7 @@ class OmniApp(ctk.CTk):
 
         # ── Separador ──────────────────────────────────────────────────
         ctk.CTkFrame(sb, height=1, fg_color=SIDEBAR_LINE).grid(
-            row=6, column=0, padx=0, sticky="ew", pady=(8, 0))
+            row=7, column=0, padx=0, sticky="ew", pady=(8, 0))
 
         # ── Botón Limpiar Contexto ─────────────────────────────────────
         ctk.CTkButton(
@@ -853,7 +884,7 @@ class OmniApp(ctk.CTk):
             fg_color="transparent", hover_color="#16162a",
             text_color=TEXT_DIM, corner_radius=6,
             command=self._limpiar_contexto_directo
-        ).grid(row=7, column=0, padx=10, pady=(4, 2), sticky="ew")
+        ).grid(row=8, column=0, padx=10, pady=(4, 2), sticky="ew")
 
         # ── NUEVO: Botón Manual de Actualización de Memoria ───────────
         ctk.CTkButton(
@@ -862,7 +893,7 @@ class OmniApp(ctk.CTk):
             fg_color="transparent", hover_color="#16162a",
             text_color=TEXT_DIM, corner_radius=6,
             command=self._actualizar_memoria_manual
-        ).grid(row=8, column=0, padx=10, pady=(2, 2), sticky="ew")
+        ).grid(row=9, column=0, padx=10, pady=(2, 2), sticky="ew")
 
         # ── Botón Modo Gaming ──────────────────────────────────────────
         self.btn_gaming = ctk.CTkButton(
@@ -872,20 +903,34 @@ class OmniApp(ctk.CTk):
             text_color=TEXT_DIM, corner_radius=6,
             command=self._toggle_modo_gaming
         )
-        self.btn_gaming.grid(row=9, column=0, padx=10, pady=(4, 2), sticky="ew")
+        self.btn_gaming.grid(row=10, column=0, padx=10, pady=(4, 2), sticky="ew")
 
         # ── Indicador de gamepad ───────────────────────────────────────
         self.lbl_gamepad = ctk.CTkLabel(
             sb, text="🎮 Mando: inactivo",
             font=FONT_UI_SM, text_color=TEXT_DIM
         )
-        self.lbl_gamepad.grid(row=10, column=0, padx=18, pady=(2, 0), sticky="w")
+        self.lbl_gamepad.grid(row=11, column=0, padx=18, pady=(2, 0), sticky="w")
 
         ctk.CTkLabel(
             sb, text="v0.3.1 — Optimizado",
             font=FONT_UI_SM, text_color=TEXT_DIM
-        ).grid(row=12, column=0, padx=18, pady=16, sticky="sw")
-        sb.grid_rowconfigure(12, weight=1)
+        ).grid(row=13, column=0, padx=18, pady=16, sticky="sw")
+        sb.grid_rowconfigure(13, weight=1)
+
+    def _on_modelo_changed(self, valor):
+        state.modelo_seleccionado = valor
+        if valor == "Por Defecto":
+            textos_modelos = {
+                "general":      "🧠 Modelo: Gemini Flash",
+                "programador":  "🧠 Modelo: DeepSeek V4 (Reasoner)",
+                "planificador": "🧠 Modelo: DeepSeek V4 (Reasoner)"
+            }
+            txt = textos_modelos.get(state.modo_actual, "🧠 Modelo: Gemini Flash")
+        else:
+            txt = f"🧠 Modelo: {valor}"
+        self.lbl_modelo_activo.configure(text=txt)
+        self._agregar_sistema(f"🧠 Modelo cambiado a: {valor}")
 
     # ── NUEVO: Actualización manual de memoria (botón en sidebar) ────
     def _actualizar_memoria_manual(self):
@@ -1102,14 +1147,19 @@ class OmniApp(ctk.CTk):
 
         state.modo_actual = nuevo_modo
 
-        textos_modelos = {
-            "general":      "🧠 Modelo: Gemini Flash",
-            "programador":  "🧠 Modelo: DeepSeek V4 (Reasoner)",
-            "planificador": "🧠 Modelo: DeepSeek V4 (Reasoner)"
-        }
-        self.lbl_modelo_activo.configure(
-            text=textos_modelos.get(nuevo_modo, textos_modelos["general"])
-        )
+        if state.modelo_seleccionado == "Por Defecto":
+            textos_modelos = {
+                "general":      "🧠 Modelo: Gemini Flash",
+                "programador":  "🧠 Modelo: DeepSeek V4 (Reasoner)",
+                "planificador": "🧠 Modelo: DeepSeek V4 (Reasoner)"
+            }
+            self.lbl_modelo_activo.configure(
+                text=textos_modelos.get(nuevo_modo, textos_modelos["general"])
+            )
+        else:
+            self.lbl_modelo_activo.configure(
+                text=f"🧠 Modelo: {state.modelo_seleccionado}"
+            )
 
         self._agregar_sistema(f"🔁 Cambiado a modo {nuevo_modo.upper()}")
 

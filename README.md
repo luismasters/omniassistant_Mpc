@@ -8,7 +8,7 @@
 
 - **Interfaz gráfica con CustomTkinter + Web**: Chat con renderizado de Markdown (código, tablas, listas), selección de modo, adjuntar archivos, guardar en memoria. También incluye una **interfaz web** (`main_web.py`) accesible desde el navegador.
 - **Voz completa**: Captura con Whisper (GPU acelerada), síntesis con Edge TTS, reproducción con cola thread-safe y corte por tecla.
-- **Modelos duales**: Gemini 3.1 Flash Lite (modo General) y DeepSeek Reasoner (modos Programador/Planificador).
+- **Modelos múltiples**: Gemini 3.1 Flash Lite, DeepSeek Reasoner y soporte integrado para Groq (Llama 3.3, Llama 3.1, Qwen 3.6, GPT-OSS) seleccionables directamente desde un menú desplegable en la GUI.
 - **Memoria persistente (ChromaDB)**: Guardado y búsqueda de recuerdos con caché de embeddings.
 - **Control de sistema**: Abrir/cerrar/mover ventanas, explorar directorios, apagar PC, búsqueda inteligente de programas.
 - **Control de audio**: Volumen maestro y por aplicación (pycaw), cambio de dispositivo de salida.
@@ -59,12 +59,14 @@ Crear un archivo `.env` en la raíz del proyecto con:
 ```env
 GEMINI_API_KEY=tu_api_key_de_gemini
 DEEPSEEK_API_KEY=tu_api_key_de_deepseek
+GROQ_API_KEY=tu_api_key_de_groq
 GITHUB_TOKEN=tu_token_de_github_opcional
 ```
 
 > **Dónde obtener las API Keys:**
 > - Gemini: https://aistudio.google.com/apikey
 > - DeepSeek: https://platform.deepseek.com/api_keys
+> - Groq: https://console.groq.com/keys
 > - GitHub Token: https://github.com/settings/tokens
 
 ### 5. Ejecutar
@@ -98,11 +100,13 @@ python -m pytest tests/ -v
 
 ## 🎮 Modos de uso
 
-| Modo | Modelo | Descripción |
-|------|--------|-------------|
+| Modo | Modelo por Defecto | Descripción |
+|------|--------------------|-------------|
 | **General** | Gemini 3.1 Flash Lite | Asistente cotidiano: chat, web, control de PC, memoria |
 | **Programador** | DeepSeek Reasoner | Edición de código, Git, arquitectura de software |
 | **Planificador** | DeepSeek Reasoner | Planificación, análisis de proyectos, documentación |
+
+> 🧠 **Nota:** Los modelos indicados arriba son los asignados *por defecto*, pero puedes cambiar a cualquiera de los modelos de **Groq** (o forzar el uso de uno específico) usando el selector desplegable de la barra lateral en la interfaz gráfica.
 
 ### Atajos
 

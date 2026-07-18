@@ -6,12 +6,12 @@ Argus es un asistente de IA multimodal avanzado diseñado para el ecosistema Win
 ## 2. Arquitectura
 
 ### Núcleo y Configuración
-*   **`config.py`**: Núcleo de configuración, gestión de estado global thread-safe (`EstadoGlobal` con `threading.Lock`) y límites de seguridad. Proporciona métodos seguros para acceso thread-safe a `contexto_chat`, `archivos_en_memoria`, y contador para extracción de perfil.
-*   **`main_gui.py`**: Interfaz gráfica principal (CustomTkinter) con renderizado de Markdown, padding responsivo, burbujas de usuario/IA, manejo de eventos de teclado, micrófono y gamepad.
+*   **`config.py`**: Núcleo de configuración, gestión de estado global thread-safe (`EstadoGlobal` con `threading.Lock`) y límites de seguridad. Proporciona métodos seguros para acceso thread-safe a `contexto_chat`, `archivos_en_memoria`, `modelo_seleccionado` y contador para extracción de perfil.
+*   **`main_gui.py`**: Interfaz gráfica principal (CustomTkinter) con renderizado de Markdown, selector de modelo activo en el sidebar (dropdown de modelos), padding responsivo, burbujas de usuario/IA, manejo de eventos de teclado, micrófono y gamepad.
 *   **`gestor_boveda.py`**: Script independiente para gestión de la bóveda vectorial (búsqueda y guardado directo).
 
 ### Inteligencia Artificial
-*   **`modulos/ia.py`**: Enrutador central de IA que gestiona la comunicación con Gemini (SDK `google-genai`) y DeepSeek (API compatible OpenAI), con streaming de voz paralelo, herramientas MCP nativas, fallback automático, confirmaciones locales sin juez IA (basadas en palabras clave), e inyección de Skills.
+*   **`modulos/ia.py`**: Enrutador central de IA que gestiona la comunicación con Gemini (SDK `google-genai`), DeepSeek (API compatible OpenAI) y Groq (API compatible OpenAI con soporte de streaming unificado para modelos como Llama y Qwen), con streaming de voz paralelo, herramientas MCP nativas, fallback automático, confirmaciones locales sin juez IA (basadas en palabras clave), e inyección de Skills.
 *   **`modulos/prompts.py`**: Generación de prompts de sistema para cada modo (general, programador, planificador), con contexto de perfil de usuario, workspace y documentos volátiles.
 
 ### Persistencia y Memoria
@@ -42,14 +42,14 @@ Argus es un asistente de IA multimodal avanzado diseñado para el ecosistema Win
 
 ## 3. Estado Actual
 *   **Multimodalidad**: Soporte completo de voz (Whisper STT + Edge TTS), visión (captura de pantalla, integración PIL con SDK google-genai), y entrada por gamepad.
-*   **Modelos**: Integración con Gemini 3.1 Flash Lite (SDK `google-genai`) y DeepSeek V4 (API compatible OpenAI). Fallback automático entre modelos ante bloqueos por safety/PII.
+*   **Modelos**: Integración con Gemini 3.1 Flash Lite (SDK `google-genai`), DeepSeek V4 (API compatible OpenAI) y Groq (API compatible OpenAI con soporte para Llama 3.3 70B, Llama 3.1 8B, Qwen 3.6 27B y GPT-OSS 120B). Fallback automático entre modelos ante bloqueos por safety/PII.
 *   **Perfil de Usuario**: Sistema de hechos atómicos funcional con extracción automática cada 20 mensajes, extracción manual desde UI, filtro de secretos, fusión sin duplicados y consolidación automática.
 *   **Memoria**: Bóveda vectorial (ChromaDB + SentenceTransformer) con búsqueda anticipada, caché de embeddings con TTL, snapshots por proyecto, y radar de cambios con watchdog + debounce.
 *   **Thread Safety**: Todas las mutaciones de `contexto_chat` y `archivos_en_memoria` pasan por métodos thread-safe con lock. El parámetro `contar_para_perfil` permite controlar qué mensajes incrementan el contador de extracción de perfil.
 *   **Control de Archivos**: Guardado, lectura, edición (1 línea), reemplazo de bloques (exacto y flexible), y creación de carpetas. Soporte dual de sintaxis: Markdown nativo y XML.
 *   **Control de Audio**: Gestión completa de volumen maestro, volumen por aplicación, dispositivos de salida, con confirmación por voz del resultado.
 *   **Integración Git**: Add/Commit/Pull/Push, reset forzado, comandos libres, todo con confirmación nativa vía chat (sin juez IA).
-*   **Interfaz**: GUI responsiva con padding dinámico según ancho de ventana, renderizado de Markdown (negrita, itálica, código inline, bloques de código con syntax highlighting, tablas, listas, encabezados), burbujas de usuario con ancho máximo dinámico, y botón de copiado en respuestas de IA.
+*   **Interfaz**: GUI responsiva con padding dinámico según ancho de ventana, menú desplegable (CTkOptionMenu) en la barra lateral para selección de modelo en tiempo real (con sincronización con los módulos de IA), renderizado de Markdown (negrita, itálica, código inline, bloques de código con syntax highlighting, tablas, listas, encabezados), burbujas de usuario con ancho máximo dinámico, y botón de copiado en respuestas de IA.
 *   **Modo Gaming**: Desactiva micrófono de teclado, descarga Whisper de VRAM, activa gamepad con botón L3+R3 para hablar.
 *   **Confirmaciones Locales**: Sistema de confirmación/cancelación de operaciones críticas (borrado, Git, guardado en bóveda) sin llamar a la IA, basado en diccionarios de palabras clave.
 *   **Skills**: Sistema de inyección contextual operativo para búsqueda web y control de audio, con detección por palabras clave.

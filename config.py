@@ -41,6 +41,7 @@ MAX_MENSAJES_CONTEXTO = 25
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 if not GEMINI_API_KEY:
     raise ValueError("⚠️ No se encontró la API Key")
@@ -72,6 +73,7 @@ class EstadoGlobal:
         self._lock = threading.Lock()
         # Atributos públicos (acceso directo pero con locks en los métodos)
         self.modo_actual = "general"
+        self.modelo_seleccionado = "Por Defecto"
         self.workspace_actual = None
         self.snapshot_actual = ""
         self.contexto_chat = []
@@ -157,6 +159,11 @@ class EstadoGlobal:
         """Cambia el modo actual de forma thread-safe."""
         with self._lock:
             self.modo_actual = nuevo_modo
+
+    def cambiar_modelo_seleccionado(self, nuevo_modelo):
+        """Cambia el modelo seleccionado de forma thread-safe."""
+        with self._lock:
+            self.modelo_seleccionado = nuevo_modelo
 
     def cambiar_workspace(self, ruta):
         """Cambia el workspace actual de forma thread-safe."""

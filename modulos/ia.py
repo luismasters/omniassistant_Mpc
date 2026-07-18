@@ -15,7 +15,7 @@ from modulos.logger import logger
 from modulos.skills.gestor_skills import gestor
 
 # Importación de llaves
-from config import GEMINI_API_KEY, DEEPSEEK_API_KEY
+from config import GEMINI_API_KEY, DEEPSEEK_API_KEY, GROQ_API_KEY
 
 from modulos.archivos import eliminar_elemento, leer_contenido_archivo
 from modulos.sistema import obtener_ventanas_activas, obtener_estado_pc, escanear_hardware_completo, explorar_directorio
@@ -53,6 +53,7 @@ gestor_skills = gestor
 # =====================================================================
 cliente_genai = genai.Client(api_key=GEMINI_API_KEY)
 cliente_deepseek = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
+cliente_groq = OpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1") if GROQ_API_KEY else None
 
 # =====================================================================
 # HERRAMIENTAS NATIVAS (GEMINI)
@@ -422,14 +423,33 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 contexto_sistema = obtener_prompt_programador_unificado(
                     texto_workspace, texto_snapshot, texto_doc_volatil, texto_perfil
                 )
-                modelo_activo = "deepseek-reasoner"
             else:
                 ruta_home = os.path.expanduser("~")
                 contexto_sistema = obtener_prompt_general(
                     fecha_hoy, ruta_home, ventanas_abiertas,
                     texto_workspace, texto_snapshot, texto_doc_volatil, texto_perfil
                 )
+
+            # Determinar modelo_activo según la selección del usuario o por defecto
+            modelo_sel = getattr(config.estado, 'modelo_seleccionado', 'Por Defecto')
+            if modelo_sel == "Gemini 3.1 Flash Lite":
                 modelo_activo = "gemini"
+            elif modelo_sel == "DeepSeek Reasoner":
+                modelo_activo = "deepseek-reasoner"
+            elif modelo_sel == "Groq Llama 3.3 70B":
+                modelo_activo = "groq:llama-3.3-70b-versatile"
+            elif modelo_sel == "Groq Llama 3.1 8B":
+                modelo_activo = "groq:llama-3.1-8b-instant"
+            elif modelo_sel == "Groq Qwen 3.6 27B":
+                modelo_activo = "groq:qwen/qwen3.6-27b"
+            elif modelo_sel == "Groq GPT-OSS 120B":
+                modelo_activo = "groq:openai/gpt-oss-120b"
+            else:
+                # "Por Defecto" -> usa los del modo
+                if MODO_ACTUAL in ["programador", "planificador"]:
+                    modelo_activo = "deepseek-reasoner"
+                else:
+                    modelo_activo = "gemini"
 
             # ─── INYECCIÓN DE SKILLS ──────────────────────────────────────────
             skill_info = gestor_skills.obtener_skill_relevante(texto_usuario)
@@ -713,8 +733,19 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                             ui_callback("⚙️ Sistema", f"❌ Error en generación MCP: {str(e)[:80]}", "#FF4500")
                         error_ocurrido = True
 
-            # ─── DEEPSEEK ──────────────────────────────────────────────────────
+            # ─── DEEPSEEK O GROQ ────────────────────────────────────────────────
             else:
+                if modelo_activo.startswith("groq:"):
+                    if not cliente_groq:
+                        raise ValueError("API Key de Groq (GROQ_API_KEY) no configurada en el archivo .env.")
+                    client_to_use = cliente_groq
+                    api_model_name = modelo_activo.split("groq:")[1]
+                    ui_title = "🤖 Argus (Groq)"
+                else:
+                    client_to_use = cliente_deepseek
+                    api_model_name = modelo_activo
+                    ui_title = "🤖 Argus"
+
                 mensajes_ds = [{"role": "system", "content": contexto_sistema}]
                 for msg in CONTEXTO_CHAT:
                     rol_ds = "assistant" if msg['role'] == "model" else "user"
@@ -723,23 +754,23 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 mensajes_ds.append({"role": "user", "content": texto_usuario})
 
                 if ui_callback:
-                    ui_callback("🤖 Argus", "", "#A8C7FA", nueva_linea=False)
+                    ui_callback(ui_title, "", "#A8C7FA", nueva_linea=False)
 
                 try:
-                    parametros_api = {"model": modelo_activo, "messages": mensajes_ds, "stream": True}
-                    response = cliente_deepseek.chat.completions.create(**parametros_api)
+                    parametros_api = {"model": api_model_name, "messages": mensajes_ds, "stream": True}
+                    response = client_to_use.chat.completions.create(**parametros_api)
                 except Exception as e:
                     err_str = str(e)
                     if "RateLimitError" in err_str or "429" in err_str:
                         if ui_callback:
-                            ui_callback("⚙️ Sistema", "⚠️ Rate limit DeepSeek. Esperá un momento.", "#FFA500")
+                            ui_callback("⚙️ Sistema", f"⚠️ Rate limit en {ui_title}. Esperá un momento.", "#FFA500")
                     elif "AuthenticationError" in err_str or "401" in err_str:
                         if ui_callback:
-                            ui_callback("⚙️ Sistema", "❌ Error de autenticación DeepSeek.", "#FF4500")
+                            ui_callback("⚙️ Sistema", f"❌ Error de autenticación en {ui_title}.", "#FF4500")
                     else:
                         if ui_callback:
-                            ui_callback("⚙️ Sistema", f"❌ Error DeepSeek: {err_str[:100]}", "#FF4500")
-                    logger.exception("Error al iniciar generación en DeepSeek")
+                            ui_callback("⚙️ Sistema", f"❌ Error en {ui_title}: {err_str[:100]}", "#FF4500")
+                    logger.exception(f"Error al iniciar generación en {ui_title}")
                     error_ocurrido = True
                     return
 
@@ -760,12 +791,12 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                     buffer_voz_ds += texto_chunk
                                     buffer_voz_ds = _procesar_buffer_voz(buffer_voz_ds, forzar=False)
                         except Exception as e:
-                            logger.exception("Error procesando chunk de DeepSeek")
+                            logger.exception(f"Error procesando chunk de {ui_title}")
                             if ui_callback:
                                 ui_callback("⚙️ Sistema", f"❌ Error en streaming: {str(e)[:80]}", "#FF4500")
                             break
                 except Exception as e:
-                    logger.exception("Error en el bucle de streaming de DeepSeek")
+                    logger.exception(f"Error en el bucle de streaming de {ui_title}")
                     if ui_callback:
                         ui_callback("⚙️ Sistema", f"❌ Error en el streaming: {str(e)[:80]}", "#FF4500")
                     error_ocurrido = True
