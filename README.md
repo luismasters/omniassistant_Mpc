@@ -6,7 +6,7 @@
 
 ## ✨ Características principales
 
-- **Interfaz gráfica con CustomTkinter + Web**: Chat con renderizado de Markdown (código, tablas, listas), selección de modo, adjuntar archivos, guardar en memoria. También incluye una **interfaz web** (`main_web.py`) accesible desde el navegador.
+- **Interfaz gráfica con CustomTkinter + Web**: Chat con renderizado de Markdown (código, tablas, listas), selección de modo, adjuntar archivos, guardar en memoria. Integra en la cabecera de la barra lateral la **pantalla interactiva EMO** con expresiones y animaciones vectoriales fluidas en tiempo real (reposo, escucha, pensamiento, habla, confirmaciones de SO y errores). También incluye una **interfaz web** (`main_web.py`) accesible desde el navegador.
 - **Voz completa**: Captura con Whisper (GPU acelerada), síntesis con Edge TTS, reproducción con cola thread-safe y corte por tecla.
 - **Modelos múltiples**: Gemini 3.1 Flash Lite, DeepSeek Reasoner y soporte integrado para Groq (Llama 3.3, Llama 3.1, Qwen 3.6, GPT-OSS) seleccionables directamente desde un menú desplegable en la GUI.
 - **Memoria persistente (ChromaDB)**: Guardado y búsqueda de recuerdos con caché de embeddings.
@@ -148,6 +148,7 @@ OmniAssistant/
 ├── main_gui.py                # Interfaz gráfica principal (CustomTkinter)
 ├── main_web.py                # Interfaz web alternativa
 ├── gestor_boveda.py           # CLI para gestión de memoria
+├── test_emo_face.py           # Prototipo autónomo de pruebas para el rostro EMO
 ├── requirements.txt           # Dependencias del proyecto
 ├── .env                       # API Keys (no versionado)
 ├── web/

@@ -110,9 +110,12 @@ def _hilo_reproductor_global():
 
     while True:
         try:
-            archivo_mp3 = _cola_reproduccion.get(timeout=0.5)
+            archivo_mp3 = _cola_reproduccion.get(timeout=0.2)
         except queue.Empty:
-            if not hablando_actualmente:
+            with _secuencia_lock:
+                sigue_sintetizando = (_siguiente_a_reproducir < _contador_secuencia)
+            if not sigue_sintetizando and not pygame.mixer.music.get_busy() and _cola_reproduccion.empty():
+                hablando_actualmente = False
                 break
             continue
 

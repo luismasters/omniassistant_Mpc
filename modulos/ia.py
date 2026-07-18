@@ -646,6 +646,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                         texto_historico = "".join([p for p in msg['parts'] if isinstance(p, str)])
                         mensajes_ds.append({"role": rol_ds, "content": texto_historico})
                     mensajes_ds.append({"role": "user", "content": texto_usuario})
+                    buffer_voz_fallback = ""
                     try:
                         response = cliente_deepseek.chat.completions.create(
                             model="deepseek-chat", messages=mensajes_ds, stream=True
@@ -660,11 +661,17 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                 respuesta_ia += texto_chunk
                                 if ui_callback:
                                     ui_callback("", texto_chunk, "#E8EAED", nueva_linea=False)
+                                if modo_voz:
+                                    buffer_voz_fallback += texto_chunk
+                                    buffer_voz_fallback = _procesar_buffer_voz(buffer_voz_fallback, forzar=False)
                     except Exception as e:
                         logger.exception("Error en fallback DeepSeek")
                         if ui_callback:
                             ui_callback("⚙️ Sistema", f"❌ Fallback DeepSeek falló: {str(e)[:100]}", "#FF4500")
                         respuesta_ia = "⚠️ Lo siento, la API bloqueó esta respuesta por políticas de seguridad."
+                    finally:
+                        if modo_voz and buffer_voz_fallback.strip():
+                            _procesar_buffer_voz(buffer_voz_fallback, forzar=True)
 
                 # ─── MCP SEGUNDA RONDA ────────────────────────────────────────
                 if usaste_mcp and not error_ocurrido and not skill_activa:

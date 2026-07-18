@@ -229,6 +229,423 @@ def _parse_table(lines):
         rows.append(cells)
     return rows if len(rows) >= 2 else None
 
+class EmoBezelFace(ctk.CTkFrame):
+    def __init__(self, parent, **kwargs):
+        super().__init__(parent, fg_color="#0d0d0d", border_width=0, **kwargs)
+        import math
+        import random
+        
+        self.ancho = 180
+        self.alto = 120
+        
+        # Canvas negro absoluto
+        self.canvas = tk.Canvas(
+            self, width=self.ancho, height=self.alto, 
+            bg="#000000", highlightthickness=0
+        )
+        self.canvas.pack(pady=4)
+        
+        # --- Configuración Proporcional según Imagen de EMO ---
+        self.izq_cx = 73
+        self.der_cx = 107
+        self.izq_cy = 52  
+        self.der_cy = 52
+        
+        self.boca_cx = 90
+        self.boca_cy = 82
+        
+        self.base_rx = 13.5
+        self.base_ry = 15.0
+        self.corner_radius = 6
+        
+        # --- Físicas e Interpolaciones ---
+        self.estado = "idle"
+        self.tiempo = 0.0
+        self.tiempo_lagrima = 0.0
+        self.msg_confirmacion = "HECHO"
+        
+        # Escala de ojos (X, Y)
+        self.cur_zoom_x_izq, self.tgt_zoom_x_izq = 1.0, 1.0
+        self.cur_zoom_y_izq, self.tgt_zoom_y_izq = 1.0, 1.0
+        self.cur_zoom_x_der, self.tgt_zoom_x_der = 1.0, 1.0
+        self.cur_zoom_y_der, self.tgt_zoom_y_der = 1.0, 1.0
+        
+        # Desplazamiento de mirada en bloque (Saccades)
+        self.cur_look_x, self.tgt_look_x = 0.0, 0.0
+        self.cur_look_y, self.tgt_look_y = 0.0, 0.0
+        
+        # Colores temáticos neón según emoción
+        self.colores = {
+            "idle": "#00f0ff",      # Cyan EMO
+            "listening": "#00f0ff", # Cyan EMO
+            "thinking": "#bd00ff",  # Púrpura
+            "talking": "#39ff14",   # Verde
+            "happy": "#00ffcc",     # Turquesa
+            "angry": "#ff5500",     # Naranja
+            "sad": "#3b82f6",       # Azul
+            "error": "#ff0033",     # Rojo
+            "confirm": "#39ff14"    # Verde confirmación
+        }
+        
+        # Iniciar bucles
+        self.loop_render()
+        self.loop_parpadeo()
+        self.loop_saccades()
+
+    def cambiar_estado(self, nuevo_estado, msg=""):
+        self.estado = nuevo_estado
+        self.tiempo = 0.0
+        self.tiempo_lagrima = 0.0
+        self.tgt_look_x = 0.0
+        self.tgt_look_y = 0.0
+        
+        if msg:
+            self.msg_confirmacion = msg
+        
+        if nuevo_estado == "idle":
+            self.tgt_zoom_x_izq = 1.0
+            self.tgt_zoom_y_izq = 1.0
+            self.tgt_zoom_x_der = 1.0
+            self.tgt_zoom_y_der = 1.0
+            
+        elif nuevo_estado == "listening":
+            self.tgt_zoom_x_izq = 1.12
+            self.tgt_zoom_y_izq = 1.12
+            self.tgt_zoom_x_der = 1.12
+            self.tgt_zoom_y_der = 1.12
+            
+        elif nuevo_estado == "thinking":
+            self.tgt_zoom_x_izq = 0.95
+            self.tgt_zoom_y_izq = 0.85
+            self.tgt_zoom_x_der = 0.95
+            self.tgt_zoom_y_der = 0.85
+            self.tgt_look_x = -4.0
+            self.tgt_look_y = -3.0
+            
+        elif nuevo_estado == "talking":
+            self.tgt_zoom_x_izq = 1.0
+            self.tgt_zoom_y_izq = 1.0
+            self.tgt_zoom_x_der = 1.0
+            self.tgt_zoom_y_der = 1.0
+            
+        elif nuevo_estado == "happy":
+            self.tgt_zoom_x_izq = 1.0
+            self.tgt_zoom_y_izq = 1.0
+            self.tgt_zoom_x_der = 1.0
+            self.tgt_zoom_y_der = 1.0
+            
+        elif nuevo_estado == "angry":
+            self.tgt_zoom_x_izq = 1.0
+            self.tgt_zoom_y_izq = 0.8
+            self.tgt_zoom_x_der = 1.0
+            self.tgt_zoom_y_der = 0.8
+            
+        elif nuevo_estado == "sad":
+            self.tgt_zoom_x_izq = 0.95
+            self.tgt_zoom_y_izq = 0.85
+            self.tgt_zoom_x_der = 0.95
+            self.tgt_zoom_y_der = 0.85
+            self.tgt_look_y = 2.0
+            
+        elif nuevo_estado == "error":
+            self.tgt_zoom_x_izq = 0.85
+            self.tgt_zoom_y_izq = 0.85
+            self.tgt_zoom_x_der = 0.85
+            self.tgt_zoom_y_der = 0.85
+            
+        elif nuevo_estado == "confirm":
+            self.tgt_zoom_x_izq = 1.1
+            self.tgt_zoom_y_izq = 1.1
+            self.tgt_zoom_x_der = 1.1
+            self.tgt_zoom_y_der = 1.1
+
+    def loop_render(self):
+        import math
+        import random
+        
+        self.canvas.delete("all")
+        self.tiempo += 0.04
+        self.tiempo_lagrima = (self.tiempo_lagrima + 0.3) % 20.0
+        
+        # Detección automática del estado "talking" basándose en el motor de audio
+        if self.estado not in ["confirm", "error", "thinking", "listening"]:
+            if audio_modulo.hablando_actualmente:
+                if self.estado != "talking":
+                    self.cambiar_estado("talking")
+            else:
+                if self.estado == "talking":
+                    self.cambiar_estado("idle")
+        
+        # Interpolaciones de escala y mirada
+        self.cur_zoom_x_izq += (self.tgt_zoom_x_izq - self.cur_zoom_x_izq) * 0.20
+        self.cur_zoom_y_izq += (self.tgt_zoom_y_izq - self.cur_zoom_y_izq) * 0.20
+        self.cur_zoom_x_der += (self.tgt_zoom_x_der - self.cur_zoom_x_der) * 0.20
+        self.cur_zoom_y_der += (self.tgt_zoom_y_der - self.cur_zoom_y_der) * 0.20
+        
+        self.cur_look_x += (self.tgt_look_x - self.cur_look_x) * 0.20
+        self.cur_look_y += (self.tgt_look_y - self.cur_look_y) * 0.20
+        
+        zx_i, zy_i = self.cur_zoom_x_izq, self.cur_zoom_y_izq
+        zx_d, zy_d = self.cur_zoom_x_der, self.cur_zoom_y_der
+        
+        # Temblores en error/guiño
+        err_x = 0; err_y = 0
+        if self.estado == "error":
+            err_x = random.randint(-1, 1)
+            err_y = random.randint(-1, 1)
+        elif self.estado == "confirm":
+            err_y = int(1.5 * math.sin(self.tiempo * 20))
+            
+        cy_i = self.izq_cy + err_y
+        cy_d = self.der_cy + err_y
+        
+        # Respiración en Idle
+        if self.estado == "idle":
+            resp = 1.0 + 0.02 * math.sin(self.tiempo * 2)
+            zx_i *= resp; zy_i *= resp
+            zx_d *= resp; zy_d *= resp
+            
+        # Animación de ojos al hablar
+        elif self.estado == "talking":
+            onda = 0.95 + 0.06 * abs(math.sin(self.tiempo * 15))
+            zy_i *= onda
+            zy_d *= onda
+            
+        # Flotación en Listening
+        elif self.estado == "listening":
+            flot = 2.0 * math.sin(self.tiempo * 3)
+            cy_i += flot
+            cy_d += flot
+
+        cx_izq = self.izq_cx + self.cur_look_x + err_x
+        cx_der = self.der_cx + self.cur_look_x + err_x
+
+        color = self.colores.get(self.estado, "#00f0ff")
+
+        # 1. Dibujar Contorno Grisáceo de EMO (Marco Plateado/Gris Estático)
+        self.dibujar_contorno_gris_emo()
+
+        # 2. Dibujar Ojos / Guiño (Wink) en Confirmación
+        self.dibujar_ojo_intellar(cx_izq, cy_i, self.base_rx * zx_i, self.base_ry * zy_i, color, izquierdo=True)
+        self.dibujar_ojo_intellar(cx_der, cy_d, self.base_rx * zx_d, self.base_ry * zy_d, color, izquierdo=False)
+        
+        # 3. Dibujar Boca
+        boca_x = self.boca_cx + self.cur_look_x * 0.7 + err_x
+        boca_y = self.boca_cy + self.cur_look_y * 0.5 + err_y
+        self.dibujar_boca_eilik(boca_x, boca_y, color)
+        
+        # 4. Si es modo CONFIRM, dibujar texto de acción truncado/limpio
+        if self.estado == "confirm":
+            msg_disp = self.msg_confirmacion
+            if len(msg_disp) > 28:
+                msg_disp = msg_disp[:25] + "..."
+            self.canvas.create_text(
+                self.ancho // 2, 106,
+                text=msg_disp.upper(),
+                font=("Consolas", 7, "bold"),
+                fill=color, justify="center"
+            )
+        
+        if self.estado == "error" and random.random() < 0.12:
+            self.canvas.delete("all")
+            
+        self.after(20, self.loop_render)
+
+    def dibujar_contorno_gris_emo(self):
+        """Dibuja un contorno redondeado grisáceo/plateado de 4px."""
+        x1, y1 = 30, 12
+        x2, y2 = 150, 108
+        r = 18
+        c_gris_oscuro = "#5a5a63"
+        c_plateado = "#9ca3af"
+        
+        # Borde gris oscuro
+        self.canvas.create_arc(x1, y1, x1 + 2*r, y1 + 2*r, start=90, extent=90, style="arc", outline=c_gris_oscuro, width=4)
+        self.canvas.create_arc(x2 - 2*r, y1, x2, y1 + 2*r, start=0, extent=90, style="arc", outline=c_gris_oscuro, width=4)
+        self.canvas.create_arc(x1, y2 - 2*r, x1 + 2*r, y2, start=180, extent=90, style="arc", outline=c_gris_oscuro, width=4)
+        self.canvas.create_arc(x2 - 2*r, y2 - 2*r, x2, y2, start=270, extent=90, style="arc", outline=c_gris_oscuro, width=4)
+        self.canvas.create_line(x1 + r, y1, x2 - r, y1, fill=c_gris_oscuro, width=4)
+        self.canvas.create_line(x1 + r, y2, x2 - r, y2, fill=c_gris_oscuro, width=4)
+        self.canvas.create_line(x1, y1 + r, x1, y2 - r, fill=c_gris_oscuro, width=4)
+        self.canvas.create_line(x2, y1 + r, x2, y2 - r, fill=c_gris_oscuro, width=4)
+        
+        # Línea de brillo plateado
+        self.canvas.create_arc(x1, y1, x1 + 2*r, y1 + 2*r, start=90, extent=90, style="arc", outline=c_plateado, width=1.5)
+        self.canvas.create_arc(x2 - 2*r, y1, x2, y1 + 2*r, start=0, extent=90, style="arc", outline=c_plateado, width=1.5)
+        self.canvas.create_arc(x1, y2 - 2*r, x1 + 2*r, y2, start=180, extent=90, style="arc", outline=c_plateado, width=1.5)
+        self.canvas.create_arc(x2 - 2*r, y2 - 2*r, x2, y2, start=270, extent=90, style="arc", outline=c_plateado, width=1.5)
+        self.canvas.create_line(x1 + r, y1, x2 - r, y1, fill=c_plateado, width=1.5)
+        self.canvas.create_line(x1 + r, y2, x2 - r, y2, fill=c_plateado, width=1.5)
+        self.canvas.create_line(x1, y1 + r, x1, y2 - r, fill=c_plateado, width=1.5)
+        self.canvas.create_line(x2, y1 + r, x2, y2 - r, fill=c_plateado, width=1.5)
+
+    def dibujar_ojo_intellar(self, cx, cy, rx, ry, color, izquierdo=True):
+        import math
+        
+        if rx <= 0 or ry <= 0:
+            return
+            
+        if self.estado == "confirm":
+            if izquierdo:
+                # Guiño: Arco feliz
+                self.canvas.create_arc(
+                    cx - rx, cy - ry + 6, cx + rx, cy + ry + 6,
+                    start=30, extent=120, style="arc",
+                    outline=color, width=5.0
+                )
+                self.canvas.create_arc(
+                    cx - rx, cy - ry + 6, cx + rx, cy + ry + 6,
+                    start=35, extent=110, style="arc",
+                    outline="#ffffff", width=1.5
+                )
+            else:
+                # Ojo derecho normal
+                x1, y1 = cx - rx, cy - ry
+                x2, y2 = cx + rx, cy + ry
+                r = min(self.corner_radius, rx, ry)
+                self.canvas.create_oval(x1, y1, x1 + 2*r, y1 + 2*r, fill=color, outline="")
+                self.canvas.create_oval(x2 - 2*r, y1, x2, y1 + 2*r, fill=color, outline="")
+                self.canvas.create_oval(x1, y2 - 2*r, x1 + 2*r, y2, fill=color, outline="")
+                self.canvas.create_oval(x2 - 2*r, y2 - 2*r, x2, y2, fill=color, outline="")
+                self.canvas.create_rectangle(x1 + r, y1, x2 - r, y2, fill=color, outline="")
+                self.canvas.create_rectangle(x1, y1 + r, x2, y2 - r, fill=color, outline="")
+            return
+            
+        if self.estado == "happy":
+            self.canvas.create_arc(
+                cx - rx, cy - ry + 6, cx + rx, cy + ry + 6,
+                start=30, extent=120, style="arc",
+                outline=color, width=5.0
+            )
+            self.canvas.create_arc(
+                cx - rx, cy - ry + 6, cx + rx, cy + ry + 6,
+                start=35, extent=110, style="arc",
+                outline="#ffffff", width=1.5
+            )
+            return
+
+        x1, y1 = cx - rx, cy - ry
+        x2, y2 = cx + rx, cy + ry
+        r = min(self.corner_radius, rx, ry)
+        
+        self.canvas.create_oval(x1, y1, x1 + 2*r, y1 + 2*r, fill=color, outline="")
+        self.canvas.create_oval(x2 - 2*r, y1, x2, y1 + 2*r, fill=color, outline="")
+        self.canvas.create_oval(x1, y2 - 2*r, x1 + 2*r, y2, fill=color, outline="")
+        self.canvas.create_oval(x2 - 2*r, y2 - 2*r, x2, y2, fill=color, outline="")
+        
+        self.canvas.create_rectangle(x1 + r, y1, x2 - r, y2, fill=color, outline="")
+        self.canvas.create_rectangle(x1, y1 + r, x2, y2 - r, fill=color, outline="")
+        
+        # Máscaras de recorte
+        if self.estado == "angry":
+            dir_c = 1 if izquierdo else -1
+            pts = [
+                cx - rx - 5, cy - ry - 5 + (6 * dir_c),
+                cx + rx + 5, cy - ry - 5 - (6 * dir_c),
+                cx + rx + 5, cy - ry + 2,
+                cx - rx - 5, cy - ry + 2
+            ]
+            self.canvas.create_polygon(pts, fill="#000000", outline="")
+            
+        elif self.estado in ["sad", "error"]:
+            dir_c = 1 if izquierdo else -1
+            pts = [
+                cx - rx - 5, cy - ry - 5 - (5 * dir_c),
+                cx + rx + 5, cy - ry - 5 + (5 * dir_c),
+                cx + rx + 5, cy - ry + 4,
+                cx - rx - 5, cy - ry + 4
+            ]
+            self.canvas.create_polygon(pts, fill="#000000", outline="")
+            
+            # Lágrima deslizante
+            if self.estado == "sad":
+                tx = cx - rx * 0.5 if izquierdo else cx + rx * 0.5
+                ty = cy + ry * 0.8 + self.tiempo_lagrima * 0.5
+                self.canvas.create_oval(tx - 2.0, ty, tx + 2.0, ty + 6.0, fill="#3b82f6", outline="")
+                self.canvas.create_polygon(tx - 2.0, ty + 2, tx, ty - 1, tx + 2.0, ty + 2, fill="#3b82f6", outline="")
+
+    def dibujar_boca_eilik(self, cx, cy, color):
+        import math
+        
+        if self.estado == "happy" or self.estado == "confirm":
+            self.canvas.create_arc(
+                cx - 10, cy - 7, cx + 10, cy + 7,
+                start=180, extent=180, style="pieslice",
+                fill=color, outline=""
+            )
+            self.canvas.create_line(
+                cx - 10, cy, cx + 10, cy,
+                fill="#ffffff", width=1.5, capstyle="round"
+            )
+            
+        elif self.estado in ["sad", "angry"]:
+            self.canvas.create_arc(
+                cx - 8, cy, cx + 8, cy + 10,
+                start=0, extent=180, style="arc",
+                outline=color, width=2.5
+            )
+            
+        elif self.estado == "listening":
+            r_dot = 2.5 + 1.0 * math.sin(self.tiempo * 3.5)
+            self.canvas.create_oval(
+                cx - r_dot, cy - r_dot, cx + r_dot, cy + r_dot,
+                fill=color, outline=""
+            )
+            
+        elif self.estado == "talking":
+            ancho_col = 3.0
+            espaciado = 5
+            for i in range(-2, 3):
+                fase = abs(i)
+                h = 2.5 + 10.0 * abs(math.sin(self.tiempo * 15 - fase * 0.7))
+                x = cx + i * espaciado
+                self.canvas.create_line(
+                    x, cy - h/2, x, cy + h/2,
+                    fill=color, width=ancho_col, capstyle="round"
+                )
+            
+        elif self.estado == "error":
+            self.canvas.create_line(
+                cx - 9, cy, cx - 4, cy - 2, cx, cy + 2, cx + 4, cy - 2, cx + 9, cy,
+                fill=color, width=2.5, capstyle="round"
+            )
+            
+        else: # idle, thinking
+            self.canvas.create_line(
+                cx - 7, cy, cx + 7, cy,
+                fill=color, width=2.5, capstyle="round"
+            )
+
+    def loop_parpadeo(self):
+        import random
+        if self.estado in ["idle", "listening", "talking", "happy", "confirm"]:
+            ant_y_izq = self.tgt_zoom_y_izq
+            ant_y_der = self.tgt_zoom_y_der
+            
+            self.tgt_zoom_y_izq = 0.01
+            self.tgt_zoom_y_der = 0.01
+            
+            self.after(90, lambda: self.restaurar_ojos(ant_y_izq, ant_y_der))
+            
+        self.after(random.randint(2500, 6000), self.loop_parpadeo)
+
+    def restaurar_ojos(self, y_izq, y_der):
+        if self.estado in ["idle", "listening", "talking", "happy", "confirm"]:
+            self.tgt_zoom_y_izq = y_izq
+            self.tgt_zoom_y_der = y_der
+
+    def loop_saccades(self):
+        import random
+        if self.estado in ["idle", "listening"]:
+            if random.random() < 0.65:
+                self.tgt_look_x = random.uniform(-6.0, 6.0)
+                self.tgt_look_y = random.uniform(-3.0, 3.0)
+            else:
+                self.tgt_look_x = 0.0
+                self.tgt_look_y = 0.0
+                
+        self.after(random.randint(1200, 3500), self.loop_saccades)
+
 class CodeBlock(ctk.CTkFrame):
     def __init__(self, parent, code, lang="", **kwargs):
         super().__init__(parent, fg_color=BG_CODE, corner_radius=8,
@@ -664,6 +1081,8 @@ class OmniApp(ctk.CTk):
         self.grid_rowconfigure(0, weight=1)
 
         self._modo_pausa_gaming = False
+        self._buffer_inicio_ia = ""
+        self._emocion_extraida = False
 
         # ─── Padding responsivo del chat ─────────────────────────────────
         # Se recalcula dinámicamente según el ancho real de la ventana en
@@ -738,7 +1157,11 @@ class OmniApp(ctk.CTk):
     def _activar_voz_desde_gamepad(self, condicion_sigue_presionado):
         if audio_modulo.hablando_actualmente:
             detener_voz()
+        self.after(0, lambda: self.face_widget.cambiar_estado("listening"))
+        self._buffer_inicio_ia = ""
+        self._emocion_extraida = False
         texto_voz = capturar_voz_micro(condicion_seguir_grabando=condicion_sigue_presionado)
+        self.after(0, lambda: self.face_widget.cambiar_estado("thinking" if texto_voz else "idle"))
         if texto_voz:
             self.after(0, self._agregar_usuario, f"🎮 {texto_voz}")
             self.burbuja_ia_actual = None
@@ -814,13 +1237,17 @@ class OmniApp(ctk.CTk):
         sb.grid(row=0, column=0, rowspan=2, sticky="nsew")
         sb.grid_columnconfigure(0, weight=1)
 
+        # NUEVO: Cara interactiva de EMO en el sidebar
+        self.face_widget = EmoBezelFace(sb)
+        self.face_widget.grid(row=0, column=0, pady=(15, 5))
+
         ctk.CTkLabel(sb, text="◆ Argus", font=(_F, TAMANO_BASE, "bold"),
-                     text_color=ACCENT).grid(row=0, column=0, padx=18, pady=(24,2), sticky="w")
+                     text_color=ACCENT).grid(row=1, column=0, padx=18, pady=(12,2), sticky="w")
         self.lbl_modelo_activo = ctk.CTkLabel(
             sb, text="🧠 Modelo: Gemini Flash",
             font=FONT_UI_SM, text_color="#86efac"
         )
-        self.lbl_modelo_activo.grid(row=1, column=0, padx=18, pady=(0,4), sticky="w")
+        self.lbl_modelo_activo.grid(row=2, column=0, padx=18, pady=(0,4), sticky="w")
 
         self.opt_modelo = ctk.CTkOptionMenu(
             sb,
@@ -843,11 +1270,11 @@ class OmniApp(ctk.CTk):
             dropdown_text_color=TEXT_PRIMARY,
             height=28
         )
-        self.opt_modelo.grid(row=2, column=0, padx=18, pady=(0, 14), sticky="ew")
+        self.opt_modelo.grid(row=3, column=0, padx=18, pady=(0, 14), sticky="ew")
         self.opt_modelo.set("Por Defecto")
 
         ctk.CTkFrame(sb, height=1, fg_color=SIDEBAR_LINE).grid(
-            row=3, column=0, padx=0, sticky="ew")
+            row=4, column=0, padx=0, sticky="ew")
 
         textos_modelos = {
             "general":      "🧠 Modelo: Gemini Flash",
@@ -863,7 +1290,7 @@ class OmniApp(ctk.CTk):
             ("💻  Modo Programador", lambda: self._cambiar_modo("programador")),
         ]
         self.botones_ui = []
-        for i, (txt, cmd) in enumerate(botones, start=4):
+        for i, (txt, cmd) in enumerate(botones, start=5):
             btn = ctk.CTkButton(
                 sb, text=txt, anchor="w", font=FONT_UI,
                 fg_color="transparent", hover_color="#16162a",
@@ -875,7 +1302,7 @@ class OmniApp(ctk.CTk):
 
         # ── Separador ──────────────────────────────────────────────────
         ctk.CTkFrame(sb, height=1, fg_color=SIDEBAR_LINE).grid(
-            row=7, column=0, padx=0, sticky="ew", pady=(8, 0))
+            row=8, column=0, padx=0, sticky="ew", pady=(8, 0))
 
         # ── Botón Limpiar Contexto ─────────────────────────────────────
         ctk.CTkButton(
@@ -884,7 +1311,7 @@ class OmniApp(ctk.CTk):
             fg_color="transparent", hover_color="#16162a",
             text_color=TEXT_DIM, corner_radius=6,
             command=self._limpiar_contexto_directo
-        ).grid(row=8, column=0, padx=10, pady=(4, 2), sticky="ew")
+        ).grid(row=9, column=0, padx=10, pady=(4, 2), sticky="ew")
 
         # ── NUEVO: Botón Manual de Actualización de Memoria ───────────
         ctk.CTkButton(
@@ -893,7 +1320,7 @@ class OmniApp(ctk.CTk):
             fg_color="transparent", hover_color="#16162a",
             text_color=TEXT_DIM, corner_radius=6,
             command=self._actualizar_memoria_manual
-        ).grid(row=9, column=0, padx=10, pady=(2, 2), sticky="ew")
+        ).grid(row=10, column=0, padx=10, pady=(2, 2), sticky="ew")
 
         # ── Botón Modo Gaming ──────────────────────────────────────────
         self.btn_gaming = ctk.CTkButton(
@@ -903,20 +1330,20 @@ class OmniApp(ctk.CTk):
             text_color=TEXT_DIM, corner_radius=6,
             command=self._toggle_modo_gaming
         )
-        self.btn_gaming.grid(row=10, column=0, padx=10, pady=(4, 2), sticky="ew")
+        self.btn_gaming.grid(row=11, column=0, padx=10, pady=(4, 2), sticky="ew")
 
         # ── Indicador de gamepad ───────────────────────────────────────
         self.lbl_gamepad = ctk.CTkLabel(
             sb, text="🎮 Mando: inactivo",
             font=FONT_UI_SM, text_color=TEXT_DIM
         )
-        self.lbl_gamepad.grid(row=11, column=0, padx=18, pady=(2, 0), sticky="w")
+        self.lbl_gamepad.grid(row=12, column=0, padx=18, pady=(2, 0), sticky="w")
 
         ctk.CTkLabel(
             sb, text="v0.3.1 — Optimizado",
             font=FONT_UI_SM, text_color=TEXT_DIM
-        ).grid(row=13, column=0, padx=18, pady=16, sticky="sw")
-        sb.grid_rowconfigure(13, weight=1)
+        ).grid(row=14, column=0, padx=18, pady=16, sticky="sw")
+        sb.grid_rowconfigure(14, weight=1)
 
     def _on_modelo_changed(self, valor):
         state.modelo_seleccionado = valor
@@ -1391,7 +1818,11 @@ class OmniApp(ctk.CTk):
                 if keyboard.is_pressed(TECLA_HABLAR):
                     if audio_modulo.hablando_actualmente:
                         detener_voz()
+                    self.after(0, lambda: self.face_widget.cambiar_estado("listening"))
+                    self._buffer_inicio_ia = ""
+                    self._emocion_extraida = False
                     texto_voz = capturar_voz_micro()
+                    self.after(0, lambda: self.face_widget.cambiar_estado("thinking" if texto_voz else "idle"))
                     if texto_voz:
                         self.after(0, self._agregar_usuario, f"🎤 {texto_voz}")
                         self.burbuja_ia_actual = None
@@ -1420,6 +1851,9 @@ class OmniApp(ctk.CTk):
         self._texto_real = ""
         self._agregar_usuario(texto)
         self.burbuja_ia_actual = None
+        self.face_widget.cambiar_estado("thinking")
+        self._buffer_inicio_ia = ""
+        self._emocion_extraida = False
         try:
             threading.Thread(target=enviar_a_gemini,
                              args=(texto, False, self.callback_ia),
@@ -1433,24 +1867,60 @@ class OmniApp(ctk.CTk):
                 self._welcome_label.destroy()
 
             if remitente and remitente != "🤖 Argus" and texto.strip():
+                if "Acción SO:" in texto:
+                    msg_limpio = texto.replace("*", "").replace("(", "").replace(")", "").strip()
+                    if "Acción SO:" in msg_limpio:
+                        msg_limpio = msg_limpio.split("Acción SO:")[1].strip()
+                    self.face_widget.cambiar_estado("confirm", msg_limpio)
+                    self.after(3500, lambda: self.face_widget.cambiar_estado("idle") if self.face_widget.estado == "confirm" else None)
+                elif texto.strip().startswith("❌"):
+                    self.face_widget.cambiar_estado("error")
+                    self.after(4000, lambda: self.face_widget.cambiar_estado("idle") if self.face_widget.estado == "error" else None)
+
                 self._agregar_sistema(texto)
                 self._scroll_abajo()
                 return
 
             if nueva_linea and texto == "":
+                if not self._emocion_extraida and self._buffer_inicio_ia:
+                    if self.burbuja_ia_actual:
+                        self.burbuja_ia_actual.append_text(self._buffer_inicio_ia)
+                self._buffer_inicio_ia = ""
+                self._emocion_extraida = False
                 if self.burbuja_ia_actual:
                     self.burbuja_ia_actual.finalizar()
                     self.burbuja_ia_actual = None
                 self._scroll_abajo()
                 return
 
+            texto_a_mostrar = texto
+            if not self._emocion_extraida:
+                self._buffer_inicio_ia += texto
+                import re
+                match = re.search(r"\[EMOTION:\s*(\w+)\]", self._buffer_inicio_ia)
+                if match:
+                    emocion = match.group(1).lower()
+                    self.face_widget.cambiar_estado(emocion)
+                    self._buffer_inicio_ia = re.sub(r"\[EMOTION:\s*\w+\]", "", self._buffer_inicio_ia)
+                    self._emocion_extraida = True
+                    texto_a_mostrar = self._buffer_inicio_ia
+                    self._buffer_inicio_ia = ""
+                elif len(self._buffer_inicio_ia) >= 45:
+                    self._emocion_extraida = True
+                    texto_a_mostrar = self._buffer_inicio_ia
+                    self._buffer_inicio_ia = ""
+                else:
+                    texto_a_mostrar = ""
+
             if not self.burbuja_ia_actual:
+                if self.face_widget.estado == "thinking":
+                    self.face_widget.cambiar_estado("idle")
                 self.burbuja_ia_actual = AIBubble(self.chat_scroll)
                 self.burbuja_ia_actual.pack(fill="x", padx=self.chat_pad_x, pady=(2,6))
                 self.burbuja_ia_actual.mostrar_carga()
 
-            if texto:
-                self.burbuja_ia_actual.append_text(texto)
+            if texto_a_mostrar:
+                self.burbuja_ia_actual.append_text(texto_a_mostrar)
 
             self.after(50, self._scroll_abajo)
         self.after(0, _update)

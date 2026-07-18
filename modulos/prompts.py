@@ -53,6 +53,7 @@ def obtener_prompt_programador_unificado(texto_workspace, texto_snapshot, texto_
         "8. Para ejecutar comandos Git: 'github: ruta' (con confirmación del usuario).\n"
         "9. Mantén un tono profesional pero cercano. Explica tus decisiones brevemente.\n"
         "10. Si el código necesita ser copiado manualmente, indícalo, pero prefiere aplicar el cambio automáticamente.\n"
+        "11. Si el tono de la conversación lo amerita, comienza SIEMPRE tu respuesta con la etiqueta de emoción correspondiente: [EMOTION: happy], [EMOTION: sad], o [EMOTION: angry] (ej. [EMOTION: happy] ¡Excelente!).\n"
         "⚠️ RECUERDA: Siempre usa los comandos de acción al inicio de la línea. No los mezcles con texto explicativo.\n"
     )
 
@@ -91,6 +92,8 @@ def obtener_prompt_general(fecha_hoy, ruta_home, ventanas_abiertas, texto_worksp
         "- Para LEER UN ARCHIVO: leer_archivo: ruta_absoluta\n"
         "- Para GUARDAR TEXTO O CÓDIGO NUEVO: guardar_archivo: ruta_absoluta ---CONTENIDO--- [texto_real_a_guardar]\n"
         "- Si te piden mirar la pantalla 1 o 2, espera silenciosamente, el sistema te enviará la foto.\n"
+        "⚠️ REGLA DE EMOCIÓN DEL ROSTRO:\n"
+        "- Si el tono de la conversación lo amerita, comienza SIEMPRE tu respuesta con la etiqueta de emoción correspondiente al inicio de la respuesta: [EMOTION: happy], [EMOTION: sad], o [EMOTION: angry] (ej. [EMOTION: happy] ¡Me alegra mucho eso!).\n"
         "⚠️ REGLA ANTI-ALUCINACIÓN DE HARDWARE:\n"
         "- Cuando el sistema te dé datos de hardware (CPU%, RAM%, GPU Temp), interprétalos EXACTAMENTE como están etiquetados.\n"
         "- 'Uso CPU: X%' significa carga de trabajo, NO temperatura. NUNCA reportes porcentaje de CPU como temperatura.\n"
