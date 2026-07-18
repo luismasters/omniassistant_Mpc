@@ -464,6 +464,19 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                 comando_busqueda_detectado = cmd[cmd.lower().find("buscar:") + 7:].replace('<', '').replace('>', '').strip()
                 continue
 
+            # GUARDAR EN BÓVEDA (con confirmación)
+            if cmd_limpia.startswith("guardar_en_boveda:"):
+                idx = cmd.lower().find("guardar_en_boveda:") + 18
+                dato = cmd[idx:].strip().strip('"\'`')
+                if dato:
+                    config.estado.pendiente_de_boveda = dato
+                    msg_alerta = f"⚠️ ¿Confirmás que querés guardar esto en la bóveda?\n\n{dato[:200]}"
+                    if ui_callback:
+                        ui_callback("🤖 Argus", msg_alerta, "#FFA500")
+                    CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg_alerta]}])
+                    return "INTERRUPTED"
+                continue
+
             # GITHUB
             if cmd_limpia.startswith(("github:", "<github>")):
                 idx = cmd.lower().find("github:") + 7 if "github:" in cmd_limpia else cmd.lower().find("<github>") + 8

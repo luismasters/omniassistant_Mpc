@@ -33,6 +33,7 @@ MAX_CONTENT_SIZE_MB = 10
 MAX_PDF_PAGES = 100
 MAX_CHARACTERS = 100_000
 MIN_FREE_SPACE_MB = 100
+MAX_MENSAJES_CONTEXTO = 25
 
 # =========================================================
 # API KEYS
@@ -77,8 +78,13 @@ class EstadoGlobal:
         self.archivos_en_memoria = set()
         self.documento_volatil = ""
         self.pendiente_de_borrado = ""
+        self.pendiente_de_boveda = ""
         self.pendiente_de_git = None
         self.archivo_pendiente_inyeccion = None
+        # Contador para perfil de usuario: mensajes nuevos desde la última
+        # extracción de hechos. Se incrementa en agregar_mensaje_chat y se
+        # resetea vía obtener_y_reiniciar_mensajes_pendientes().
+        self.mensajes_desde_ultima_extraccion = 0
 
     # ─── MÉTODOS SEGUROS PARA MODIFICAR EL ESTADO ──────────────────────
 
@@ -86,8 +92,19 @@ class EstadoGlobal:
         """Añade un mensaje al contexto del chat de forma thread-safe."""
         with self._lock:
             self.contexto_chat.append(mensaje)
-            if len(self.contexto_chat) > 100:
-                self.contexto_chat = self.contexto_chat[-100:]
+            self.mensajes_desde_ultima_extraccion += 1
+            if len(self.contexto_chat) > MAX_MENSAJES_CONTEXTO:
+                self.contexto_chat = self.contexto_chat[-MAX_MENSAJES_CONTEXTO:]
+
+    def obtener_y_reiniciar_mensajes_pendientes(self):
+        """
+        Devuelve la cantidad de mensajes acumulados desde la última extracción
+        de perfil y resetea el contador a 0. Thread-safe.
+        """
+        with self._lock:
+            count = self.mensajes_desde_ultima_extraccion
+            self.mensajes_desde_ultima_extraccion = 0
+            return count
 
     def reemplazar_contexto_chat(self, nuevo_contexto):
         """
@@ -100,9 +117,13 @@ class EstadoGlobal:
         agregando un mensaje (agregar_mensaje_chat, que sí usa el lock), la
         lista puede quedar en un estado inconsistente. Usar este método
         centraliza la escritura y la protege con el mismo lock.
+        NOTA: Al reemplazar el contexto también reseteamos el contador de
+        mensajes del perfil, ya que estos mensajes no representan conversación
+        continua (ej. cambio de modo).
         """
         with self._lock:
             self.contexto_chat = nuevo_contexto
+            self.mensajes_desde_ultima_extraccion = 0
 
     def agregar_archivo_memoria(self, ruta):
         """Añade un archivo a la caché de memoria de forma thread-safe."""

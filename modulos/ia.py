@@ -40,6 +40,14 @@ from modulos.prompts import (
     obtener_prompt_programador_unificado
 )
 
+# ─── Perfil de usuario persistente ─────────────────────────────────────
+from modulos.perfil_usuario import (
+    texto_perfil_para_prompt,
+    extraer_hechos_de_sesion,
+    guardar_perfil,
+    cargar_perfil
+)
+
 # ─── Usar la instancia global del gestor ────────────────────────────────
 gestor_skills = gestor
 
@@ -91,8 +99,13 @@ def mcp_buscar_en_boveda(consulta: str):
 
 def mcp_guardar_en_boveda(dato: str):
     """
-    Guarda un dato, recuerdo o información importante en la memoria a largo plazo (bóveda).
-    OPTIMIZADO: llama directo a ChromaDB sin proceso MCP intermedio.
+    Guarda un dato en la memoria a largo plazo (bóveda).
+    USAR ÚNICAMENTE si el usuario lo pide EXPLÍCITAMENTE con frases como
+    "guardá esto", "acordate de...", "no te olvides que...".
+    Si el usuario menciona algo de pasada, sin pedir que se recuerde,
+    NO llamar a esta herramienta bajo ninguna circunstancia — existe un
+    sistema separado (extracción pasiva de perfil) que se encarga de eso
+    automáticamente, sin intervención del modelo en tiempo real.
     """
     try:
         exito = guardar_recuerdo(texto_a_guardar=dato, etiqueta_tema="Memoria_IA")
@@ -126,7 +139,7 @@ def mcp_leer_documento(ruta: str):
 
 lista_herramientas_mcp = [
     mcp_estado_pc, mcp_hardware_pc, mcp_buscar_en_boveda,
-    mcp_guardar_en_boveda, mcp_explorar_ruta, mcp_leer_documento
+    mcp_explorar_ruta, mcp_leer_documento
 ]
 
 # =====================================================================
@@ -344,6 +357,31 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         ])
         return
 
+    # ─── ESCUDO DE CONFIRMACIÓN: GUARDAR EN BÓVEDA ────────────────────
+    PENDIENTE_DE_BOVEDA = config.estado.pendiente_de_boveda
+    if PENDIENTE_DE_BOVEDA:
+        dato_boveda = PENDIENTE_DE_BOVEDA
+        config.estado.pendiente_de_boveda = ""
+        logger.info(f"Evaluando confirmación de guardado en bóveda (local): {dato_boveda[:60]}...")
+        decision_boveda = _evaluar_confirmacion_local(texto_usuario)
+        if "CONFIRMADO" in decision_boveda:
+            exito = guardar_recuerdo(texto_a_guardar=dato_boveda, etiqueta_tema="Memoria_IA")
+            if exito:
+                msg = f"✅ Dato guardado en la bóveda: {dato_boveda[:120]}"
+            else:
+                msg = "❌ Error al guardar el dato en la bóveda."
+        else:
+            msg = "⏭️ Guardado en bóveda cancelado."
+        if ui_callback:
+            ui_callback("🤖 Argus", msg, "#00E5FF" if "cancelado" in msg else "#86EFAC")
+        if modo_voz:
+            hablar_no_bloqueante("Listo." if "cancelado" not in msg else "Cancelado.")
+        CONTEXTO_CHAT.extend([
+            {'role': 'user', 'parts': [texto_usuario]},
+            {'role': 'model', 'parts': [msg]}
+        ])
+        return
+
     # =================================================================
     # TRADUCTOR INSTANTÁNEO DE INTENCIONES NATURALES
     # =================================================================
@@ -383,20 +421,22 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             fecha_hoy = datetime.datetime.now().strftime("%A, %d de %B de %Y")
             ventanas_abiertas = obtener_ventanas_activas()
 
+            from modulos.perfil_usuario import texto_perfil_para_prompt
+            texto_perfil = texto_perfil_para_prompt()
             texto_workspace = f"[WORKSPACE ANCLADO]: {WORKSPACE_ACTUAL}\n" if WORKSPACE_ACTUAL else ""
             texto_snapshot = f"[ESTADO DEL PROYECTO]:\n{SNAPSHOT_ACTUAL}\n\n" if SNAPSHOT_ACTUAL else ""
             texto_doc_volatil = f"[DOCUMENTOS EN MEMORIA]:\n{DOCUMENTO_VOLATIL}\n\n" if DOCUMENTO_VOLATIL else ""
 
             if MODO_ACTUAL in ["programador", "planificador"]:
                 contexto_sistema = obtener_prompt_programador_unificado(
-                    texto_workspace, texto_snapshot, texto_doc_volatil
+                    texto_workspace, texto_snapshot, texto_doc_volatil, texto_perfil
                 )
                 modelo_activo = "deepseek-reasoner"
             else:
                 ruta_home = os.path.expanduser("~")
                 contexto_sistema = obtener_prompt_general(
                     fecha_hoy, ruta_home, ventanas_abiertas,
-                    texto_workspace, texto_snapshot, texto_doc_volatil
+                    texto_workspace, texto_snapshot, texto_doc_volatil, texto_perfil
                 )
                 modelo_activo = "gemini"
 
@@ -430,7 +470,6 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                         types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
                         types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
                         types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY, threshold=types.HarmBlockThreshold.BLOCK_NONE),
-                        types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_JAILBREAK, threshold=types.HarmBlockThreshold.BLOCK_NONE),
                     ]
                 )
                 if not skill_activa:
@@ -459,7 +498,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
 
                 try:
                     response_stream = cliente_genai.models.generate_content_stream(
-                        model="gemini-2.5-flash",
+                        model="gemini-3.1-flash-lite",
                         contents=mensajes_para_gemini,
                         config=gemini_config
                     )
@@ -584,6 +623,38 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                     if modo_voz and buffer_voz.strip() and not usaste_mcp:
                         _procesar_buffer_voz(buffer_voz, forzar=True)
 
+                # ─── FALLBACK POR RESPUESTA VACÍA (Safety/PII blocking) ─────
+                if not respuesta_ia and not error_ocurrido and not usaste_mcp:
+                    logger.warning("⚠️ Respuesta vacía — probable bloqueo por Safety/PII. Fallback a DeepSeek.")
+                    if ui_callback:
+                        ui_callback("⚙️ Sistema", "⚠️ La API bloqueó esta respuesta. Usando respaldo DeepSeek...", "#FFA500")
+                    # Reintentar con DeepSeek como fallback
+                    mensajes_ds = [{"role": "system", "content": contexto_sistema}]
+                    for msg in CONTEXTO_CHAT:
+                        rol_ds = "assistant" if msg['role'] == "model" else "user"
+                        texto_historico = "".join([p for p in msg['parts'] if isinstance(p, str)])
+                        mensajes_ds.append({"role": rol_ds, "content": texto_historico})
+                    mensajes_ds.append({"role": "user", "content": texto_usuario})
+                    try:
+                        response = cliente_deepseek.chat.completions.create(
+                            model="deepseek-chat", messages=mensajes_ds, stream=True
+                        )
+                        if ui_callback:
+                            ui_callback("🤖 Argus (DeepSeek)", "", "#A8C7FA", nueva_linea=False)
+                        for chunk in response:
+                            delta = chunk.choices[0].delta
+                            if getattr(delta, 'content', None):
+                                texto_chunk = delta.content
+                                print(texto_chunk, end='', flush=True)
+                                respuesta_ia += texto_chunk
+                                if ui_callback:
+                                    ui_callback("", texto_chunk, "#E8EAED", nueva_linea=False)
+                    except Exception as e:
+                        logger.exception("Error en fallback DeepSeek")
+                        if ui_callback:
+                            ui_callback("⚙️ Sistema", f"❌ Fallback DeepSeek falló: {str(e)[:100]}", "#FF4500")
+                        respuesta_ia = "⚠️ Lo siento, la API bloqueó esta respuesta por políticas de seguridad."
+
                 # ─── MCP SEGUNDA RONDA ────────────────────────────────────────
                 if usaste_mcp and not error_ocurrido and not skill_activa:
                     try:
@@ -612,7 +683,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                 ]
                             )
                             response_2 = cliente_genai.models.generate_content_stream(
-                                model="gemini-2.5-flash",
+                                model="gemini-3.1-flash-lite",
                                 contents=mensajes_para_gemini,
                                 config=config_segunda_ronda
                             )
@@ -635,6 +706,12 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                     if ui_callback:
                                         ui_callback("⚙️ Sistema", f"❌ Error en respuesta MCP: {str(e)[:80]}", "#FF4500")
                                     break
+                            # ─── FALLBACK POR RESPUESTA VACÍA EN MCP RONDA 2 ─────
+                            if not respuesta_ia and not error_ocurrido:
+                                logger.warning("⚠️ Respuesta vacía en MCP ronda 2 — Safety/PII blocking.")
+                                if ui_callback:
+                                    ui_callback("⚙️ Sistema", "⚠️ Datos obtenidos pero la API bloqueó la respuesta.", "#FFA500")
+                                respuesta_ia = "⚠️ Obtuve la información solicitada, pero la API bloqueó la respuesta por políticas de seguridad."
                             if ui_callback:
                                 ui_callback("", "", "#E8EAED", nueva_linea=True)
                             if modo_voz and buffer_voz_2.strip():
@@ -765,7 +842,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                         types.Content(role='user', parts=[types.Part.from_text(text=f"Resultados web:\n{datos_encontrados}\n\nRespondé usando esto.")])
                     ]
                     segunda_respuesta = cliente_genai.models.generate_content_stream(
-                        model="gemini-2.5-flash",
+                        model="gemini-3.1-flash-lite",
                         contents=mensajes_secundarios,
                         config=config_web
                     )
@@ -801,8 +878,9 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             {'role': 'user', 'parts': [texto_usuario]},
             {'role': 'model', 'parts': [respuesta_ia]}
         ])
-    if len(CONTEXTO_CHAT) > 100:
-        config.estado.contexto_chat = CONTEXTO_CHAT[-100:]
+
+    if len(CONTEXTO_CHAT) > config.MAX_MENSAJES_CONTEXTO:
+        config.estado.contexto_chat = CONTEXTO_CHAT[-config.MAX_MENSAJES_CONTEXTO:]
 
 
 # =====================================================================
@@ -847,7 +925,7 @@ def cargar_adjuntos_en_contexto(rutas_archivos, ui_callback=None):
 
     try:
         resumen_response = cliente_genai.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.1-flash-lite",
             contents=f"Resume en 2 líneas el contenido de estos archivos:\n\n{contenido_volatil_acumulado[:8000]}"
         )
         resumen = resumen_response.text.strip()

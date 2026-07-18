@@ -671,7 +671,9 @@ class OmniApp(ctk.CTk):
         self.burbuja_ia_actual = None
         self.texto_sin_enviar  = ""
         self._stop_micro_event = threading.Event()
+        self._detener_extraccion_perfil = threading.Event()
         threading.Thread(target=self.motor_microfono, daemon=True).start()
+        threading.Thread(target=self._ciclo_extraccion_perfil, daemon=True).start()
 
         self._gestor_gamepad = GestorGamepad(
             callback_activar_voz=self._activar_voz_desde_gamepad
@@ -739,8 +741,52 @@ class OmniApp(ctk.CTk):
                 daemon=True
             ).start()
 
+    def _ciclo_extraccion_perfil(self):
+        """
+        Hilo de fondo que verifica periódicamente si se acumularon mensajes
+        nuevos desde la última extracción de perfil. Cuando se alcanza el umbral
+        (definido en perfil_usuario.UMBRAL_MENSAJES_EXTRACCION), dispara
+        extraer_y_procesar_sesion() con la nueva arquitectura de hechos atómicos.
+        """
+        while not self._detener_extraccion_perfil.is_set():
+            time.sleep(5)  # check cada 5 segundos
+            try:
+                import config as _cfg
+                from modulos.perfil_usuario import (
+                    extraer_y_procesar_sesion,
+                    UMBRAL_MENSAJES_EXTRACCION
+                )
+                count = _cfg.estado.obtener_y_reiniciar_mensajes_pendientes()
+                if count >= UMBRAL_MENSAJES_EXTRACCION:
+                    mensajes = _cfg.estado.obtener_contexto_copia()
+                    if mensajes:
+                        extraer_y_procesar_sesion(mensajes[-count:])
+            except Exception:
+                try:
+                    from modulos.logger import logger
+                    logger.exception("Error en ciclo de extracción de perfil")
+                except Exception:
+                    pass
+
     def on_closing(self):
+        self._detener_extraccion_perfil.set()
         self._stop_micro_event.set()
+        # Extracción final de respaldo para capturar mensajes que no llegaron al umbral
+        try:
+            import config as _cfg
+            from modulos.perfil_usuario import extraer_y_procesar_sesion
+            count = _cfg.estado.obtener_y_reiniciar_mensajes_pendientes()
+            mensajes = _cfg.estado.obtener_contexto_copia()
+            if count > 0 and mensajes:
+                extraer_y_procesar_sesion(mensajes[-count:])
+                from modulos.logger import logger
+                logger.info(f"📋 Perfil respaldado al cerrar ({count} mensajes)")
+        except Exception:
+            try:
+                from modulos.logger import logger
+                logger.exception("Error en extracción final de perfil")
+            except Exception:
+                pass
         try:
             self._gestor_gamepad.detener()
         except Exception:
@@ -800,7 +846,7 @@ class OmniApp(ctk.CTk):
         ctk.CTkFrame(sb, height=1, fg_color=SIDEBAR_LINE).grid(
             row=6, column=0, padx=0, sticky="ew", pady=(8, 0))
 
-        # ── NUEVO: Botón Limpiar Contexto ──────────────────────────────
+        # ── Botón Limpiar Contexto ─────────────────────────────────────
         ctk.CTkButton(
             sb, text="🧹  Limpiar contexto",
             anchor="w", font=FONT_UI,
@@ -808,6 +854,15 @@ class OmniApp(ctk.CTk):
             text_color=TEXT_DIM, corner_radius=6,
             command=self._limpiar_contexto_directo
         ).grid(row=7, column=0, padx=10, pady=(4, 2), sticky="ew")
+
+        # ── NUEVO: Botón Manual de Actualización de Memoria ───────────
+        ctk.CTkButton(
+            sb, text="🧠  Actualizar memoria",
+            anchor="w", font=FONT_UI,
+            fg_color="transparent", hover_color="#16162a",
+            text_color=TEXT_DIM, corner_radius=6,
+            command=self._actualizar_memoria_manual
+        ).grid(row=8, column=0, padx=10, pady=(2, 2), sticky="ew")
 
         # ── Botón Modo Gaming ──────────────────────────────────────────
         self.btn_gaming = ctk.CTkButton(
@@ -817,20 +872,52 @@ class OmniApp(ctk.CTk):
             text_color=TEXT_DIM, corner_radius=6,
             command=self._toggle_modo_gaming
         )
-        self.btn_gaming.grid(row=8, column=0, padx=10, pady=(4, 2), sticky="ew")
+        self.btn_gaming.grid(row=9, column=0, padx=10, pady=(4, 2), sticky="ew")
 
         # ── Indicador de gamepad ───────────────────────────────────────
         self.lbl_gamepad = ctk.CTkLabel(
             sb, text="🎮 Mando: inactivo",
             font=FONT_UI_SM, text_color=TEXT_DIM
         )
-        self.lbl_gamepad.grid(row=9, column=0, padx=18, pady=(2, 0), sticky="w")
+        self.lbl_gamepad.grid(row=10, column=0, padx=18, pady=(2, 0), sticky="w")
 
         ctk.CTkLabel(
             sb, text="v0.3.1 — Optimizado",
             font=FONT_UI_SM, text_color=TEXT_DIM
-        ).grid(row=11, column=0, padx=18, pady=16, sticky="sw")
-        sb.grid_rowconfigure(11, weight=1)
+        ).grid(row=12, column=0, padx=18, pady=16, sticky="sw")
+        sb.grid_rowconfigure(12, weight=1)
+
+    # ── NUEVO: Actualización manual de memoria (botón en sidebar) ────
+    def _actualizar_memoria_manual(self):
+        """
+        Dispara extraer_y_procesar_sesion() manualmente en un hilo aparte,
+        sin esperar el umbral de 20 mensajes. Muestra feedback al usuario.
+        """
+        import config as _cfg
+        mensajes = _cfg.estado.obtener_contexto_copia()
+        if not mensajes:
+            self._agregar_sistema("🧠 No hay mensajes para analizar.")
+            return
+        self._agregar_sistema("🧠 Actualizando memoria de perfil...")
+        threading.Thread(
+            target=self._ejecutar_extraccion_manual,
+            args=(mensajes,),
+            daemon=True
+        ).start()
+
+    def _ejecutar_extraccion_manual(self, mensajes):
+        """Ejecuta la extracción y muestra feedback al terminar."""
+        try:
+            from modulos.perfil_usuario import extraer_y_procesar_sesion
+            extraer_y_procesar_sesion(mensajes)
+            # Feedback en el hilo principal
+            self.after(0, lambda: self._agregar_sistema(
+                "🧠 Memoria de perfil actualizada."))
+        except Exception as e:
+            from modulos.logger import logger
+            logger.exception("Error en extracción manual de perfil")
+            self.after(0, lambda: self._agregar_sistema(
+                f"❌ Error actualizando memoria: {str(e)[:80]}"))
 
     # ── NUEVO: Limpiar contexto directo, sin pasar por Gemini ─────────
     def _limpiar_contexto_directo(self):

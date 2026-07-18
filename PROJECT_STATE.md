@@ -2,15 +2,17 @@
 
 ## 1. Resumen Ejecutivo
 
-**Argus** es un asistente de IA multimodal integrado al escritorio de Windows, diseñado para operar en tres modos (General, Programador y Planificador) con cambio dinámico de modelo de lenguaje (Gemini Flash para el modo General, DeepSeek Reasoner para modos avanzados). Su núcleo es una **interfaz gráfica en CustomTkinter** con soporte de voz (Edge TTS + Whisper), búsqueda web (DuckDuckGo), control de sistema (ventanas, procesos, audio), gestión de archivos con sandbox de seguridad, memoria persistente vía ChromaDB, control de gamepad (L3+R3 push‑to‑talk), y un sistema extensible de **Skills** (inyección contextual). Está en **fase activa de expansión**, con integración continua de nuevas capacidades (audio, monitoreo de hardware, recordatorios).
+**Argus** es un asistente de IA multimodal integrado al escritorio de Windows, diseñado para operar en tres modos (General, Programador y Planificador) con cambio dinámico de modelo de lenguaje (Gemini 3.1 Flash Lite para el modo General, DeepSeek Reasoner para modos avanzados). Su núcleo es una **interfaz gráfica en CustomTkinter** con soporte de voz (Edge TTS + Whisper), búsqueda web (DuckDuckGo), control de sistema (ventanas, procesos, audio), gestión de archivos con sandbox de seguridad, memoria persistente vía ChromaDB, control de gamepad (L3+R3 push‑to‑talk), y un sistema extensible de **Skills** (inyección contextual). Está en **fase activa de expansión**, con integración continua de nuevas capacidades (audio, monitoreo de hardware, recordatorios).
 
 ## 2. Arquitectura
 
 | Archivo / Módulo | Propósito |
 |---|---|
-| `config.py` | Cargar variables de entorno, parches para memoria y GPU (Whisper/chromadb), clase `EstadoGlobal` thread‑safe que centraliza el estado de la aplicación (modo, workspace, contexto, archivos en memoria, pendientes de Git/borrado). |
+| `config.py` | Cargar variables de entorno, parches para memoria y GPU (Whisper/chromadb), clase `EstadoGlobal` thread‑safe que centraliza el estado de la aplicación (modo, workspace, contexto, archivos en memoria, pendientes de Git/borrado). Incluye `MAX_GRABACION_SEGUNDOS=180` y método `reemplazar_contexto_chat()` thread‑safe. |
 | `main_gui.py` | Interfaz gráfica principal con CustomTkinter: sidebar de modos, área de chat con renderizado de markdown (código, tablas, listas), barra de entrada con placeholder, botones adjuntar/guardar en memoria. Maneja hilos de micrófono, gamepad y callbacks de IA. |
-| `modulos/ia.py` | Enrutador universal de mensajes: selecciona modelo (Gemini o DeepSeek), inyecta prompts según modo y skills, maneja streaming de respuesta y voz en paralelo, ejecuta confirmaciones nativas sin juez IA, procesa acciones de archivo/audio/git/sistema. |
+| `main_web.py` | Interfaz web alternativa accesible desde navegador. |
+| `web/index.html` | Frontend web (HTML+JS) para la interfaz alternativa. |
+| `modulos/ia.py` | Enrutador universal de mensajes: selecciona modelo (Gemini o DeepSeek), inyecta prompts según modo y skills, maneja streaming de respuesta y voz en paralelo, ejecuta confirmaciones nativas sin juez IA (borrado, Git, guardado en bóveda), procesa acciones de archivo/audio/git/sistema. |
 | `modulos/prompts.py` | Contiene las plantillas de system prompt para cada modo: `obtener_prompt_general`, `obtener_prompt_programador_unificado`, y el prompt dinámico para la skill de búsqueda web. |
 | `modulos/audio_custom.py` | Captura de voz con Whisper (lazy loading), síntesis y reproducción con Edge TTS + pygame, cola de reproducción thread‑safe, limpieza de texto para voz. |
 | `modulos/memoria.py` | Capa de persistencia vía ChromaDB: guardar/buscar recuerdos, caché de embeddings con TTL, búsqueda anticipada en hilo paralelo, snapshot de proyecto (JSON), y radar de cambios (watchdog con debounce). |
@@ -37,9 +39,9 @@
 
 ## 3. Estado Actual
 
-- **Interfaz gráfica completa**: Chat con renderizado de markdown, selección de modo, adjuntar archivos, guardar en memoria, botón de limpiar contexto, modo gaming con gamepad.
+- **Interfaz gráfica completa**: Chat con renderizado de markdown, selección de modo, adjuntar archivos, guardar en memoria, botón de limpiar contexto, modo gaming con gamepad. Incluye **interfaz web alternativa** (`main_web.py` + `web/index.html`).
 - **Voz funcional**: Captura con Whisper (lazy loading, GPU), síntesis con Edge TTS, reproducción con cola thread‑safe y corte por tecla Esc/espacio.
-- **Selección de modelo automática**: Gemini 2.5 Flash en modo General, DeepSeek Reasoner en modos Programador/Planificador.
+- **Selección de modelo automática**: Gemini 3.1 Flash Lite en modo General, DeepSeek Reasoner en modos Programador/Planificador.
 - **Memoria persistente (ChromaDB)**: Guardado y búsqueda de recuerdos con caché de embeddings y pre‑fetch anticipado.
 - **Control de sistema**: Abrir/cerrar/mover ventanas, explorar directorios, apagar PC con tiempos, búsqueda inteligente de programas (fuzzy match).
 - **Control de audio**: Volumen maestro y por aplicación (pycaw), listado de apps con audio, cambio de dispositivo de salida (requiere módulo AudioDeviceCmdlets para algunos casos).
@@ -55,9 +57,16 @@
 
 ## 4. Deuda Técnica / Próximos Pasos
 
-### ✅ Completado (Migraciones)
-- **Migración a `google.genai`** (nuevo SDK): Migrado de `google.generativeai` deprecado al nuevo SDK `google.genai`. Cliente inicializado en `modulos/ia.py` línea 49 (`genai.Client`). Incluye uso de `google.genai.types` para herramientas nativas.
+### ✅ Completado (Migraciones y mejoras)
+- **Guardado en bóveda con confirmación nativa**: `mcp_guardar_en_boveda` removido de `lista_herramientas_mcp` en `ia.py` — el modelo ya no puede llamarlo como function call automática. Reemplazado por comando de texto `guardar_en_boveda:` parseado por `controlador_acciones.py`, que setea `config.estado.pendiente_de_boveda` y muestra alerta de confirmación al usuario usando el mismo patrón que borrado/Git. `ia.py` intercepta la respuesta con `_evaluar_confirmacion_local()` y solo ejecuta el guardado si el usuario confirma. Nuevo estado `pendiente_de_boveda` en `config.py`.
+- **Sistema de memoria persistente (arquitectura de hechos atómicos)**: `modulos/perfil_usuario.py` reestructurado con nueva arquitectura. `extraer_hechos_candidatos()` pide al LLM una lista JSON de hechos sueltos (no reescritura completa del perfil). `rutear_hecho()` filtra por importancia (≥60), excluye secretos (contraseñas/tokens/API keys), y rutea por tipo: `perfil_funcional` (5 claves fijas), `perfil_vida` (fusión case-insensitive por tema), `proyecto` (guarda directo en ChromaDB vía `guardar_recuerdo()`). `extraer_y_procesar_sesion()` es el orquestador único para extracción automática y manual. Nuevo botón "🧠 Actualizar memoria" en sidebar de `main_gui.py`. Extracción automática cada 20 mensajes en hilo de fondo. Límite de contexto centralizado en `config.MAX_MENSAJES_CONTEXTO = 25`.
+- **Migración a `google.genai`** (nuevo SDK): Migrado de `google.generativeai` deprecado al nuevo SDK `google.genai`. Cliente inicializado en `modulos/ia.py` (`genai.Client`). Incluye uso de `google.genai.types` para herramientas nativas. Nueva dependencia `google-genai>=2.0.0` en `requirements.txt`.
 - **Memoria directa a ChromaDB**: Optimizada para evitar el overhead del servidor MCP en búsqueda/guardado en bóveda. `mcp_buscar_en_boveda()` y `mcp_guardar_en_boveda()` ahora llaman directo a `modulos.memoria` en lugar de `cliente_sistema.ejecutar()`. Latencia reducida de 3-5s a <500ms.
+- **Interfaz web**: Nueva interfaz web alternativa (`main_web.py` + `web/index.html`).
+- **Chat padding responsivo**: El padding horizontal del chat ahora se calcula como porcentaje del ancho de ventana (9%), con piso de 24px y techo de 140px. Antes era fijo a 110px.
+- **Seguridad en cierre de procesos (`sistema.py`)**: Ahora se exige longitud mínima de 3 caracteres en el objetivo y se detiene en el PRIMER match, evitando matar múltiples programas accidentalmente con transcripciones de voz incompletas.
+- **Límite de grabación configurable**: `MAX_GRABACION_SEGUNDOS = 180` en `config.py` (antes hardcodeado a 30s en `audio_custom.py`), evitando cortes prematuros en explicaciones largas.
+- **Thread‑safe en contexto**: Nuevo método `reemplazar_contexto_chat()` en `config.EstadoGlobal` que centraliza la escritura del contexto con lock, eliminando condiciones de carrera entre hilos.
 
 ### Urgente
 - **Skill `control_audio` — dependencia externa `pycaw`**: Documentar instalación explícita (`pip install pycaw comtypes`). El cambio de dispositivo de salida falla sin el módulo PowerShell `AudioDeviceCmdlets`.
@@ -76,7 +85,5 @@
 
 ### Baja prioridad / Futuro
 - **Skill `steam_integration`**, `clima_tiempo`, `portapapeles_inteligente`, `resumen_contenido`, `traductor`, `monitor_procesos` — todas en el roadmap.
-- **Unificar estado global**: Eliminar `_StateProxy` en `main_gui.py` y usar directamente `config.EstadoGlobal` para evitar duplicidad.
 - **Internacionalización**: Actualmente solo español. Podría ampliarse a otros idiomas.
-- **Documentación de usuario**: Falta un README.md y guía de instalación.
 - **Limpieza de código**: Algunos módulos (`prompts.py`, `controlador_acciones.py`) tienen funciones largas que podrían dividirse. Las instrucciones de `servidor_sistema_mcp.py` son redundantes con la capa directa en `ia.py` (búsqueda en bóveda ya va directo a ChromaDB).

@@ -6,7 +6,7 @@
 
 ## ✨ Características principales
 
-- **Interfaz gráfica con CustomTkinter**: Chat con renderizado de Markdown (código, tablas, listas), selección de modo, adjuntar archivos, guardar en memoria.
+- **Interfaz gráfica con CustomTkinter + Web**: Chat con renderizado de Markdown (código, tablas, listas), selección de modo, adjuntar archivos, guardar en memoria. También incluye una **interfaz web** (`main_web.py`) accesible desde el navegador.
 - **Voz completa**: Captura con Whisper (GPU acelerada), síntesis con Edge TTS, reproducción con cola thread-safe y corte por tecla.
 - **Modelos duales**: Gemini 3.1 Flash Lite (modo General) y DeepSeek Reasoner (modos Programador/Planificador).
 - **Memoria persistente (ChromaDB)**: Guardado y búsqueda de recuerdos con caché de embeddings.
@@ -141,10 +141,13 @@ El comando `escanear_proyecto:` se ejecuta en dos fases:
 ```
 OmniAssistant/
 ├── config.py                  # Configuración y estado global
-├── main_gui.py                # Interfaz gráfica principal
+├── main_gui.py                # Interfaz gráfica principal (CustomTkinter)
+├── main_web.py                # Interfaz web alternativa
 ├── gestor_boveda.py           # CLI para gestión de memoria
 ├── requirements.txt           # Dependencias del proyecto
 ├── .env                       # API Keys (no versionado)
+├── web/
+│   └── index.html             # Frontend web
 ├── modulos/
 │   ├── ia.py                  # Enrutador IA (Gemini + DeepSeek)
 │   ├── prompts.py             # Plantillas de system prompt
@@ -163,9 +166,19 @@ OmniAssistant/
 │   ├── logger.py              # Logging
 │   ├── limpiar.py             # Limpieza de ChromaDB
 │   └── skills/                # Skills extensibles
-│       ├── gestor_skills.py
+│       ├── __init__.py
+│       ├── gestor_skills.py   # Gestor de skills con detección contextual
 │       ├── busqueda_web_actualizada/
+│       │   ├── __init__.py
+│       │   ├── SKILL.md
+│       │   ├── instructions.md
+│       │   └── ejemplos.md
 │       └── control_audio/
+│           ├── __init__.py
+│           ├── audio_control.py
+│           ├── SKILL.md
+│           ├── instructions.md
+│           └── ejemplos.md
 ├── tests/
 │   ├── __init__.py
 │   └── test_ia.py             # Tests unitarios
@@ -194,13 +207,14 @@ python -m pytest tests/test_ia.py -v -k "EstadoGlobal"
 Ver [`PROJECT_STATE.md`](PROJECT_STATE.md) para el estado detallado del proyecto y el roadmap.
 
 ### Prioridades actuales
-- [ ] Migración completa a `google-genai` ✅ *(completado)*
-- [ ] Tests unitarios y de integración ✅ *(tests iniciales agregados)*
-- [ ] README con guía de instalación ✅ *(este documento)*
+- [x] Migración completa a `google-genai` (nuevo SDK) ✅
+- [x] Tests unitarios y de integración ✅
+- [x] README con guía de instalación ✅
 - [ ] Skill `monitor_hardware` (temperatura CPU/GPU)
 - [ ] Skill `recordatorios`
 - [ ] Confirmaciones GUI con popups nativos (CTkDialog)
 - [ ] Detección de skills por embeddings semánticos
+- [ ] Interfaz web (`main_web.py`)
 
 ---
 
