@@ -121,8 +121,8 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
     """
     import config
     WORKSPACE_ACTUAL = config.estado.workspace_actual
-    CONTEXTO_CHAT = config.estado.contexto_chat
-    ARCHIVOS_EN_MEMORIA = config.estado.archivos_en_memoria
+    CONTEXTO_CHAT = config.estado.obtener_contexto_copia()
+    ARCHIVOS_EN_MEMORIA = config.estado.obtener_archivos_copia()
     MODO_ACTUAL = config.estado.modo_actual
 
     reportes_acciones = []
@@ -134,7 +134,10 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
         logger.error(msg_err)
         if ui_callback:
             ui_callback("⚙️ Sistema", msg_err, "#ff4500")
-        CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[SISTEMA] {msg_err}"]})
+        config.estado.agregar_mensaje_chat(
+            {'role': 'user', 'parts': [f"[SISTEMA] {msg_err}"]},
+            contar_para_perfil=False
+        )
         return "INTERRUPTED"
 
     # 0. LECTURAS EN FORMATO XML (DeepSeek V4 Fallback)
@@ -154,8 +157,11 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
             contenido_leido = leer_contenido_archivo(ruta_real)
             if len(contenido_leido) > 80000:
                 contenido_leido = contenido_leido[:80000] + "\n... [CONTENIDO TRUNCADO POR SEGURIDAD]"
-            ARCHIVOS_EN_MEMORIA.add(ruta_real)
-            CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[CONTENIDO DE '{ruta_real}']:\n{contenido_leido}"]})
+            config.estado.agregar_archivo_memoria(ruta_real)
+            config.estado.agregar_mensaje_chat(
+                {'role': 'user', 'parts': [f"[CONTENIDO DE '{ruta_real}']:\n{contenido_leido}"]},
+                contar_para_perfil=False
+            )
             if ui_callback:
                 ui_callback("⚙️ Sistema", f"📄 Archivo cargado (XML): {ruta_corta}", "#80868B")
 
@@ -180,7 +186,10 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                 resultado_escritura = escribir_archivo(ruta_f_abs, contenido_f)
                 if "ERROR" in resultado_escritura:
                     logger.error(f"Error al guardar {ruta_f_abs}: {resultado_escritura}")
-                    CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO ESCRITURA] Fallo al guardar {ruta_f}: {resultado_escritura}"]})
+                    config.estado.agregar_mensaje_chat(
+                        {'role': 'user', 'parts': [f"[RESULTADO ESCRITURA] Fallo al guardar {ruta_f}: {resultado_escritura}"]},
+                        contar_para_perfil=False
+                    )
                     if ui_callback:
                         ui_callback("⚙️ Sistema", f"❌ Error guardando {ruta_f}: {resultado_escritura}", "#ff4500")
                 else:
@@ -188,7 +197,10 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                         for msg in CONTEXTO_CHAT:
                             if isinstance(msg.get('parts', [''])[0], str) and f"[CONTENIDO DE '{ruta_f_abs}']:" in msg['parts'][0]:
                                 msg['parts'][0] = f"[CONTENIDO DE '{ruta_f_abs}']:\n{contenido_f}"
-                    CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO ESCRITURA] Archivo {ruta_f} guardado correctamente."]})
+                    config.estado.agregar_mensaje_chat(
+                        {'role': 'user', 'parts': [f"[RESULTADO ESCRITURA] Archivo {ruta_f} guardado correctamente."]},
+                        contar_para_perfil=False
+                    )
                     if ui_callback:
                         ui_callback("⚙️ Sistema", f"✅ Archivo guardado: {ruta_f}", "#86efac")
         except Exception as e:
@@ -228,13 +240,19 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                             if isinstance(msg.get('parts', [''])[0], str) and f"[CONTENIDO DE '{ruta_real_edit}']:" in msg['parts'][0]:
                                 msg['parts'][0] = f"[CONTENIDO DE '{ruta_real_edit}']:\n{nuevo_contenido}"
                         exito_msg = f"[RESULTADO EDICIÓN] Modificación exacta exitosa en {ruta_edit}"
-                        CONTEXTO_CHAT.append({'role': 'user', 'parts': [exito_msg]})
+                        config.estado.agregar_mensaje_chat(
+                            {'role': 'user', 'parts': [exito_msg]},
+                            contar_para_perfil=False
+                        )
                         if ui_callback:
                             ui_callback("⚙️ Sistema", f"✅ Bloque actualizado con precisión en {ruta_edit}", "#86efac")
                         continue
                     elif count_exacto > 1:
                         msg_fallo = f"❌ Ambigüedad: El bloque aparece {count_exacto} veces. Dame más líneas de contexto."
-                        CONTEXTO_CHAT.append({'role': 'user', 'parts': [msg_fallo]})
+                        config.estado.agregar_mensaje_chat(
+                            {'role': 'user', 'parts': [msg_fallo]},
+                            contar_para_perfil=False
+                        )
                         if ui_callback:
                             ui_callback("⚙️ Sistema", f"❌ Ambigüedad en {ruta_edit}", "#ff4500")
                         continue
@@ -256,17 +274,26 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                             if isinstance(msg.get('parts', [''])[0], str) and f"[CONTENIDO DE '{ruta_real_edit}']:" in msg['parts'][0]:
                                 msg['parts'][0] = f"[CONTENIDO DE '{ruta_real_edit}']:\n{nuevo_contenido}"
                         exito_msg = f"[RESULTADO EDICIÓN] Modificación flexible (Regex) exitosa en {ruta_edit}"
-                        CONTEXTO_CHAT.append({'role': 'user', 'parts': [exito_msg]})
+                        config.estado.agregar_mensaje_chat(
+                            {'role': 'user', 'parts': [exito_msg]},
+                            contar_para_perfil=False
+                        )
                         if ui_callback:
                             ui_callback("⚙️ Sistema", f"✅ Bloque ajustado (Flexible) en {ruta_edit}", "#86efac")
                     elif len(coincidencias) > 1:
                         msg_fallo = f"❌ Ambigüedad en búsqueda flexible. Demasiados resultados similares."
-                        CONTEXTO_CHAT.append({'role': 'user', 'parts': [msg_fallo]})
+                        config.estado.agregar_mensaje_chat(
+                            {'role': 'user', 'parts': [msg_fallo]},
+                            contar_para_perfil=False
+                        )
                         if ui_callback:
                             ui_callback("⚙️ Sistema", f"❌ Ambigüedad flexible en {ruta_edit}", "#ff4500")
                     else:
                         msg_fallo = f"❌ Fallo crítico: No encontré el bloque en {ruta_edit}."
-                        CONTEXTO_CHAT.append({'role': 'user', 'parts': [msg_fallo]})
+                        config.estado.agregar_mensaje_chat(
+                            {'role': 'user', 'parts': [msg_fallo]},
+                            contar_para_perfil=False
+                        )
                         if ui_callback:
                             ui_callback("⚙️ Sistema", f"❌ Bloque no encontrado en {ruta_edit}", "#ff4500")
                 else:
@@ -274,7 +301,10 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                     logger.error(msg_fallo)
                     if ui_callback:
                         ui_callback("⚙️ Sistema", msg_fallo, "#ff4500")
-                    CONTEXTO_CHAT.append({'role': 'user', 'parts': [msg_fallo]})
+                    config.estado.agregar_mensaje_chat(
+                        {'role': 'user', 'parts': [msg_fallo]},
+                        contar_para_perfil=False
+                    )
         except Exception as e:
             logger.exception("Error en reemplazo de bloque")
             print(f"❌ Error en reemplazo de bloque: {e}")
@@ -320,8 +350,11 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                 contenido_leido = leer_contenido_archivo(ruta_real)
                 if len(contenido_leido) > 80000:
                     contenido_leido = contenido_leido[:80000] + "\n... [CONTENIDO TRUNCADO POR SEGURIDAD]"
-                ARCHIVOS_EN_MEMORIA.add(ruta_real)
-                CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[CONTENIDO DE '{ruta_real}']:\n{contenido_leido}"]})
+                config.estado.agregar_archivo_memoria(ruta_real)
+                config.estado.agregar_mensaje_chat(
+                    {'role': 'user', 'parts': [f"[CONTENIDO DE '{ruta_real}']:\n{contenido_leido}"]},
+                    contar_para_perfil=False
+                )
                 if ui_callback:
                     ui_callback("⚙️ Sistema", f"📄 Archivo cargado en memoria: {ruta_corta}", "#80868B")
                 continue
@@ -384,7 +417,10 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                         resultado_audio = f"⚠️ Comando de audio no reconocido: {subcmd}"
 
                     if resultado_audio:
-                        CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO AUDIO]: {resultado_audio}"]})
+                        config.estado.agregar_mensaje_chat(
+                            {'role': 'user', 'parts': [f"[RESULTADO AUDIO]: {resultado_audio}"]},
+                            contar_para_perfil=False
+                        )
                         if ui_callback:
                             ui_callback("⚙️ Sistema", f"🔊 {resultado_audio}", "#80868B")
                         # FIX: antes el resultado REAL del comando de audio solo se
@@ -434,13 +470,22 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                                     for msg in CONTEXTO_CHAT:
                                         if isinstance(msg.get('parts', [''])[0], str) and f"[CONTENIDO DE '{ruta_real_edit}']:" in msg['parts'][0]:
                                             msg['parts'][0] = f"[CONTENIDO DE '{ruta_real_edit}']:\n{nuevo_contenido}"
-                                    CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Modificación exitosa en {ruta_edit}"]})
+                                    config.estado.agregar_mensaje_chat(
+                                        {'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Modificación exitosa en {ruta_edit}"]},
+                                        contar_para_perfil=False
+                                    )
                                     if ui_callback:
                                         ui_callback("⚙️ Sistema", f"✅ Edición rápida en {ruta_edit}", "#86efac")
                             else:
-                                CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Difiere en espacios. Sé más preciso."]})
+                                config.estado.agregar_mensaje_chat(
+                                    {'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Difiere en espacios. Sé más preciso."]},
+                                    contar_para_perfil=False
+                                )
                         else:
-                            CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Fallo: Texto no encontrado."]})
+                            config.estado.agregar_mensaje_chat(
+                                {'role': 'user', 'parts': [f"[RESULTADO EDICIÓN] Fallo: Texto no encontrado."]},
+                                contar_para_perfil=False
+                            )
                             if ui_callback:
                                 ui_callback("⚙️ Sistema", f"❌ Texto no encontrado en {ruta_edit}", "#ff4500")
                     else:
@@ -473,7 +518,8 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                     msg_alerta = f"⚠️ ¿Confirmás que querés guardar esto en la bóveda?\n\n{dato[:200]}"
                     if ui_callback:
                         ui_callback("🤖 Argus", msg_alerta, "#FFA500")
-                    CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg_alerta]}])
+                    config.estado.agregar_mensaje_chat({'role': 'user', 'parts': [texto_usuario]})
+                    config.estado.agregar_mensaje_chat({'role': 'model', 'parts': [msg_alerta]})
                     return "INTERRUPTED"
                 continue
 
@@ -488,7 +534,8 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                     msg_alerta = f"⚠️ ALERTA: Vas a subir el proyecto a GitHub:\n'{ruta_real}'\n\n¿Autorizás el Push? (SÍ / NO)."
                     if ui_callback:
                         ui_callback("🤖 Argus", msg_alerta, "#FF4500")
-                    CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg_alerta]}])
+                    config.estado.agregar_mensaje_chat({'role': 'user', 'parts': [texto_usuario]})
+                    config.estado.agregar_mensaje_chat({'role': 'model', 'parts': [msg_alerta]})
                     return "INTERRUPTED"
                 continue
 
@@ -501,7 +548,8 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                     msg_alerta = f"⚠️ ALERTA CRÍTICA: Vas a DESVINCULAR y subir el repo.\n\n¿Autorizás esta operación crítica? (SÍ / NO)"
                     if ui_callback:
                         ui_callback("🤖 Argus", msg_alerta, "#FF4500")
-                    CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg_alerta]}])
+                    config.estado.agregar_mensaje_chat({'role': 'user', 'parts': [texto_usuario]})
+                    config.estado.agregar_mensaje_chat({'role': 'model', 'parts': [msg_alerta]})
                     return "INTERRUPTED"
                 continue
 
@@ -514,7 +562,8 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                     msg_alerta = f"⚠️ ALERTA: Vas a ejecutar un comando libre en Git.\nComando: {partes[1].strip()}\n\n¿Autorizás? (SÍ / NO)"
                     if ui_callback:
                         ui_callback("🤖 Argus", msg_alerta, "#FF4500")
-                    CONTEXTO_CHAT.extend([{'role': 'user', 'parts': [texto_usuario]}, {'role': 'model', 'parts': [msg_alerta]}])
+                    config.estado.agregar_mensaje_chat({'role': 'user', 'parts': [texto_usuario]})
+                    config.estado.agregar_mensaje_chat({'role': 'model', 'parts': [msg_alerta]})
                     return "INTERRUPTED"
                 continue
 
@@ -593,7 +642,10 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                     if resultado.startswith("⚠️ No encontré el programa"):
                         if ui_callback:
                             ui_callback("⚙️ Sistema", resultado, "#FFA500")
-                        CONTEXTO_CHAT.append({'role': 'user', 'parts': [f"[SISTEMA] {resultado}"]})
+                        config.estado.agregar_mensaje_chat(
+                            {'role': 'user', 'parts': [f"[SISTEMA] {resultado}"]},
+                            contar_para_perfil=False
+                        )
                     else:
                         reportes_acciones.append(f"Acción SO: {resultado}")
                 continue

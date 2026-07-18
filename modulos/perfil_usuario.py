@@ -272,7 +272,22 @@ def extraer_hechos_candidatos(ultimos_mensajes: list) -> list:
     from modulos.ia import cliente_genai
     from google.genai import types
 
-    conversacion = "\n".join(str(m) for m in ultimos_mensajes[-30:])
+    # Filtrar mensajes técnicos internos largos que no aportan al perfil
+    # y encarecen innecesariamente la llamada a Gemini.
+    mensajes_filtrados = []
+    for m in ultimos_mensajes[-30:]:
+        texto = str(m)
+        # Si es un mensaje técnico interno ([CONTENIDO DE], [RESULTADO ESCRITURA],
+        # [RESULTADO EDICIÓN], [RESULTADO AUDIO], [SISTEMA]) con más de 500
+        # caracteres, reemplazarlo por un placeholder para no desperdiciar
+        # tokens ni contaminar el extractor de perfil.
+        if any(sig in texto for sig in ["[CONTENIDO DE '", "[RESULTADO ESCRITURA]",
+                "[RESULTADO EDICIÓN]", "[RESULTADO AUDIO]", "[SISTEMA]"]):
+            if len(texto) > 500:
+                mensajes_filtrados.append("[mensaje técnico interno — omitido por longitud]")
+                continue
+        mensajes_filtrados.append(texto)
+    conversacion = "\n".join(mensajes_filtrados)
 
     prompt = (
         "Eres un extractor de hechos de perfil de usuario. Analizá la conversación "
@@ -476,100 +491,6 @@ def extraer_y_procesar_sesion(ultimos_mensajes: list) -> None:
 
     except Exception as e:
         logger.exception(f"Error en extraer_y_procesar_sesion: {e}")
-
-
-# ─── EXTRACCIÓN CON LLM (ANTIGUA, reescribía el perfil entero) ────────────────
-# Se mantiene temporalmente por compatibilidad con el bloque OLD en ia.py.
-# Será eliminada cuando se remueva ese bloque.
-
-def extraer_hechos_de_sesion(ultimos_mensajes: list, perfil_actual: dict) -> dict:
-    """
-    [DEPRECADO] Analiza los últimos mensajes de la conversación usando Gemini Flash-Lite
-    y devuelve el perfil actualizado. Reemplazado por extraer_hechos_candidatos() + rutear_hecho().
-
-    Args:
-        ultimos_mensajes: lista de strings con los mensajes más recientes.
-        perfil_actual: dict con el perfil existente.
-
-    Returns:
-        dict con el perfil actualizado (ya sanitizado y fusionado).
-    """
-    if not ultimos_mensajes:
-        return _sanitizar_perfil_completo(perfil_actual)
-
-    from modulos.ia import cliente_genai
-    from google.genai import types
-
-    hoy = datetime.date.today().strftime("%Y-%m-%d")
-    perfil_json = json.dumps(perfil_actual, ensure_ascii=False, indent=2)
-    conversacion = "\n".join(str(m) for m in ultimos_mensajes[-50:])
-
-    prompt = (
-        "Eres un extractor de perfil de usuario. Tu tarea es analizar la conversación "
-        "y el perfil actual, y devolver SOLO un JSON con el perfil actualizado.\n\n"
-        "REGLAS:\n"
-        "1. El JSON debe tener EXACTAMENTE esta estructura, sin claves extra:\n"
-        '   {\n'
-        '     "funcional": {\n'
-        '       "identidad": "",\n'
-        '       "proyecto_actual": "",\n'
-        '       "hardware_relevante": "",\n'
-        '       "preferencias_comunicacion": "",\n'
-        '       "rutina_uso": ""\n'
-        '     },\n'
-        '     "vida_personal": [\n'
-        '       {"tema": "string", "contenido": "string", "actualizado": "YYYY-MM-DD"}\n'
-        '     ]\n'
-        '   }\n'
-        "2. En 'funcional', SOLO podes completar el CONTENIDO de esas 5 claves. "
-        "NO agregues claves nuevas.\n"
-        "3. En 'vida_personal', cada entrada tiene tema libre (salud, "
-        "actividad_fisica, vehiculo, mascotas, etc.). Si encuentras info de un "
-        "tema que ya existe, actualiza su contenido. Si es un tema nuevo, agrega "
-        "una entrada nueva.\n"
-        "4. Si no hay información nueva relevante, devolvé el perfil actual sin cambios.\n"
-        "5. Devolvé SOLO el JSON, sin explicaciones ni markdown.\n\n"
-        f"Perfil actual:\n{perfil_json}\n\n"
-        f"Conversación reciente:\n{conversacion}\n\n"
-        "JSON actualizado:"
-    )
-
-    try:
-        respuesta = cliente_genai.models.generate_content(
-            model="gemini-3.1-flash-lite",
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.1,
-                max_output_tokens=2048
-            )
-        )
-        texto_respuesta = respuesta.text.strip()
-        # Limpiar posibles delimitadores markdown
-        if texto_respuesta.startswith("```"):
-            texto_respuesta = texto_respuesta.split("\n", 1)[-1]
-        if texto_respuesta.endswith("```"):
-            texto_respuesta = texto_respuesta.rsplit("```", 1)[0]
-        texto_respuesta = texto_respuesta.strip()
-
-        perfil_nuevo = json.loads(texto_respuesta)
-        if not isinstance(perfil_nuevo, dict):
-            raise ValueError("Respuesta no es un dict")
-
-    except Exception as e:
-        logger.exception(f"Error extrayendo hechos de sesión: {e}")
-        # Si falla la IA, devolver perfil actual sin cambios
-        return _sanitizar_perfil_completo(perfil_actual)
-
-    # Sanitizar: limpiar claves extra del modelo
-    perfil_nuevo = _sanitizar_funcional(perfil_nuevo)
-
-    # Fusionar vida_personal (evitar duplicados)
-    vida_actual = perfil_actual.get("vida_personal", [])
-    vida_nueva = perfil_nuevo.get("vida_personal", [])
-    perfil_nuevo["vida_personal"] = _fusionar_vida_personal(vida_actual, vida_nueva)
-
-    return perfil_nuevo
-
 
 # ─── CONSOLIDACIÓN ───────────────────────────────────────────────────────────
 

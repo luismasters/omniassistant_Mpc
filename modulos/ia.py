@@ -43,9 +43,6 @@ from modulos.prompts import (
 # ─── Perfil de usuario persistente ─────────────────────────────────────
 from modulos.perfil_usuario import (
     texto_perfil_para_prompt,
-    extraer_hechos_de_sesion,
-    guardar_perfil,
-    cargar_perfil
 )
 
 # ─── Usar la instancia global del gestor ────────────────────────────────
@@ -317,10 +314,8 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             ui_callback("🤖 Argus", msg, "#FF4500" if "abortado" in msg else "#00E5FF")
         if modo_voz:
             hablar_no_bloqueante(msg)
-        CONTEXTO_CHAT.extend([
-            {'role': 'user', 'parts': [texto_usuario]},
-            {'role': 'model', 'parts': [msg]}
-        ])
+        config.estado.agregar_mensaje_chat({'role': 'user', 'parts': [texto_usuario]})
+        config.estado.agregar_mensaje_chat({'role': 'model', 'parts': [msg]})
         return
 
     if PENDIENTE_DE_GIT:
@@ -351,10 +346,8 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             ui_callback("🤖 Argus", msg, "#FF4500" if "cancelada" in msg else "#00E5FF")
         if modo_voz:
             hablar_no_bloqueante("Operación finalizada." if "completada" in msg else "Operación cancelada.")
-        CONTEXTO_CHAT.extend([
-            {'role': 'user', 'parts': [texto_usuario]},
-            {'role': 'model', 'parts': [msg]}
-        ])
+        config.estado.agregar_mensaje_chat({'role': 'user', 'parts': [texto_usuario]})
+        config.estado.agregar_mensaje_chat({'role': 'model', 'parts': [msg]})
         return
 
     # ─── ESCUDO DE CONFIRMACIÓN: GUARDAR EN BÓVEDA ────────────────────
@@ -376,10 +369,8 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             ui_callback("🤖 Argus", msg, "#00E5FF" if "cancelado" in msg else "#86EFAC")
         if modo_voz:
             hablar_no_bloqueante("Listo." if "cancelado" not in msg else "Cancelado.")
-        CONTEXTO_CHAT.extend([
-            {'role': 'user', 'parts': [texto_usuario]},
-            {'role': 'model', 'parts': [msg]}
-        ])
+        config.estado.agregar_mensaje_chat({'role': 'user', 'parts': [texto_usuario]})
+        config.estado.agregar_mensaje_chat({'role': 'model', 'parts': [msg]})
         return
 
     # =================================================================
@@ -860,10 +851,8 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                         _procesar_buffer_voz(buffer_voz_web, forzar=True)
                     if ui_callback:
                         ui_callback("", "", "#E8EAED", nueva_linea=True)
-                    CONTEXTO_CHAT.extend([
-                        {'role': 'user', 'parts': [texto_usuario]},
-                        {'role': 'model', 'parts': [respuesta_final]}
-                    ])
+                    config.estado.agregar_mensaje_chat({'role': 'user', 'parts': [texto_usuario]})
+                    config.estado.agregar_mensaje_chat({'role': 'model', 'parts': [respuesta_final]})
                     return
                 except Exception as e:
                     logger.exception("Error en búsqueda web secundaria")
@@ -874,13 +863,8 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         hablar_no_bloqueante(respuesta_ia)
 
     if respuesta_ia and not error_ocurrido:
-        CONTEXTO_CHAT.extend([
-            {'role': 'user', 'parts': [texto_usuario]},
-            {'role': 'model', 'parts': [respuesta_ia]}
-        ])
-
-    if len(CONTEXTO_CHAT) > config.MAX_MENSAJES_CONTEXTO:
-        config.estado.contexto_chat = CONTEXTO_CHAT[-config.MAX_MENSAJES_CONTEXTO:]
+        config.estado.agregar_mensaje_chat({'role': 'user', 'parts': [texto_usuario]})
+        config.estado.agregar_mensaje_chat({'role': 'model', 'parts': [respuesta_ia]})
 
 
 # =====================================================================

@@ -88,11 +88,12 @@ class EstadoGlobal:
 
     # ─── MÉTODOS SEGUROS PARA MODIFICAR EL ESTADO ──────────────────────
 
-    def agregar_mensaje_chat(self, mensaje):
+    def agregar_mensaje_chat(self, mensaje, contar_para_perfil=True):
         """Añade un mensaje al contexto del chat de forma thread-safe."""
         with self._lock:
             self.contexto_chat.append(mensaje)
-            self.mensajes_desde_ultima_extraccion += 1
+            if contar_para_perfil:
+                self.mensajes_desde_ultima_extraccion += 1
             if len(self.contexto_chat) > MAX_MENSAJES_CONTEXTO:
                 self.contexto_chat = self.contexto_chat[-MAX_MENSAJES_CONTEXTO:]
 
