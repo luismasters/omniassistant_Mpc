@@ -18,6 +18,7 @@ import modulos.ia as motor_ia
 from modulos.memoria import guardar_snapshot, iniciar_radar_proyecto, guardar_recuerdo
 from modulos.archivos import leer_contenido_archivo
 from modulos.gamepad_control import GestorGamepad
+from modulos.rostro_argus import RostroArgus
 
 # ─── Paleta ───────────────────────────────────────────────────────────────────
 BG_MAIN        = "#141414"
@@ -287,10 +288,14 @@ class EmoBezelFace(ctk.CTkFrame):
             "confirm": "#39ff14"    # Verde confirmación
         }
         
+        self._idle_action = "none"
+        self._idle_action_timer = 0
+        
         # Iniciar bucles
         self.loop_render()
         self.loop_parpadeo()
         self.loop_saccades()
+        self.after(5000, self.loop_idle_actions)
 
     def cambiar_estado(self, nuevo_estado, msg=""):
         self.estado = nuevo_estado
@@ -359,6 +364,40 @@ class EmoBezelFace(ctk.CTkFrame):
             self.tgt_zoom_x_der = 1.1
             self.tgt_zoom_y_der = 1.1
 
+    def loop_idle_actions(self):
+        import random
+        if self.estado == "idle" and self._idle_action == "none":
+            accion = random.choice(["wink", "sigh", "curious", "yawn"])
+            self._idle_action = accion
+            self._idle_action_timer = 0
+            
+            duracion = 2000
+            if accion == "wink":
+                duracion = 1000
+                self.tgt_zoom_y_izq = 0.01
+            elif accion == "yawn":
+                duracion = 2500
+            elif accion == "sigh":
+                self.tgt_look_y = 4.0
+            elif accion == "curious":
+                self.tgt_look_x = -4.0
+                self.tgt_look_y = -3.0
+                self.tgt_zoom_y_izq = 0.7
+            
+            self.after(duracion, self.finalizar_idle_action)
+            
+        self.after(random.randint(12000, 22000), self.loop_idle_actions)
+        
+    def finalizar_idle_action(self):
+        self._idle_action = "none"
+        if self.estado == "idle":
+            self.tgt_zoom_x_izq = 1.0
+            self.tgt_zoom_y_izq = 1.0
+            self.tgt_zoom_x_der = 1.0
+            self.tgt_zoom_y_der = 1.0
+            self.tgt_look_x = 0.0
+            self.tgt_look_y = 0.0
+
     def loop_render(self):
         import math
         import random
@@ -399,11 +438,20 @@ class EmoBezelFace(ctk.CTkFrame):
         cy_i = self.izq_cy + err_y
         cy_d = self.der_cy + err_y
         
-        # Respiración en Idle
+        # Respiración en Idle y Acciones Inactivas
         if self.estado == "idle":
             resp = 1.0 + 0.02 * math.sin(self.tiempo * 2)
             zx_i *= resp; zy_i *= resp
             zx_d *= resp; zy_d *= resp
+            
+            if self._idle_action == "yawn":
+                zy_i *= 0.45
+                zy_d *= 0.45
+                zx_i *= 1.15
+                zx_d *= 1.15
+            elif self._idle_action == "sigh":
+                zy_i *= 0.75
+                zy_d *= 0.75
             
         # Animación de ojos al hablar
         elif self.estado == "talking":
@@ -485,7 +533,7 @@ class EmoBezelFace(ctk.CTkFrame):
         if rx <= 0 or ry <= 0:
             return
             
-        if self.estado == "confirm":
+        if self.estado == "confirm" or (self.estado == "idle" and self._idle_action == "wink"):
             if izquierdo:
                 # Guiño: Arco feliz
                 self.canvas.create_arc(
@@ -567,7 +615,13 @@ class EmoBezelFace(ctk.CTkFrame):
     def dibujar_boca_eilik(self, cx, cy, color):
         import math
         
-        if self.estado == "happy" or self.estado == "confirm":
+        if self.estado == "idle" and self._idle_action == "yawn":
+            self.canvas.create_oval(
+                cx - 3, cy - 5, cx + 3, cy + 5,
+                fill=color, outline=""
+            )
+            
+        elif self.estado in ["happy", "confirm"] or (self.estado == "idle" and self._idle_action == "wink"):
             self.canvas.create_arc(
                 cx - 10, cy - 7, cx + 10, cy + 7,
                 start=180, extent=180, style="pieslice",
@@ -578,7 +632,7 @@ class EmoBezelFace(ctk.CTkFrame):
                 fill="#ffffff", width=1.5, capstyle="round"
             )
             
-        elif self.estado in ["sad", "angry"]:
+        elif self.estado in ["sad", "angry"] or (self.estado == "idle" and self._idle_action == "sigh"):
             self.canvas.create_arc(
                 cx - 8, cy, cx + 8, cy + 10,
                 start=0, extent=180, style="arc",
@@ -618,7 +672,7 @@ class EmoBezelFace(ctk.CTkFrame):
 
     def loop_parpadeo(self):
         import random
-        if self.estado in ["idle", "listening", "talking", "happy", "confirm"]:
+        if self.estado in ["idle", "listening", "talking", "happy", "confirm"] and self._idle_action == "none":
             ant_y_izq = self.tgt_zoom_y_izq
             ant_y_der = self.tgt_zoom_y_der
             
@@ -636,7 +690,7 @@ class EmoBezelFace(ctk.CTkFrame):
 
     def loop_saccades(self):
         import random
-        if self.estado in ["idle", "listening"]:
+        if self.estado in ["idle", "listening"] and self._idle_action == "none":
             if random.random() < 0.65:
                 self.tgt_look_x = random.uniform(-6.0, 6.0)
                 self.tgt_look_y = random.uniform(-3.0, 3.0)
@@ -646,6 +700,7 @@ class EmoBezelFace(ctk.CTkFrame):
                 
         self.after(random.randint(1200, 3500), self.loop_saccades)
 
+# ArgusVectorFace ha sido removido y reemplazado por RostroArgus en modulos/rostro_argus.py
 class CodeBlock(ctk.CTkFrame):
     def __init__(self, parent, code, lang="", **kwargs):
         super().__init__(parent, fg_color=BG_CODE, corner_radius=8,
@@ -1157,11 +1212,11 @@ class OmniApp(ctk.CTk):
     def _activar_voz_desde_gamepad(self, condicion_sigue_presionado):
         if audio_modulo.hablando_actualmente:
             detener_voz()
-        self.after(0, lambda: self.face_widget.cambiar_estado("listening"))
+        self.after(0, lambda: self._cambiar_estado_rostro("listening"))
         self._buffer_inicio_ia = ""
         self._emocion_extraida = False
         texto_voz = capturar_voz_micro(condicion_seguir_grabando=condicion_sigue_presionado)
-        self.after(0, lambda: self.face_widget.cambiar_estado("thinking" if texto_voz else "idle"))
+        self.after(0, lambda: self._cambiar_estado_rostro("thinking" if texto_voz else "idle"))
         if texto_voz:
             self.after(0, self._agregar_usuario, f"🎮 {texto_voz}")
             self.burbuja_ia_actual = None
@@ -1237,17 +1292,40 @@ class OmniApp(ctk.CTk):
         sb.grid(row=0, column=0, rowspan=2, sticky="nsew")
         sb.grid_columnconfigure(0, weight=1)
 
-        # NUEVO: Cara interactiva de EMO en el sidebar
-        self.face_widget = EmoBezelFace(sb)
-        self.face_widget.grid(row=0, column=0, pady=(15, 5))
+        # NUEVO: Contenedor para alternar rostros interactivos
+        self.face_container = ctk.CTkFrame(sb, fg_color="transparent")
+        self.face_container.grid(row=0, column=0, pady=(15, 2))
+
+        self.emo_face = EmoBezelFace(self.face_container)
+        self.argus_face = RostroArgus(self.face_container, size=180)
+
+        self.face_widget_estado = "idle"
+        self.face_widget_msg = ""
+
+        # Por defecto, EMO activo
+        self.face_widget = self.emo_face
+        self.face_widget.grid(row=0, column=0)
+        self.argus_face.grid_forget()
+
+        # Selector Segmentado de Rostro
+        self.face_selector = ctk.CTkSegmentedButton(
+            sb, values=["EMO", "Argus"],
+            command=self._on_face_selected,
+            font=("Segoe UI", 9, "bold"),
+            fg_color="#1a1a2e",
+            selected_color="#7c3aed",
+            selected_hover_color="#8b5cf6"
+        )
+        self.face_selector.grid(row=1, column=0, padx=18, pady=(0, 8), sticky="ew")
+        self.face_selector.set("EMO")
 
         ctk.CTkLabel(sb, text="◆ Argus", font=(_F, TAMANO_BASE, "bold"),
-                     text_color=ACCENT).grid(row=1, column=0, padx=18, pady=(12,2), sticky="w")
+                     text_color=ACCENT).grid(row=2, column=0, padx=18, pady=(12,2), sticky="w")
         self.lbl_modelo_activo = ctk.CTkLabel(
             sb, text="🧠 Modelo: Gemini Flash",
             font=FONT_UI_SM, text_color="#86efac"
         )
-        self.lbl_modelo_activo.grid(row=2, column=0, padx=18, pady=(0,4), sticky="w")
+        self.lbl_modelo_activo.grid(row=3, column=0, padx=18, pady=(0,4), sticky="w")
 
         self.opt_modelo = ctk.CTkOptionMenu(
             sb,
@@ -1270,11 +1348,11 @@ class OmniApp(ctk.CTk):
             dropdown_text_color=TEXT_PRIMARY,
             height=28
         )
-        self.opt_modelo.grid(row=3, column=0, padx=18, pady=(0, 14), sticky="ew")
+        self.opt_modelo.grid(row=4, column=0, padx=18, pady=(0, 14), sticky="ew")
         self.opt_modelo.set("Por Defecto")
 
         ctk.CTkFrame(sb, height=1, fg_color=SIDEBAR_LINE).grid(
-            row=4, column=0, padx=0, sticky="ew")
+            row=5, column=0, padx=0, sticky="ew")
 
         textos_modelos = {
             "general":      "🧠 Modelo: Gemini Flash",
@@ -1290,7 +1368,7 @@ class OmniApp(ctk.CTk):
             ("💻  Modo Programador", lambda: self._cambiar_modo("programador")),
         ]
         self.botones_ui = []
-        for i, (txt, cmd) in enumerate(botones, start=5):
+        for i, (txt, cmd) in enumerate(botones, start=6):
             btn = ctk.CTkButton(
                 sb, text=txt, anchor="w", font=FONT_UI,
                 fg_color="transparent", hover_color="#16162a",
@@ -1344,6 +1422,24 @@ class OmniApp(ctk.CTk):
             font=FONT_UI_SM, text_color=TEXT_DIM
         ).grid(row=14, column=0, padx=18, pady=16, sticky="sw")
         sb.grid_rowconfigure(14, weight=1)
+
+    def _on_face_selected(self, valor):
+        self.emo_face.grid_forget()
+        self.argus_face.grid_forget()
+        
+        if valor == "EMO":
+            self.face_widget = self.emo_face
+        else:
+            self.face_widget = self.argus_face
+            
+        self.face_widget.grid(row=0, column=0)
+        self.face_widget.cambiar_estado(self.face_widget_estado, self.face_widget_msg)
+
+    def _cambiar_estado_rostro(self, estado, msg=""):
+        self.face_widget_estado = estado
+        self.face_widget_msg = msg
+        if hasattr(self, "face_widget"):
+            self.face_widget.cambiar_estado(estado, msg)
 
     def _on_modelo_changed(self, valor):
         state.modelo_seleccionado = valor
@@ -1818,11 +1914,11 @@ class OmniApp(ctk.CTk):
                 if keyboard.is_pressed(TECLA_HABLAR):
                     if audio_modulo.hablando_actualmente:
                         detener_voz()
-                    self.after(0, lambda: self.face_widget.cambiar_estado("listening"))
+                    self.after(0, lambda: self._cambiar_estado_rostro("listening"))
                     self._buffer_inicio_ia = ""
                     self._emocion_extraida = False
                     texto_voz = capturar_voz_micro()
-                    self.after(0, lambda: self.face_widget.cambiar_estado("thinking" if texto_voz else "idle"))
+                    self.after(0, lambda: self._cambiar_estado_rostro("thinking" if texto_voz else "idle"))
                     if texto_voz:
                         self.after(0, self._agregar_usuario, f"🎤 {texto_voz}")
                         self.burbuja_ia_actual = None
@@ -1851,7 +1947,7 @@ class OmniApp(ctk.CTk):
         self._texto_real = ""
         self._agregar_usuario(texto)
         self.burbuja_ia_actual = None
-        self.face_widget.cambiar_estado("thinking")
+        self._cambiar_estado_rostro("thinking")
         self._buffer_inicio_ia = ""
         self._emocion_extraida = False
         try:
@@ -1871,11 +1967,11 @@ class OmniApp(ctk.CTk):
                     msg_limpio = texto.replace("*", "").replace("(", "").replace(")", "").strip()
                     if "Acción SO:" in msg_limpio:
                         msg_limpio = msg_limpio.split("Acción SO:")[1].strip()
-                    self.face_widget.cambiar_estado("confirm", msg_limpio)
-                    self.after(3500, lambda: self.face_widget.cambiar_estado("idle") if self.face_widget.estado == "confirm" else None)
+                    self._cambiar_estado_rostro("confirm", msg_limpio)
+                    self.after(3500, lambda: self._cambiar_estado_rostro("idle") if self.face_widget_estado == "confirm" else None)
                 elif texto.strip().startswith("❌"):
-                    self.face_widget.cambiar_estado("error")
-                    self.after(4000, lambda: self.face_widget.cambiar_estado("idle") if self.face_widget.estado == "error" else None)
+                    self._cambiar_estado_rostro("error")
+                    self.after(4000, lambda: self._cambiar_estado_rostro("idle") if self.face_widget_estado == "error" else None)
 
                 self._agregar_sistema(texto)
                 self._scroll_abajo()
@@ -1900,7 +1996,7 @@ class OmniApp(ctk.CTk):
                 match = re.search(r"\[EMOTION:\s*(\w+)\]", self._buffer_inicio_ia)
                 if match:
                     emocion = match.group(1).lower()
-                    self.face_widget.cambiar_estado(emocion)
+                    self._cambiar_estado_rostro(emocion)
                     self._buffer_inicio_ia = re.sub(r"\[EMOTION:\s*\w+\]", "", self._buffer_inicio_ia)
                     self._emocion_extraida = True
                     texto_a_mostrar = self._buffer_inicio_ia
@@ -1913,8 +2009,8 @@ class OmniApp(ctk.CTk):
                     texto_a_mostrar = ""
 
             if not self.burbuja_ia_actual:
-                if self.face_widget.estado == "thinking":
-                    self.face_widget.cambiar_estado("idle")
+                if self.face_widget_estado == "thinking":
+                    self._cambiar_estado_rostro("idle")
                 self.burbuja_ia_actual = AIBubble(self.chat_scroll)
                 self.burbuja_ia_actual.pack(fill="x", padx=self.chat_pad_x, pady=(2,6))
                 self.burbuja_ia_actual.mostrar_carga()

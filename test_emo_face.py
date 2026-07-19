@@ -61,10 +61,14 @@ class EmoBezelFace(ctk.CTkFrame):
             "confirm": "#39ff14"    # Verde confirmación
         }
         
+        self._idle_action = "none"
+        self._idle_action_timer = 0
+        
         # Iniciar bucles
         self.loop_render()
         self.loop_parpadeo()
         self.loop_saccades()
+        self.after(5000, self.loop_idle_actions)
 
     def cambiar_estado(self, nuevo_estado, msg=""):
         self.estado = nuevo_estado
@@ -134,6 +138,40 @@ class EmoBezelFace(ctk.CTkFrame):
             self.tgt_zoom_x_der = 1.1
             self.tgt_zoom_y_der = 1.1
 
+    def loop_idle_actions(self):
+        import random
+        if self.estado == "idle" and self._idle_action == "none":
+            accion = random.choice(["wink", "sigh", "curious", "yawn"])
+            self._idle_action = accion
+            self._idle_action_timer = 0
+            
+            duracion = 2000
+            if accion == "wink":
+                duracion = 1000
+                self.tgt_zoom_y_izq = 0.01
+            elif accion == "yawn":
+                duracion = 2500
+            elif accion == "sigh":
+                self.tgt_look_y = 6.0
+            elif accion == "curious":
+                self.tgt_look_x = -8.0
+                self.tgt_look_y = -6.0
+                self.tgt_zoom_y_izq = 0.7
+            
+            self.after(duracion, self.finalizar_idle_action)
+            
+        self.after(random.randint(12000, 22000), self.loop_idle_actions)
+        
+    def finalizar_idle_action(self):
+        self._idle_action = "none"
+        if self.estado == "idle":
+            self.tgt_zoom_x_izq = 1.0
+            self.tgt_zoom_y_izq = 1.0
+            self.tgt_zoom_x_der = 1.0
+            self.tgt_zoom_y_der = 1.0
+            self.tgt_look_x = 0.0
+            self.tgt_look_y = 0.0
+
     def loop_render(self):
         self.canvas.delete("all")
         self.tiempo += 0.04
@@ -163,11 +201,20 @@ class EmoBezelFace(ctk.CTkFrame):
         cy_i = self.izq_cy + err_y
         cy_d = self.der_cy + err_y
         
-        # Respiración en Idle
+        # Respiración en Idle y Acciones Inactivas
         if self.estado == "idle":
             resp = 1.0 + 0.02 * math.sin(self.tiempo * 2)
             zx_i *= resp; zy_i *= resp
             zx_d *= resp; zy_d *= resp
+            
+            if self._idle_action == "yawn":
+                zy_i *= 0.45
+                zy_d *= 0.45
+                zx_i *= 1.15
+                zx_d *= 1.15
+            elif self._idle_action == "sigh":
+                zy_i *= 0.75
+                zy_d *= 0.75
             
         # Animación de ojos al hablar
         elif self.estado == "talking":
@@ -250,7 +297,7 @@ class EmoBezelFace(ctk.CTkFrame):
         if rx <= 0 or ry <= 0:
             return
             
-        if self.estado == "confirm":
+        if self.estado == "confirm" or (self.estado == "idle" and self._idle_action == "wink"):
             if izquierdo:
                 # Ojo izquierdo guiña: un arco feliz de neón (^ )
                 self.canvas.create_arc(
@@ -332,7 +379,15 @@ class EmoBezelFace(ctk.CTkFrame):
                 self.canvas.create_polygon(tx - 3.5, ty + 3, tx, ty - 2, tx + 3.5, ty + 3, fill="#3b82f6", outline="")
 
     def dibujar_boca_eilik(self, cx, cy, color):
-        if self.estado == "happy" or self.estado == "confirm":
+        import math
+        
+        if self.estado == "idle" and self._idle_action == "yawn":
+            self.canvas.create_oval(
+                cx - 5, cy - 8, cx + 5, cy + 8,
+                fill=color, outline=""
+            )
+            
+        elif self.estado in ["happy", "confirm"] or (self.estado == "idle" and self._idle_action == "wink"):
             self.canvas.create_arc(
                 cx - 18, cy - 12, cx + 18, cy + 12,
                 start=180, extent=180, style="pieslice",
@@ -343,7 +398,7 @@ class EmoBezelFace(ctk.CTkFrame):
                 fill="#ffffff", width=2.5, capstyle="round"
             )
             
-        elif self.estado in ["sad", "angry"]:
+        elif self.estado in ["sad", "angry"] or (self.estado == "idle" and self._idle_action == "sigh"):
             self.canvas.create_arc(
                 cx - 15, cy, cx + 15, cy + 18,
                 start=0, extent=180, style="arc",
@@ -382,7 +437,7 @@ class EmoBezelFace(ctk.CTkFrame):
             )
 
     def loop_parpadeo(self):
-        if self.estado in ["idle", "listening", "talking", "happy", "confirm"]:
+        if self.estado in ["idle", "listening", "talking", "happy", "confirm"] and self._idle_action == "none":
             ant_y_izq = self.tgt_zoom_y_izq
             ant_y_der = self.tgt_zoom_y_der
             
@@ -399,7 +454,7 @@ class EmoBezelFace(ctk.CTkFrame):
             self.tgt_zoom_y_der = y_der
 
     def loop_saccades(self):
-        if self.estado in ["idle", "listening"]:
+        if self.estado in ["idle", "listening"] and self._idle_action == "none":
             if random.random() < 0.65:
                 self.tgt_look_x = random.uniform(-10.0, 10.0)
                 self.tgt_look_y = random.uniform(-6.0, 6.0)

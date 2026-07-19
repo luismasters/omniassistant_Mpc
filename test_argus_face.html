@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Argus — Rostro v2 (doble ojo)</title>
+<style>
+  :root{
+    --void: #07070f;
+    --panel: rgba(18, 16, 34, 0.55);
+    --panel-border: rgba(124, 58, 237, 0.28);
+    --ink: #eceafb;
+    --ink-dim: #77758f;
+    --mono: 'Cascadia Code', 'Consolas', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  }
+
+  *{ box-sizing: border-box; }
+
+  html, body{ margin:0; width:100%; height:100%; background:var(--void); overflow:hidden; }
+
+  body{
+    display:flex; align-items:center; justify-content:center;
+    font-family: var(--mono); color: var(--ink);
+  }
+
+  .fondo{
+    position:fixed; inset:0; z-index:0;
+    background:
+      radial-gradient(ellipse 55% 40% at 50% 42%, rgba(124,58,237,0.10), transparent 65%),
+      radial-gradient(ellipse 120% 80% at 50% 100%, rgba(7,7,18,0.92), var(--void) 70%);
+  }
+
+  canvas#particulas{ position:fixed; inset:0; z-index:1; }
+
+  .escena{
+    position:relative; z-index:3;
+    display:flex; flex-direction:column; align-items:center;
+    gap: clamp(14px, 2.6vh, 28px);
+    padding: 22px;
+  }
+
+  /* ─── Escenario del rostro ─────────────────────────────────────────── */
+  .stage{
+    --sc: #7c3aed;         /* color de estado */
+    --sc-soft: rgba(124,58,237,0.32);
+    position:relative;
+    width: clamp(280px, 42vw, 460px);
+    transition: --sc 0.6s ease;
+  }
+
+  .stage::after{
+    content:""; position:absolute; left:50%; bottom:-14%;
+    width:110%; height:34%; transform:translateX(-50%);
+    background: radial-gradient(ellipse, var(--sc-soft), transparent 70%);
+    filter: blur(8px); z-index:0; transition: background 0.6s ease;
+  }
+
+  .stage svg{ position:relative; z-index:1; width:100%; height:auto; overflow:visible; }
+
+  /* Paleta de 11 estados */
+  .stage[data-state="idle"]      { --sc:#7c3aed; --sc-soft:rgba(124,58,237,0.32); }
+  .stage[data-state="listening"] { --sc:#5eead4; --sc-soft:rgba(94,234,212,0.35); }
+  .stage[data-state="thinking"]  { --sc:#a78bfa; --sc-soft:rgba(167,139,250,0.32); }
+  .stage[data-state="speaking"]  { --sc:#8b5cf6; --sc-soft:rgba(139,92,246,0.36); }
+  .stage[data-state="happy"]     { --sc:#ffd166; --sc-soft:rgba(255,209,102,0.38); }
+  .stage[data-state="surprised"] { --sc:#4fd1ff; --sc-soft:rgba(79,209,255,0.38); }
+  .stage[data-state="confused"]  { --sc:#34d399; --sc-soft:rgba(52,211,153,0.32); }
+  .stage[data-state="sad"]       { --sc:#6e8cae; --sc-soft:rgba(110,140,174,0.30); }
+  .stage[data-state="angry"]     { --sc:#ff2d55; --sc-soft:rgba(255,45,85,0.4); }
+  .stage[data-state="sleepy"]    { --sc:#8686a8; --sc-soft:rgba(134,134,168,0.26); }
+  .stage[data-state="error"]     { --sc:#ff9f1c; --sc-soft:rgba(255,159,28,0.4); }
+
+  /* ─── Visor ─────────────────────────────────────────────────────────── */
+  .visor{
+    fill: rgba(255,255,255,0.02);
+    stroke: var(--sc);
+    stroke-width: 1.4;
+    transition: stroke 0.6s ease;
+  }
+  .visor-brillo{
+    stroke: var(--sc);
+    stroke-width: 1;
+    opacity: 0.35;
+    transition: stroke 0.6s ease;
+  }
+
+  /* ─── Ojos ──────────────────────────────────────────────────────────── */
+  .ojo-forma{
+    fill: url(#gradOjo);
+    transition: transform 0.42s cubic-bezier(.22,1,.36,1);
+  }
+  #ojoIzq{ transform-origin: 150px 120px; }
+  #ojoDer{ transform-origin: 250px 120px; }
+
+  .pupila{ fill: var(--void); transition: transform 0.4s ease; }
+  .brillo-ojo{ fill:#fff; opacity:0.9; }
+
+  /* ─── Cejas ─────────────────────────────────────────────────────────── */
+  .ceja{
+    fill: var(--sc);
+    transition: transform 0.42s cubic-bezier(.22,1,.36,1), fill 0.6s ease;
+  }
+  #cejaIzq{ transform-origin: 150px 78px; }
+  #cejaDer{ transform-origin: 250px 78px; }
+
+  /* ─── Variantes de boca (se muestra/oculta 1 por estado) ─────────────── */
+  .boca-variante{
+    opacity: 0;
+    transform: scale(0.85);
+    transform-origin: 200px 208px;
+    transition: opacity 0.3s ease, transform 0.3s cubic-bezier(.22,1,.36,1);
+  }
+  .boca-variante.activa{ opacity: 1; transform: scale(1); }
+  .boca-variante path, .boca-variante rect, .boca-variante circle, .boca-variante polyline{
+    fill: none; stroke: var(--sc); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round;
+    transition: stroke 0.6s ease;
+  }
+  #bocaSorpresa circle{ fill: var(--sc); stroke:none; opacity:0.85; }
+  #bocaHabla rect{ fill: var(--sc); stroke:none; }
+
+  /* ─── Lágrima (solo triste) ────────────────────────────────────────── */
+  .lagrima{ fill: var(--sc); opacity: 0; }
+  .stage[data-state="sad"] .lagrima{
+    opacity: 0.85;
+    animation: caer-lagrima 3.6s ease-in infinite;
+  }
+  @keyframes caer-lagrima{
+    0%{ transform: translateY(0); opacity:0; }
+    10%{ opacity:0.85; }
+    75%{ opacity:0.6; }
+    100%{ transform: translateY(22px); opacity:0; }
+  }
+
+  /* ─── Z de sueño ───────────────────────────────────────────────────── */
+  .zzz{ opacity:0; fill: var(--sc); font-family: var(--mono); font-weight:700; }
+  .stage[data-state="sleepy"] .zzz{ opacity:1; }
+  .stage[data-state="sleepy"] .z1{ animation: flotar-z 3.2s ease-in infinite; }
+  .stage[data-state="sleepy"] .z2{ animation: flotar-z 3.2s ease-in 1.1s infinite; }
+  .stage[data-state="sleepy"] .z3{ animation: flotar-z 3.2s ease-in 2.2s infinite; }
+  @keyframes flotar-z{
+    0%{ transform: translate(0,0) scale(0.7); opacity:0; }
+    15%{ opacity:0.9; }
+    100%{ transform: translate(14px,-26px) scale(1.15); opacity:0; }
+  }
+
+  /* ══════════════════════ ESTADOS: OJOS + CEJAS ═══════════════════════ */
+
+  /* idle */
+  .stage[data-state="idle"] #ojoIzq, .stage[data-state="idle"] #ojoDer{ transform: scaleY(1); }
+
+  /* listening: bien abiertos, atentos */
+  .stage[data-state="listening"] #ojoIzq, .stage[data-state="listening"] #ojoDer{ transform: scaleY(1.16); }
+  .stage[data-state="listening"] .pupila{ transform: scale(1.15); }
+  .stage[data-state="listening"] #cejaIzq{ transform: translateY(-6px); }
+  .stage[data-state="listening"] #cejaDer{ transform: translateY(-6px); }
+
+  /* thinking: entrecerrados, mirada que deriva, cejas fruncidas suave */
+  .stage[data-state="thinking"] #ojoIzq, .stage[data-state="thinking"] #ojoDer{ transform: scaleY(0.68); }
+  .stage[data-state="thinking"] #cejaIzq{ transform: translateY(2px) rotate(6deg); }
+  .stage[data-state="thinking"] #cejaDer{ transform: translateY(2px) rotate(-6deg); }
+  .stage[data-state="thinking"] .pupila{ animation: derivar 3.4s ease-in-out infinite; }
+  @keyframes derivar{
+    0%, 100%{ transform: translateX(-3px); }
+    50%{ transform: translateX(3px); }
+  }
+
+  /* speaking: leve rebote */
+  .stage[data-state="speaking"] .pupila{ animation: rebote 0.5s ease-in-out infinite alternate; }
+  @keyframes rebote{ from{ transform: translateY(0); } to{ transform: translateY(1.5px); } }
+
+  /* happy: ojos casi cerrados en curva feliz, cejas relajadas arriba */
+  .stage[data-state="happy"] #ojoIzq, .stage[data-state="happy"] #ojoDer{ transform: scaleY(0.32); }
+  .stage[data-state="happy"] #cejaIzq{ transform: translateY(-3px) rotate(-4deg); }
+  .stage[data-state="happy"] #cejaDer{ transform: translateY(-3px) rotate(4deg); }
+
+  /* surprised: ojos muy abiertos, cejas muy arriba, pupila chica */
+  .stage[data-state="surprised"] #ojoIzq, .stage[data-state="surprised"] #ojoDer{ transform: scaleY(1.4); }
+  .stage[data-state="surprised"] .pupila{ transform: scale(0.8); }
+  .stage[data-state="surprised"] #cejaIzq{ transform: translateY(-13px); }
+  .stage[data-state="surprised"] #cejaDer{ transform: translateY(-13px); }
+
+  /* confused: asimétrico — una ceja arriba, un ojo grande y otro chico */
+  .stage[data-state="confused"] #ojoIzq{ transform: scaleY(0.55); }
+  .stage[data-state="confused"] #ojoDer{ transform: scaleY(1.18); }
+  .stage[data-state="confused"] #cejaIzq{ transform: translateY(0px) rotate(2deg); }
+  .stage[data-state="confused"] #cejaDer{ transform: translateY(-12px) rotate(-10deg); }
+
+  /* sad: ojos caídos, cejas en ángulo triste, pupilas hacia abajo */
+  .stage[data-state="sad"] #ojoIzq, .stage[data-state="sad"] #ojoDer{ transform: scaleY(0.7); }
+  .stage[data-state="sad"] .pupila{ transform: translateY(4px); }
+  .stage[data-state="sad"] #cejaIzq{ transform: translateY(-2px) rotate(-16deg) translateX(4px); }
+  .stage[data-state="sad"] #cejaDer{ transform: translateY(-2px) rotate(16deg) translateX(-4px); }
+
+  /* angry: ranura, cejas en V marcada */
+  .stage[data-state="angry"] #ojoIzq, .stage[data-state="angry"] #ojoDer{ transform: scaleY(0.5); }
+  .stage[data-state="angry"] #cejaIzq{ transform: translateY(6px) rotate(20deg) translateX(6px); }
+  .stage[data-state="angry"] #cejaDer{ transform: translateY(6px) rotate(-20deg) translateX(-6px); }
+
+  /* sleepy: casi cerrados, cejas caídas */
+  .stage[data-state="sleepy"] #ojoIzq, .stage[data-state="sleepy"] #ojoDer{
+    animation: cabecear 4.4s ease-in-out infinite;
+  }
+  .stage[data-state="sleepy"] #cejaIzq{ transform: translateY(4px) rotate(-3deg); }
+  .stage[data-state="sleepy"] #cejaDer{ transform: translateY(4px) rotate(3deg); }
+  @keyframes cabecear{
+    0%, 100%{ transform: scaleY(0.16); }
+    50%{ transform: scaleY(0.3); }
+  }
+
+  /* error: parpadeo digital + jitter de pupilas */
+  .stage[data-state="error"] #ojoIzq, .stage[data-state="error"] #ojoDer{
+    animation: parpadeo-error 0.22s steps(2) infinite;
+  }
+  .stage[data-state="error"] .pupila{ animation: jitter-error 0.16s steps(3) infinite; }
+  .stage[data-state="error"] #cejaIzq, .stage[data-state="error"] #cejaDer{
+    animation: jitter-ceja 0.3s steps(4) infinite;
+  }
+  @keyframes parpadeo-error{ 0%,100%{ transform: scaleY(1); } 50%{ transform: scaleY(0.15); } }
+  @keyframes jitter-error{ 0%{ transform: translate(0,0);} 33%{ transform: translate(2px,-1px);} 66%{ transform: translate(-2px,1px);} 100%{ transform: translate(0,0);} }
+  @keyframes jitter-ceja{ 0%{ transform: translateY(0);} 50%{ transform: translateY(-3px) rotate(4deg);} 100%{ transform: translateY(0);} }
+
+  .stage.glitch-burst{ animation: sacudida 0.4s ease; }
+  @keyframes sacudida{
+    0%,100%{ transform: translate(0,0); filter:none; }
+    20%{ transform: translate(-4px,2px); filter: drop-shadow(2px 0 #ff2d55) drop-shadow(-2px 0 #5eead4); }
+    50%{ transform: translate(3px,-2px); }
+    80%{ transform: translate(2px,1px); filter:none; }
+  }
+
+  /* Parpadeo natural periódico */
+  .stage.blink #ojoIzq, .stage.blink #ojoDer{ transform: scaleY(0.08) !important; }
+
+  /* ─── Lectura HUD ─────────────────────────────────────────────────── */
+  .lectura{ text-align:center; letter-spacing:0.26em; font-size:11px; text-transform:uppercase; }
+  .lectura .etiqueta{ color:var(--ink-dim); }
+  .lectura .valor{
+    display:block; margin-top:4px; font-size:15px; letter-spacing:0.3em;
+    color: var(--sc); text-shadow: 0 0 14px var(--sc-soft);
+    transition: color 0.5s ease, text-shadow 0.5s ease;
+  }
+
+  /* ─── Dock ────────────────────────────────────────────────────────── */
+  .dock{
+    display:flex; flex-wrap:wrap; justify-content:center; gap:7px;
+    max-width:min(94vw, 700px); padding:10px;
+    background: var(--panel); border:1px solid var(--panel-border);
+    border-radius:14px; backdrop-filter: blur(10px);
+  }
+  .dock-btn{
+    display:flex; flex-direction:column; align-items:center; gap:3px;
+    min-width:66px; padding:8px 8px;
+    background: rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.08);
+    border-radius:9px; color: var(--ink-dim); font-family: var(--mono);
+    font-size:9px; letter-spacing:0.06em; text-transform:uppercase; cursor:pointer;
+    transition: all 0.2s ease;
+  }
+  .dock-btn svg{ width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:1.6; }
+  .dock-btn:hover{ color:var(--ink); border-color:rgba(255,255,255,0.18); transform:translateY(-1px); }
+  .dock-btn:focus-visible{ outline:2px solid #5eead4; outline-offset:2px; }
+  .dock-btn.is-active{
+    color: var(--void); background: var(--bc); border-color: var(--bc);
+    box-shadow: 0 0 16px var(--bc);
+  }
+  .dock-btn[data-state="idle"]{ --bc:#7c3aed; }
+  .dock-btn[data-state="listening"]{ --bc:#5eead4; }
+  .dock-btn[data-state="thinking"]{ --bc:#a78bfa; }
+  .dock-btn[data-state="speaking"]{ --bc:#8b5cf6; }
+  .dock-btn[data-state="happy"]{ --bc:#ffd166; }
+  .dock-btn[data-state="surprised"]{ --bc:#4fd1ff; }
+  .dock-btn[data-state="confused"]{ --bc:#34d399; }
+  .dock-btn[data-state="sad"]{ --bc:#6e8cae; }
+  .dock-btn[data-state="angry"]{ --bc:#ff2d55; }
+  .dock-btn[data-state="sleepy"]{ --bc:#8686a8; }
+  .dock-btn[data-state="error"]{ --bc:#ff9f1c; }
+
+  .creditos{ font-size:9px; letter-spacing:0.2em; color:var(--ink-dim); opacity:0.5; text-transform:uppercase; }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ animation-duration:0.01ms !important; animation-iteration-count:1 !important; transition-duration:0.15s !important; }
+  }
+  @media (max-width:460px){ .dock-btn{ min-width:56px; font-size:8px; } }
+</style>
+</head>
+<body>
+
+  <div class="fondo"></div>
+  <canvas id="particulas"></canvas>
+
+  <main class="escena">
+
+    <div class="stage" id="stage" data-state="idle">
+      <svg viewBox="0 0 400 260" aria-hidden="true">
+        <defs>
+          <radialGradient id="gradOjo" cx="50%" cy="35%" r="75%">
+            <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95"/>
+            <stop offset="45%" stop-color="var(--sc)" stop-opacity="0.95"/>
+            <stop offset="100%" stop-color="var(--sc)" stop-opacity="0.25"/>
+          </radialGradient>
+        </defs>
+
+        <!-- Visor -->
+        <rect class="visor" x="30" y="52" width="340" height="132" rx="66"/>
+        <rect class="visor-brillo" x="38" y="60" width="324" height="116" rx="58"/>
+
+        <!-- Ojo izquierdo -->
+        <g id="ojoIzq">
+          <rect class="ojo-forma" x="122" y="88" width="56" height="64" rx="28"/>
+          <circle class="pupila" cx="150" cy="120" r="10"/>
+          <circle class="brillo-ojo" cx="145" cy="112" r="3"/>
+        </g>
+
+        <!-- Ojo derecho -->
+        <g id="ojoDer">
+          <rect class="ojo-forma" x="222" y="88" width="56" height="64" rx="28"/>
+          <circle class="pupila" cx="250" cy="120" r="10"/>
+          <circle class="brillo-ojo" cx="245" cy="112" r="3"/>
+        </g>
+
+        <!-- Cejas -->
+        <rect id="cejaIzq" class="ceja" x="130" y="72" width="40" height="7" rx="3.5"/>
+        <rect id="cejaDer" class="ceja" x="230" y="72" width="40" height="7" rx="3.5"/>
+
+        <!-- Lágrima (solo triste) -->
+        <path class="lagrima" d="M 178 158 q 5 8 0 14 a 5 5 0 0 1 -5 -14 Z"/>
+
+        <!-- Zzz (solo con sueño) -->
+        <text class="zzz z1" x="272" y="70" font-size="16">Z</text>
+        <text class="zzz z2" x="286" y="58" font-size="12">Z</text>
+        <text class="zzz z3" x="296" y="48" font-size="9">Z</text>
+
+        <!-- Variantes de boca -->
+        <g id="bocaNeutra" class="boca-variante activa">
+          <path d="M 178 208 L 222 208"/>
+        </g>
+        <g id="bocaEscucha" class="boca-variante">
+          <path d="M 190 204 q 10 -8 20 0 q -10 10 -20 0 Z" style="fill:var(--sc); stroke:none; opacity:0.8;"/>
+        </g>
+        <g id="bocaHabla" class="boca-variante">
+          <rect x="182" y="200" width="36" height="10" rx="5" id="bocaHablaBarra"/>
+        </g>
+        <g id="bocaFeliz" class="boca-variante">
+          <path d="M 172 200 Q 200 226 228 200"/>
+        </g>
+        <g id="bocaSorpresa" class="boca-variante">
+          <circle cx="200" cy="210" r="12"/>
+        </g>
+        <g id="bocaConfundida" class="boca-variante">
+          <path d="M 174 206 q 8 -10 16 0 t 16 0 t 16 0"/>
+        </g>
+        <g id="bocaTriste" class="boca-variante">
+          <path d="M 174 216 Q 200 194 226 216"/>
+        </g>
+        <g id="bocaEnojada" class="boca-variante">
+          <path d="M 172 210 L 194 202 L 206 208 L 228 200"/>
+        </g>
+        <g id="bocaError" class="boca-variante">
+          <polyline points="172,206 186,196 200,214 214,196 228,206"/>
+        </g>
+      </svg>
+    </div>
+
+    <div class="lectura">
+      <span class="etiqueta">Estado</span>
+      <span class="valor" id="valorEstado">Reposo</span>
+    </div>
+
+    <nav class="dock" id="dock" aria-label="Panel de pruebas de emociones de Argus">
+      <button class="dock-btn" data-state="idle" type="button"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>Reposo</button>
+      <button class="dock-btn" data-state="listening" type="button"><svg viewBox="0 0 24 24"><path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 1 1-6 0V6a3 3 0 0 1 3-3Z"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>Escucha</button>
+      <button class="dock-btn" data-state="thinking" type="button"><svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="18" cy="12" r="1.4"/></svg>Piensa</button>
+      <button class="dock-btn" data-state="speaking" type="button"><svg viewBox="0 0 24 24"><path d="M3 12h2l2-6 3 12 3-9 2 3h5"/></svg>Habla</button>
+      <button class="dock-btn" data-state="happy" type="button"><svg viewBox="0 0 24 24"><path d="M8 14s1.6 2 4 2 4-2 4-2M8 9h.01M16 9h.01"/><circle cx="12" cy="12" r="9"/></svg>Feliz</button>
+      <button class="dock-btn" data-state="surprised" type="button"><svg viewBox="0 0 24 24"><circle cx="12" cy="14" r="2"/><circle cx="9" cy="9" r="1"/><circle cx="15" cy="9" r="1"/><circle cx="12" cy="12" r="9"/></svg>Sorpresa</button>
+      <button class="dock-btn" data-state="confused" type="button"><svg viewBox="0 0 24 24"><path d="M9 9a3 3 0 0 1 5-2M12 15v.01"/><circle cx="12" cy="12" r="9"/></svg>Confuso</button>
+      <button class="dock-btn" data-state="sad" type="button"><svg viewBox="0 0 24 24"><path d="M8 15s1.6-2 4-2 4 2 4 2M8 9h.01M16 9h.01"/><circle cx="12" cy="12" r="9"/></svg>Triste</button>
+      <button class="dock-btn" data-state="angry" type="button"><svg viewBox="0 0 24 24"><path d="M7 8l3 1.4M17 8l-3 1.4M8 16s1.8-2 4-2 4 2 4 2"/><circle cx="12" cy="12" r="9"/></svg>Enojo</button>
+      <button class="dock-btn" data-state="sleepy" type="button"><svg viewBox="0 0 24 24"><path d="M8 12h3M13 12h3"/><circle cx="12" cy="12" r="9"/></svg>Sueño</button>
+      <button class="dock-btn" data-state="error" type="button"><svg viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3Z"/><path d="M12 10v4M12 17h.01"/></svg>Error</button>
+    </nav>
+
+    <div class="creditos">Argus · Interfaz de rostro v2 · doble ojo</div>
+  </main>
+
+<script>
+(function(){
+  "use strict";
+
+  const ESTADOS = ["idle","listening","thinking","speaking","happy","surprised","confused","sad","angry","sleepy","error"];
+  const ETIQUETAS = {
+    idle:"Reposo", listening:"Escuchando", thinking:"Procesando", speaking:"Hablando",
+    happy:"Contento", surprised:"Sorprendido", confused:"Confundido", sad:"Triste",
+    angry:"Alerta", sleepy:"Con sueño", error:"Error"
+  };
+  const BOCA_POR_ESTADO = {
+    idle:"bocaNeutra", listening:"bocaEscucha", thinking:"bocaNeutra", speaking:"bocaHabla",
+    happy:"bocaFeliz", surprised:"bocaSorpresa", confused:"bocaConfundida", sad:"bocaTriste",
+    angry:"bocaEnojada", sleepy:"bocaNeutra", error:"bocaError"
+  };
+
+  const stage = document.getElementById("stage");
+  const valorEstado = document.getElementById("valorEstado");
+  const botones = document.querySelectorAll(".dock-btn");
+  const bocas = document.querySelectorAll(".boca-variante");
+  const barraHabla = document.getElementById("bocaHablaBarra");
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  let cicloHabla = null;
+
+  function mostrarBoca(id){
+    bocas.forEach(b => b.classList.toggle("activa", b.id === id));
+  }
+
+  function animarHabla(activar){
+    if (cicloHabla){ clearInterval(cicloHabla); cicloHabla = null; }
+    if (!activar || reduceMotion) return;
+    cicloHabla = setInterval(() => {
+      const h = 4 + Math.random() * 14;
+      barraHabla.setAttribute("height", h);
+      barraHabla.setAttribute("y", 205 - h / 2);
+      barraHabla.setAttribute("rx", h / 2);
+    }, 110);
+  }
+
+  function establecerEstado(nombre){
+    if (!ESTADOS.includes(nombre)) return;
+    stage.dataset.state = nombre;
+    valorEstado.textContent = ETIQUETAS[nombre];
+    botones.forEach(b => b.classList.toggle("is-active", b.dataset.state === nombre));
+    mostrarBoca(BOCA_POR_ESTADO[nombre]);
+    animarHabla(nombre === "speaking");
+    if (nombre === "error") lanzarGlitch();
+    window.dispatchEvent(new CustomEvent("argus:estado", { detail: { estado: nombre } }));
+  }
+
+  function lanzarGlitch(){
+    stage.classList.remove("glitch-burst");
+    void stage.offsetWidth;
+    stage.classList.add("glitch-burst");
+  }
+
+  botones.forEach(b => b.addEventListener("click", () => establecerEstado(b.dataset.state)));
+
+  function programarParpadeo(){
+    const espera = 2600 + Math.random() * 3400;
+    setTimeout(() => {
+      const actual = stage.dataset.state;
+      if (["idle","listening","thinking","happy","confused"].includes(actual) && !reduceMotion){
+        stage.classList.add("blink");
+        setTimeout(() => stage.classList.remove("blink"), 200);
+      }
+      programarParpadeo();
+    }, espera);
+  }
+  if (!reduceMotion) programarParpadeo();
+
+  // Partículas ambientales coloreadas según el estado activo
+  const canvas = document.getElementById("particulas");
+  const ctx = canvas.getContext("2d");
+  function redimensionar(){ canvas.width = innerWidth; canvas.height = innerHeight; }
+  addEventListener("resize", redimensionar);
+  redimensionar();
+
+  const N = 0;
+  const particulas = Array.from({ length:N }, () => ({
+    x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+    r: Math.random()*1.5+0.4, vy: -(Math.random()*0.15+0.05), a: Math.random()*0.5+0.12
+  }));
+
+  function ciclo(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    const color = getComputedStyle(stage).getPropertyValue("--sc").trim() || "#7c3aed";
+    particulas.forEach(p=>{
+      p.y += p.vy; if (p.y < -10){ p.y = canvas.height+10; p.x = Math.random()*canvas.width; }
+      ctx.beginPath(); ctx.fillStyle=color; ctx.globalAlpha=p.a;
+      ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    if (!reduceMotion) requestAnimationFrame(ciclo);
+  }
+  ciclo();
+
+  window.ArgusFace = {
+    setState: establecerEstado,
+    getState: () => stage.dataset.state,
+    states: ESTADOS.slice()
+  };
+
+  establecerEstado("idle");
+})();
+</script>
+</body>
+</html>

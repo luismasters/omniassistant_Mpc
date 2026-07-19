@@ -499,11 +499,16 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                     if ui_callback:
                         ui_callback("⚙️ Sistema", "📸 Capturando pantalla...", "#80868B")
                     winsound.Beep(1500, 100)
-                    num_pantalla = 2 if any(p in texto_usuario_lower for p in ["1", "uno", "la 1", "el 1"]) else 1
+                    num_pantalla = 1 if any(p in texto_usuario_lower for p in ["1", "uno", "la 1", "el 1"]) else 2
                     img = capturar_pantalla(num_pantalla)
                     if img:
-                        # En el nuevo SDK, PIL Images se pasan directamente
-                        partes_usuario.append(img)
+                        import io
+                        img_byte_arr = io.BytesIO()
+                        img.save(img_byte_arr, format='PNG')
+                        img_bytes = img_byte_arr.getvalue()
+                        partes_usuario.append(
+                            types.Part.from_bytes(data=img_bytes, mime_type='image/png')
+                        )
 
                 mensajes_para_gemini.append(types.Content(role='user', parts=partes_usuario))
 
