@@ -1,7 +1,7 @@
 # PROJECT_STATE.md
 
 ## 1. Resumen Ejecutivo
-Argus es un asistente de IA multimodal avanzado diseñado para el ecosistema Windows. Su propósito es actuar como un copiloto de escritorio capaz de interactuar con el sistema operativo, gestionar proyectos de software, controlar hardware y mantener una memoria persistente a largo plazo. Se distingue por su capacidad de operar en modos especializados (General, Programador, Planificador) y su integración profunda con voz, visión, gamepad y un perfil de usuario persistente.
+Argus es un asistente de IA multimodal avanzado diseñado para el ecosistema Windows. Su propósito es actuar como un copiloto de escritorio capaz de interactuar con el sistema operativo, gestionar proyectos de software, controlar hardware y mantener una memoria persistente a largo plazo. Se distingue por su capacidad de operar en modos especializados (General, Mentor Tecnológico) y su integración profunda con voz, visión, gamepad y un perfil de usuario persistente.
 
 ## 2. Arquitectura
 
@@ -15,7 +15,7 @@ Argus es un asistente de IA multimodal avanzado diseñado para el ecosistema Win
 
 ### Inteligencia Artificial
 *   **`modulos/ia.py`**: Enrutador central de IA que gestiona la comunicación con Gemini (SDK `google-genai`), DeepSeek (API compatible OpenAI) y Groq (API compatible OpenAI con soporte de streaming unificado para modelos como Llama y Qwen), con streaming de voz paralelo, herramientas MCP nativas, fallback automático, confirmaciones locales sin juez IA (basadas en palabras clave), e inyección de Skills.
-*   **`modulos/prompts.py`**: Generación de prompts de sistema para cada modo (general, programador, planificador), con contexto de perfil de usuario, workspace y documentos volátiles.
+*   **`modulos/prompts.py`**: Generación de prompts de sistema para cada modo (general, mentor), con contexto de perfil de usuario, workspace y documentos volátiles.
 
 ### Persistencia y Memoria
 *   **`modulos/memoria.py`**: Motor de persistencia basado en ChromaDB con caché de embeddings (`SentenceTransformer all-MiniLM-L6-v2`), búsqueda anticipada (pre-fetch en hilo paralelo), snapshots de proyecto y radar de cambios vía `watchdog` con debounce.

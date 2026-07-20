@@ -620,7 +620,7 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                             estado_md = estado_md.split("```")[1].rsplit("```", 1)[0].strip()
                         ruta_state = os.path.join(WORKSPACE_ACTUAL, "PROJECT_STATE.md")
                         escribir_archivo(ruta_state, estado_md)
-                        msg_exito = "✅ ¡PROJECT_STATE.md generado con éxito! El Planificador ya tiene visión total del código."
+                        msg_exito = "✅ ¡PROJECT_STATE.md generado con éxito! El Mentor ya tiene visión total del código."
                         if ui_callback:
                             ui_callback("⚙️ Sistema", msg_exito, "#86efac")
                         logger.info(msg_exito)
@@ -630,7 +630,7 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                             ui_callback("⚙️ Sistema", f"❌ Error en el Crawler: {e}", "#ff4500")
                 else:
                     if ui_callback:
-                        ui_callback("🤖 Argus", "Necesito estar dentro del Modo Planificador o Programador para saber qué proyecto escanear.", "#FFA500")
+                        ui_callback("🤖 Argus", "Necesito tener un proyecto anclado para saber qué proyecto escanear.", "#FFA500")
                 continue
 
             # COMANDOS DE SISTEMA

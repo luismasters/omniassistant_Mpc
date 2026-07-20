@@ -1,7 +1,7 @@
 {
   "funcional": {
-    "identidad": "Luis",
-    "proyecto_actual": "",
+    "identidad": "Técnico Universitario en Programación graduado de la UTN FRGP hace más de un año y medio.",
+    "proyecto_actual": "Sin experiencia laboral previa en el rubro y sin un stack tecnológico definido.",
     "hardware_relevante": "",
     "preferencias_comunicacion": "",
     "rutina_uso": ""
@@ -16,6 +16,11 @@
       "tema": "salud",
       "contenido": "Recomendación médica de reducir ingesta de comida chatarra",
       "actualizado": "2026-07-17"
+    },
+    {
+      "tema": "opinión profesional",
+      "contenido": "Considera que la IA ha cambiado considerablemente el estatus del mercado laboral tecnológico.",
+      "actualizado": "2026-07-19"
     }
   ]
 }

@@ -34,10 +34,8 @@ from modulos.memoria import (
 from modulos.cliente_mcp import cliente_sistema
 
 from modulos.prompts import (
-    obtener_prompt_planificador,
-    obtener_prompt_programador,
-    obtener_prompt_general,
-    obtener_prompt_programador_unificado
+    obtener_prompt_mentor,
+    obtener_prompt_general
 )
 
 # ─── Perfil de usuario persistente ─────────────────────────────────────
@@ -153,7 +151,10 @@ _PATRON_COMANDOS_VOZ = re.compile(
 )
 
 def _limpiar_para_voz(texto: str) -> str:
-    return _PATRON_COMANDOS_VOZ.sub('', texto).strip()
+    texto = _PATRON_COMANDOS_VOZ.sub('', texto)
+    # Eliminar etiquetas [EMOTION: ...] para que no se lean en audio
+    texto = re.sub(r'\[EMOTION:\s*\w+\]', '', texto, flags=re.IGNORECASE)
+    return texto.strip()
 
 def _procesar_buffer_voz(buffer: str, forzar: bool = False) -> str:
     buffer_limpio = _limpiar_para_voz(buffer)
@@ -419,8 +420,8 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             texto_snapshot = f"[ESTADO DEL PROYECTO]:\n{SNAPSHOT_ACTUAL}\n\n" if SNAPSHOT_ACTUAL else ""
             texto_doc_volatil = f"[DOCUMENTOS EN MEMORIA]:\n{DOCUMENTO_VOLATIL}\n\n" if DOCUMENTO_VOLATIL else ""
 
-            if MODO_ACTUAL in ["programador", "planificador"]:
-                contexto_sistema = obtener_prompt_programador_unificado(
+            if MODO_ACTUAL == "mentor":
+                contexto_sistema = obtener_prompt_mentor(
                     texto_workspace, texto_snapshot, texto_doc_volatil, texto_perfil
                 )
             else:
@@ -446,7 +447,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 modelo_activo = "groq:openai/gpt-oss-120b"
             else:
                 # "Por Defecto" -> usa los del modo
-                if MODO_ACTUAL in ["programador", "planificador"]:
+                if MODO_ACTUAL == "mentor":
                     modelo_activo = "deepseek-reasoner"
                 else:
                     modelo_activo = "gemini"

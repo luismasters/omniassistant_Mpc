@@ -1,0 +1,17 @@
+{
+  "stack_objetivo": {
+    "frontend": "Pendiente de definir",
+    "backend": "Pendiente de definir",
+    "bases_de_datos": "Pendiente de definir",
+    "otras_herramientas": []
+  },
+  "tecnologias_aprendidas": [],
+  "tecnologias_en_estudio": [],
+  "proyectos_de_portafolio": [],
+  "ultimo_avance_registrado": "Ninguno",
+  "claves_de_contexto_faltantes": [
+    "¿Prefieres enfocarte en desarrollo Frontend, Backend o Fullstack?",
+    "¿Qué lenguajes o tecnologías aprendiste en la UTN FRGP y con cuáles te sentiste más cómodo?",
+    "¿Tienes en mente alguna idea de proyecto para construir como parte de tu portafolio?"
+  ]
+}

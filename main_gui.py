@@ -804,8 +804,7 @@ class AIBubble(ctk.CTkFrame):
                      ).pack(side="left", padx=(0, 6))
         nombres_modelos = {
             "general": "Gemini Flash",
-            "programador": "DeepSeek V4 (Reasoner)",
-            "planificador": "DeepSeek V4 (Reasoner)"
+            "mentor": "DeepSeek Reasoner"
         }
         modo_actual = state.modo_actual
         nombre_modelo = nombres_modelos.get(modo_actual, "IA")
@@ -1231,21 +1230,23 @@ class OmniApp(ctk.CTk):
         Hilo de fondo que verifica periódicamente si se acumularon mensajes
         nuevos desde la última extracción de perfil. Cuando se alcanza el umbral
         (definido en perfil_usuario.UMBRAL_MENSAJES_EXTRACCION), dispara
-        extraer_y_procesar_sesion() con la nueva arquitectura de hechos atómicos.
+        extraer_y_procesar_sesion() o extraer_y_procesar_sesion_mentor() según el modo activo.
         """
         while not self._detener_extraccion_perfil.is_set():
             time.sleep(5)  # check cada 5 segundos
             try:
                 import config as _cfg
-                from modulos.perfil_usuario import (
-                    extraer_y_procesar_sesion,
-                    UMBRAL_MENSAJES_EXTRACCION
-                )
                 count = _cfg.estado.obtener_y_reiniciar_mensajes_pendientes()
+                from modulos.perfil_usuario import UMBRAL_MENSAJES_EXTRACCION
                 if count >= UMBRAL_MENSAJES_EXTRACCION:
                     mensajes = _cfg.estado.obtener_contexto_copia()
                     if mensajes:
-                        extraer_y_procesar_sesion(mensajes[-count:])
+                        if _cfg.estado.modo_actual == "mentor":
+                            from modulos.perfil_mentor import extraer_y_procesar_sesion_mentor
+                            extraer_y_procesar_sesion_mentor(mensajes[-count:])
+                        else:
+                            from modulos.perfil_usuario import extraer_y_procesar_sesion
+                            extraer_y_procesar_sesion(mensajes[-count:])
             except Exception:
                 try:
                     from modulos.logger import logger
@@ -1259,11 +1260,15 @@ class OmniApp(ctk.CTk):
         # Extracción final de respaldo para capturar mensajes que no llegaron al umbral
         try:
             import config as _cfg
-            from modulos.perfil_usuario import extraer_y_procesar_sesion
             count = _cfg.estado.obtener_y_reiniciar_mensajes_pendientes()
             mensajes = _cfg.estado.obtener_contexto_copia()
             if count > 0 and mensajes:
-                extraer_y_procesar_sesion(mensajes[-count:])
+                if _cfg.estado.modo_actual == "mentor":
+                    from modulos.perfil_mentor import extraer_y_procesar_sesion_mentor
+                    extraer_y_procesar_sesion_mentor(mensajes[-count:])
+                else:
+                    from modulos.perfil_usuario import extraer_y_procesar_sesion
+                    extraer_y_procesar_sesion(mensajes[-count:])
                 from modulos.logger import logger
                 logger.info(f"📋 Perfil respaldado al cerrar ({count} mensajes)")
         except Exception:
@@ -1356,8 +1361,7 @@ class OmniApp(ctk.CTk):
 
         textos_modelos = {
             "general":      "🧠 Modelo: Gemini Flash",
-            "programador":  "🧠 Modelo: DeepSeek V4 (Reasoner)",
-            "planificador": "🧠 Modelo: DeepSeek V4 (Reasoner)"
+            "mentor":       "🧠 Modelo: DeepSeek Reasoner"
         }
         self.lbl_modelo_activo.configure(
             text=textos_modelos.get(state.modo_actual, textos_modelos["general"])
@@ -1365,7 +1369,7 @@ class OmniApp(ctk.CTk):
 
         botones = [
             ("💬  Chat General",     lambda: self._cambiar_modo("general")),
-            ("💻  Modo Programador", lambda: self._cambiar_modo("programador")),
+            ("🎓  Modo Mentor",      lambda: self._cambiar_modo("mentor")),
         ]
         self.botones_ui = []
         for i, (txt, cmd) in enumerate(botones, start=6):
@@ -1400,6 +1404,17 @@ class OmniApp(ctk.CTk):
             command=self._actualizar_memoria_manual
         ).grid(row=10, column=0, padx=10, pady=(2, 2), sticky="ew")
 
+        # ── Botón Anclar Proyecto ─────────────────────────────────────
+        self.btn_workspace = ctk.CTkButton(
+            sb, text="📁  Anclar Proyecto",
+            anchor="w", font=FONT_UI,
+            fg_color="transparent", hover_color="#16162a",
+            text_color=TEXT_DIM, corner_radius=6,
+            command=self._click_workspace
+        )
+        self.btn_workspace.grid(row=11, column=0, padx=10, pady=(2, 2), sticky="ew")
+        self._actualizar_boton_workspace()
+
         # ── Botón Modo Gaming ──────────────────────────────────────────
         self.btn_gaming = ctk.CTkButton(
             sb, text="🎮  Modo Gaming: OFF",
@@ -1408,14 +1423,14 @@ class OmniApp(ctk.CTk):
             text_color=TEXT_DIM, corner_radius=6,
             command=self._toggle_modo_gaming
         )
-        self.btn_gaming.grid(row=11, column=0, padx=10, pady=(4, 2), sticky="ew")
+        self.btn_gaming.grid(row=12, column=0, padx=10, pady=(4, 2), sticky="ew")
 
         # ── Indicador de gamepad ───────────────────────────────────────
         self.lbl_gamepad = ctk.CTkLabel(
             sb, text="🎮 Mando: inactivo",
             font=FONT_UI_SM, text_color=TEXT_DIM
         )
-        self.lbl_gamepad.grid(row=12, column=0, padx=18, pady=(2, 0), sticky="w")
+        self.lbl_gamepad.grid(row=13, column=0, padx=18, pady=(2, 0), sticky="w")
 
         ctk.CTkLabel(
             sb, text="v0.3.1 — Optimizado",
@@ -1446,14 +1461,74 @@ class OmniApp(ctk.CTk):
         if valor == "Por Defecto":
             textos_modelos = {
                 "general":      "🧠 Modelo: Gemini Flash",
-                "programador":  "🧠 Modelo: DeepSeek V4 (Reasoner)",
-                "planificador": "🧠 Modelo: DeepSeek V4 (Reasoner)"
+                "mentor":       "🧠 Modelo: DeepSeek Reasoner"
             }
             txt = textos_modelos.get(state.modo_actual, "🧠 Modelo: Gemini Flash")
         else:
             txt = f"🧠 Modelo: {valor}"
         self.lbl_modelo_activo.configure(text=txt)
         self._agregar_sistema(f"🧠 Modelo cambiado a: {valor}")
+
+    def _click_workspace(self):
+        import config
+        if state.workspace_actual:
+            from tkinter import messagebox
+            r = messagebox.askyesnocancel(
+                "Proyecto Anclado",
+                f"Proyecto actual: {os.path.basename(state.workspace_actual)}\n\n¿Deseas desanclarlo?\n- 'Sí' para desanclar.\n- 'No' para seleccionar otro proyecto.\n- 'Cancelar' para mantenerlo."
+            )
+            if r is True:
+                self._desanclar_proyecto()
+            elif r is False:
+                self._anclar_proyecto_dialogo()
+        else:
+            self._anclar_proyecto_dialogo()
+
+    def _anclar_proyecto_dialogo(self):
+        ruta = filedialog.askdirectory(
+            title="Selecciona el proyecto a anclar"
+        )
+        if not ruta:
+            return
+        self._anclar_proyecto(ruta)
+
+    def _anclar_proyecto(self, ruta):
+        import config
+        from modulos.memoria import iniciar_radar_proyecto, guardar_snapshot
+        
+        state.workspace_actual = ruta
+        nombre_proj = os.path.basename(ruta)
+        estructura = []
+        for raiz, carpetas, archivos in os.walk(ruta):
+            carpetas[:] = [d for d in carpetas if d not in ['.git','__pycache__','venv','node_modules']]
+            nivel = raiz.replace(ruta,'').count(os.sep)
+            ind  = ' ' * 4 * nivel
+            sind = ' ' * 4 * (nivel + 1)
+            estructura.append(f"{ind}📂 {os.path.basename(raiz)}/")
+            for f in archivos:
+                estructura.append(f"{sind}📄 {f}")
+        arbol = f"Estructura del proyecto '{nombre_proj}':\n" + "\n".join(estructura)
+        guardar_snapshot(ruta, arbol)
+        state.snapshot_actual = arbol
+        iniciar_radar_proyecto(ruta, ui_callback=self.callback_ia)
+        
+        self._actualizar_boton_workspace()
+        self._agregar_sistema(f"📂 Proyecto anclado: {nombre_proj}")
+
+    def _desanclar_proyecto(self):
+        import config
+        state.workspace_actual = None
+        state.snapshot_actual = ""
+        self._actualizar_boton_workspace()
+        self._agregar_sistema("📂 Proyecto desanclado")
+
+    def _actualizar_boton_workspace(self):
+        import config
+        if state.workspace_actual:
+            nombre = os.path.basename(state.workspace_actual)
+            self.btn_workspace.configure(text=f"📂  {nombre}", text_color="#86efac")
+        else:
+            self.btn_workspace.configure(text="📁  Anclar Proyecto", text_color=TEXT_DIM)
 
     # ── NUEVO: Actualización manual de memoria (botón en sidebar) ────
     def _actualizar_memoria_manual(self):
@@ -1476,8 +1551,13 @@ class OmniApp(ctk.CTk):
     def _ejecutar_extraccion_manual(self, mensajes):
         """Ejecuta la extracción y muestra feedback al terminar."""
         try:
-            from modulos.perfil_usuario import extraer_y_procesar_sesion
-            extraer_y_procesar_sesion(mensajes)
+            import config as _cfg
+            if _cfg.estado.modo_actual == "mentor":
+                from modulos.perfil_mentor import extraer_y_procesar_sesion_mentor
+                extraer_y_procesar_sesion_mentor(mensajes)
+            else:
+                from modulos.perfil_usuario import extraer_y_procesar_sesion
+                extraer_y_procesar_sesion(mensajes)
             # Feedback en el hilo principal
             self.after(0, lambda: self._agregar_sistema(
                 "🧠 Memoria de perfil actualizada."))
@@ -1622,29 +1702,6 @@ class OmniApp(ctk.CTk):
         if nuevo_modo == state.modo_actual:
             return
 
-        if nuevo_modo in ["planificador", "programador"]:
-            if not state.workspace_actual:
-                ruta = filedialog.askdirectory(
-                    title=f"Selecciona el proyecto para el Modo {nuevo_modo.capitalize()}"
-                )
-                if not ruta:
-                    return
-                state.workspace_actual = ruta
-                nombre_proj = os.path.basename(ruta)
-                estructura = []
-                for raiz, carpetas, archivos in os.walk(ruta):
-                    carpetas[:] = [d for d in carpetas if d not in ['.git','__pycache__','venv','node_modules']]
-                    nivel = raiz.replace(ruta,'').count(os.sep)
-                    ind  = ' ' * 4 * nivel
-                    sind = ' ' * 4 * (nivel + 1)
-                    estructura.append(f"{ind}📂 {os.path.basename(raiz)}/")
-                    for f in archivos:
-                        estructura.append(f"{sind}📄 {f}")
-                arbol = f"Estructura del proyecto '{nombre_proj}':\n" + "\n".join(estructura)
-                guardar_snapshot(ruta, arbol)
-                state.snapshot_actual = arbol
-                iniciar_radar_proyecto(ruta, ui_callback=self.callback_ia)
-
         visual = []
         for widget in self.chat_scroll.winfo_children():
             if isinstance(widget, UserBubble):
@@ -1673,8 +1730,7 @@ class OmniApp(ctk.CTk):
         if state.modelo_seleccionado == "Por Defecto":
             textos_modelos = {
                 "general":      "🧠 Modelo: Gemini Flash",
-                "programador":  "🧠 Modelo: DeepSeek V4 (Reasoner)",
-                "planificador": "🧠 Modelo: DeepSeek V4 (Reasoner)"
+                "mentor":       "🧠 Modelo: DeepSeek Reasoner"
             }
             self.lbl_modelo_activo.configure(
                 text=textos_modelos.get(nuevo_modo, textos_modelos["general"])
@@ -1688,14 +1744,17 @@ class OmniApp(ctk.CTk):
 
         if not any(isinstance(w, (UserBubble, AIBubble)) for w in self.chat_scroll.winfo_children()):
             ruta_corta = os.path.basename(state.workspace_actual) if state.workspace_actual else ""
+            if ruta_corta:
+                msg_workspace = f" [ Proyecto: {ruta_corta} ]"
+            else:
+                msg_workspace = " (General)"
             mensajes = {
                 "general":      "¿En qué puedo ayudarte hoy?",
-                "programador":  f"💻 Modo Programador\n[ {ruta_corta} ]\n¿Qué vamos a diseñar o programar?",
-                "planificador": f"📐 Modo Planificador\n[ {ruta_corta} ]\n(redirigido a Programador)"
+                "mentor":       f"🎓 Modo Mentor Tecnológico{msg_workspace}\n¿En qué tecnología, roadmap o proyecto trabajamos hoy?"
             }
             self._welcome_label = ctk.CTkLabel(
                 self.chat_scroll,
-                text=mensajes.get(nuevo_modo, mensajes["programador"]),
+                text=mensajes.get(nuevo_modo, mensajes["mentor"]),
                 font=(_F, TAMANO_BASE + 6, "bold"), text_color="#2a2a3e"
             )
             self._welcome_label.pack(expand=True, pady=(120, 0))

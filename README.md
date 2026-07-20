@@ -1,6 +1,6 @@
 # Argus — Asistente de IA Multimodal para Windows
 
-**Argus** es un asistente de IA integrado al escritorio de Windows, diseñado para operar en tres modos (General, Programador y Planificador) con cambio dinámico de modelo de lenguaje (Gemini 3.1 Flash Lite / DeepSeek Reasoner). Soporta voz, visión, gamepad, búsqueda web, control de sistema, memoria persistente, y un sistema extensible de Skills.
+**Argus** es un asistente de IA integrado al escritorio de Windows, diseñado para operar en dos modos (General y Mentor Tecnológico) con cambio dinámico de modelo de lenguaje (Gemini 3.1 Flash Lite / DeepSeek Reasoner). Soporta voz, visión, gamepad, búsqueda web, control de sistema, memoria persistente, y un sistema extensible de Skills.
 
 ---
 
@@ -103,8 +103,7 @@ python -m pytest tests/ -v
 | Modo | Modelo por Defecto | Descripción |
 |------|--------------------|-------------|
 | **General** | Gemini 3.1 Flash Lite | Asistente cotidiano: chat, web, control de PC, memoria |
-| **Programador** | DeepSeek Reasoner | Edición de código, Git, arquitectura de software |
-| **Planificador** | DeepSeek Reasoner | Planificación, análisis de proyectos, documentación |
+| **Mentor Tecnológico** | DeepSeek Reasoner | Asesoría de stack, proyectos de portafolio, simulación de entrevistas y radar de tendencias (soporta anclaje opcional de proyecto) |
 
 > 🧠 **Nota:** Los modelos indicados arriba son los asignados *por defecto*, pero puedes cambiar a cualquiera de los modelos de **Groq** (o forzar el uso de uno específico) usando el selector desplegable de la barra lateral en la interfaz gráfica.
 
