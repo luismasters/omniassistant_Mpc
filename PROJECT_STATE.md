@@ -7,11 +7,9 @@ Argus es un asistente de IA multimodal avanzado diseñado para el ecosistema Win
 
 ### Núcleo y Configuración
 *   **`config.py`**: Núcleo de configuración, gestión de estado global thread-safe (`EstadoGlobal` con `threading.Lock`) y límites de seguridad. Proporciona métodos seguros para acceso thread-safe a `contexto_chat`, `archivos_en_memoria`, `modelo_seleccionado` y contador para extracción de perfil.
-*   **`main_gui.py`**: Interfaz gráfica principal (CustomTkinter) con renderizado de Markdown, selector de modelo activo, padding responsivo, burbujas de chat, soporte de eventos, y un contenedor de rostro interactivo dinámico con un selector segmentado de caras que permite alternar en caliente entre EMO (`EmoBezelFace`) y Argus v2 (`RostroArgus`) preservando el estado de la conversación.
-*   **`modulos/rostro_argus.py`**: Implementación nativa de Tkinter.Canvas para el rostro de Argus con transición de suavizado mediante interpolación física y estados expresivos dinámicos (soporta ejecución directa para pruebas).
+*   **`main_gui.py`**: Interfaz gráfica principal (CustomTkinter) con renderizado de Markdown, selector de modelo activo, padding responsivo, burbujas de chat, soporte de eventos, y el rostro interactivo EMO (`EmoBezelFace`) en la cabecera con cambios de tema cromático dinámico según el modo (General, Mentor, Gamer).
 *   **`gestor_boveda.py`**: Script independiente para gestión de la bóveda vectorial (búsqueda y guardado directo).
 *   **`test_emo_face.py`**: Script independiente en la raíz para pruebas y simulación aislada de todas las expresiones del rostro EMO.
-*   **`test_argus_face.html`**: Prototipo web interactivo del rostro v2 de Argus con partículas ambientales y panel de emociones.
 
 ### Inteligencia Artificial
 *   **`modulos/ia.py`**: Enrutador central de IA que gestiona la comunicación con Gemini (SDK `google-genai`), DeepSeek (API compatible OpenAI) y Groq (API compatible OpenAI con soporte de streaming unificado para modelos como Llama y Qwen), con streaming de voz paralelo, herramientas MCP nativas, fallback automático, confirmaciones locales sin juez IA (basadas en palabras clave), e inyección de Skills.
@@ -44,7 +42,7 @@ Argus es un asistente de IA multimodal avanzado diseñado para el ecosistema Win
 *   **`modulos/limpiar.py`**: Utilidad de limpieza de contexto y memoria.
 
 ## 3. Estado Actual
-*   **Multimodalidad**: Soporte completo de voz (Whisper STT + Edge TTS con sincronización limpia de fin de habla y salida de audio en fallback de contingencia), visión (captura de pantalla, integración PIL con SDK google-genai), entrada por gamepad y **pantalla interactiva dual (EMO / Argus)** con lectura dinámica de sentimientos (etiquetas `[EMOTION: happy/sad/angry]`), confirmaciones visuales de sistema (guiño/wink), alertas en color rojo de fallos (`error`), y acciones inactivas autónomas.
+*   **Multimodalidad**: Soporte completo de voz (Whisper STT + Edge TTS con sincronización limpia de fin de habla y salida de audio en fallback de contingencia), visión (captura de pantalla, integración PIL con SDK google-genai), entrada por gamepad y **pantalla interactiva EMO (`EmoBezelFace`)** con lectura dinámica de sentimientos (etiquetas `[EMOTION: happy/sad/angry]`), confirmaciones visuales de sistema (guiño/wink), alertas en color rojo de fallos (`error`), y temas cromáticos por modo (General, Mentor, Gamer).
 *   **Modelos**: Integración con Gemini 3.1 Flash Lite (SDK `google-genai`), DeepSeek V4 (API compatible OpenAI) y Groq (API compatible OpenAI con soporte para Llama 3.3 70B, Llama 3.1 8B, Qwen 3.6 27B y GPT-OSS 120B). Fallback automático entre modelos ante bloqueos por safety/PII.
 *   **Perfil de Usuario**: Sistema de hechos atómicos funcional con extracción automática cada 20 mensajes, extracción manual desde UI, filtro de secretos, fusión sin duplicados y consolidación automática.
 *   **Memoria**: Bóveda vectorial (ChromaDB + SentenceTransformer) con búsqueda anticipada, caché de embeddings con TTL, snapshots por proyecto, y radar de cambios con watchdog + debounce.

@@ -18,7 +18,6 @@ import modulos.ia as motor_ia
 from modulos.memoria import guardar_snapshot, iniciar_radar_proyecto, guardar_recuerdo
 from modulos.archivos import leer_contenido_archivo
 from modulos.gamepad_control import GestorGamepad
-from modulos.rostro_argus import RostroArgus
 
 # ─── Paleta ───────────────────────────────────────────────────────────────────
 BG_MAIN        = "#141414"
@@ -296,6 +295,19 @@ class EmoBezelFace(ctk.CTkFrame):
         self.loop_parpadeo()
         self.loop_saccades()
         self.after(5000, self.loop_idle_actions)
+
+    def set_modo_tema(self, tema: str):
+        """Cambia los tonos de color neón de EMO según el modo activo."""
+        self.modo_tema = tema
+        if tema == "mentor":
+            self.colores["idle"] = "#10b981"      # Esmeralda Mentor
+            self.colores["listening"] = "#34d399" # Menta Mentor
+        elif tema == "gamer":
+            self.colores["idle"] = "#ff0055"      # Neón Rojo/Magenta Arcade
+            self.colores["listening"] = "#f43f5e" # Carmesí Gamer
+        else: # "general"
+            self.colores["idle"] = "#00f0ff"      # Cyan EMO clásico
+            self.colores["listening"] = "#00f0ff"
 
     def cambiar_estado(self, nuevo_estado, msg=""):
         self.estado = nuevo_estado
@@ -1297,40 +1309,65 @@ class OmniApp(ctk.CTk):
         sb.grid(row=0, column=0, rowspan=2, sticky="nsew")
         sb.grid_columnconfigure(0, weight=1)
 
-        # NUEVO: Contenedor para alternar rostros interactivos
-        self.face_container = ctk.CTkFrame(sb, fg_color="transparent")
-        self.face_container.grid(row=0, column=0, pady=(15, 2))
-
-        self.emo_face = EmoBezelFace(self.face_container)
-        self.argus_face = RostroArgus(self.face_container, size=180)
+        # ── ROSTRO EMO EN CABECERA ──────────────────────────────────────
+        self.emo_face = EmoBezelFace(sb)
+        self.emo_face.grid(row=0, column=0, pady=(16, 4))
 
         self.face_widget_estado = "idle"
         self.face_widget_msg = ""
-
-        # Por defecto, EMO activo
         self.face_widget = self.emo_face
-        self.face_widget.grid(row=0, column=0)
-        self.argus_face.grid_forget()
 
-        # Selector Segmentado de Rostro
-        self.face_selector = ctk.CTkSegmentedButton(
-            sb, values=["EMO", "Argus"],
-            command=self._on_face_selected,
-            font=("Segoe UI", 9, "bold"),
-            fg_color="#1a1a2e",
-            selected_color="#7c3aed",
-            selected_hover_color="#8b5cf6"
+        self.lbl_header_titulo = ctk.CTkLabel(
+            sb, text="◆ ARGUS ASSISTANT", font=(_F, TAMANO_BASE, "bold"),
+            text_color=ACCENT
         )
-        self.face_selector.grid(row=1, column=0, padx=18, pady=(0, 8), sticky="ew")
-        self.face_selector.set("EMO")
+        self.lbl_header_titulo.grid(row=1, column=0, padx=18, pady=(2, 0), sticky="w")
 
-        ctk.CTkLabel(sb, text="◆ Argus", font=(_F, TAMANO_BASE, "bold"),
-                     text_color=ACCENT).grid(row=2, column=0, padx=18, pady=(12,2), sticky="w")
+        textos_modelos = {
+            "general":      "🧠 Modelo: Gemini Flash",
+            "mentor":       "🧠 Modelo: DeepSeek Reasoner"
+        }
         self.lbl_modelo_activo = ctk.CTkLabel(
-            sb, text="🧠 Modelo: Gemini Flash",
+            sb, text=textos_modelos.get(state.modo_actual, textos_modelos["general"]),
             font=FONT_UI_SM, text_color="#86efac"
         )
-        self.lbl_modelo_activo.grid(row=3, column=0, padx=18, pady=(0,4), sticky="w")
+        self.lbl_modelo_activo.grid(row=2, column=0, padx=18, pady=(0, 10), sticky="w")
+
+        # ── SECCIÓN: MODOS PRINCIPALES ──────────────────────────────────
+        ctk.CTkLabel(
+            sb, text="MODOS PRINCIPALES", font=("Segoe UI", 9, "bold"),
+            text_color=TEXT_DIM
+        ).grid(row=3, column=0, padx=18, pady=(6, 2), sticky="w")
+
+        self.btn_general = ctk.CTkButton(
+            sb, text="💬  Chat General", anchor="w", font=FONT_UI,
+            fg_color="#2a2a4a" if state.modo_actual == "general" else "transparent",
+            hover_color="#16162a",
+            text_color="#A8C7FA" if state.modo_actual == "general" else TEXT_PRIMARY,
+            corner_radius=6,
+            command=lambda: self._cambiar_modo("general")
+        )
+        self.btn_general.grid(row=4, column=0, padx=10, pady=2, sticky="ew")
+
+        self.btn_mentor = ctk.CTkButton(
+            sb, text="🎓  Modo Mentor", anchor="w", font=FONT_UI,
+            fg_color="#064e3b" if state.modo_actual == "mentor" else "transparent",
+            hover_color="#16162a",
+            text_color="#6ee7b7" if state.modo_actual == "mentor" else TEXT_PRIMARY,
+            corner_radius=6,
+            command=lambda: self._cambiar_modo("mentor")
+        )
+        self.btn_mentor.grid(row=5, column=0, padx=10, pady=2, sticky="ew")
+
+        # Separador 1
+        ctk.CTkFrame(sb, height=1, fg_color=SIDEBAR_LINE).grid(
+            row=6, column=0, padx=10, sticky="ew", pady=(10, 6))
+
+        # ── SECCIÓN: MODELO DE LENGUAJE ──────────────────────────────────
+        ctk.CTkLabel(
+            sb, text="SELECCIÓN DE MODELO", font=("Segoe UI", 9, "bold"),
+            text_color=TEXT_DIM
+        ).grid(row=7, column=0, padx=18, pady=(2, 2), sticky="w")
 
         self.opt_modelo = ctk.CTkOptionMenu(
             sb,
@@ -1353,108 +1390,79 @@ class OmniApp(ctk.CTk):
             dropdown_text_color=TEXT_PRIMARY,
             height=28
         )
-        self.opt_modelo.grid(row=4, column=0, padx=18, pady=(0, 14), sticky="ew")
+        self.opt_modelo.grid(row=8, column=0, padx=14, pady=(2, 8), sticky="ew")
         self.opt_modelo.set("Por Defecto")
 
+        # Separador 2
         ctk.CTkFrame(sb, height=1, fg_color=SIDEBAR_LINE).grid(
-            row=5, column=0, padx=0, sticky="ew")
+            row=9, column=0, padx=10, sticky="ew", pady=(4, 6))
 
-        textos_modelos = {
-            "general":      "🧠 Modelo: Gemini Flash",
-            "mentor":       "🧠 Modelo: DeepSeek Reasoner"
-        }
-        self.lbl_modelo_activo.configure(
-            text=textos_modelos.get(state.modo_actual, textos_modelos["general"])
-        )
+        # ── SECCIÓN: HERRAMIENTAS & PROYECTO ────────────────────────────
+        ctk.CTkLabel(
+            sb, text="PROYECTO & MEMORIA", font=("Segoe UI", 9, "bold"),
+            text_color=TEXT_DIM
+        ).grid(row=10, column=0, padx=18, pady=(2, 2), sticky="w")
 
-        botones = [
-            ("💬  Chat General",     lambda: self._cambiar_modo("general")),
-            ("🎓  Modo Mentor",      lambda: self._cambiar_modo("mentor")),
-        ]
-        self.botones_ui = []
-        for i, (txt, cmd) in enumerate(botones, start=6):
-            btn = ctk.CTkButton(
-                sb, text=txt, anchor="w", font=FONT_UI,
-                fg_color="transparent", hover_color="#16162a",
-                text_color=TEXT_PRIMARY, corner_radius=6,
-                command=cmd
-            )
-            btn.grid(row=i, column=0, padx=10, pady=2, sticky="ew")
-            self.botones_ui.append(btn)
-
-        # ── Separador ──────────────────────────────────────────────────
-        ctk.CTkFrame(sb, height=1, fg_color=SIDEBAR_LINE).grid(
-            row=8, column=0, padx=0, sticky="ew", pady=(8, 0))
-
-        # ── Botón Limpiar Contexto ─────────────────────────────────────
-        ctk.CTkButton(
-            sb, text="🧹  Limpiar contexto",
-            anchor="w", font=FONT_UI,
-            fg_color="transparent", hover_color="#16162a",
-            text_color=TEXT_DIM, corner_radius=6,
-            command=self._limpiar_contexto_directo
-        ).grid(row=9, column=0, padx=10, pady=(4, 2), sticky="ew")
-
-        # ── NUEVO: Botón Manual de Actualización de Memoria ───────────
-        ctk.CTkButton(
-            sb, text="🧠  Actualizar memoria",
-            anchor="w", font=FONT_UI,
-            fg_color="transparent", hover_color="#16162a",
-            text_color=TEXT_DIM, corner_radius=6,
-            command=self._actualizar_memoria_manual
-        ).grid(row=10, column=0, padx=10, pady=(2, 2), sticky="ew")
-
-        # ── Botón Anclar Proyecto ─────────────────────────────────────
         self.btn_workspace = ctk.CTkButton(
-            sb, text="📁  Anclar Proyecto",
-            anchor="w", font=FONT_UI,
+            sb, text="📁  Anclar Proyecto", anchor="w", font=FONT_UI,
             fg_color="transparent", hover_color="#16162a",
             text_color=TEXT_DIM, corner_radius=6,
             command=self._click_workspace
         )
-        self.btn_workspace.grid(row=11, column=0, padx=10, pady=(2, 2), sticky="ew")
+        self.btn_workspace.grid(row=11, column=0, padx=10, pady=2, sticky="ew")
         self._actualizar_boton_workspace()
 
-        # ── Botón Modo Gaming ──────────────────────────────────────────
-        self.btn_gaming = ctk.CTkButton(
-            sb, text="🎮  Modo Gaming: OFF",
-            anchor="w", font=FONT_UI,
+        self.btn_memoria = ctk.CTkButton(
+            sb, text="🧠  Actualizar memoria", anchor="w", font=FONT_UI,
             fg_color="transparent", hover_color="#16162a",
+            text_color=TEXT_DIM, corner_radius=6,
+            command=self._actualizar_memoria_manual
+        )
+        self.btn_memoria.grid(row=12, column=0, padx=10, pady=2, sticky="ew")
+
+        self.btn_limpiar = ctk.CTkButton(
+            sb, text="🧹  Limpiar contexto", anchor="w", font=FONT_UI,
+            fg_color="transparent", hover_color="#16162a",
+            text_color=TEXT_DIM, corner_radius=6,
+            command=self._limpiar_contexto_directo
+        )
+        self.btn_limpiar.grid(row=13, column=0, padx=10, pady=2, sticky="ew")
+
+        # Separador 3
+        ctk.CTkFrame(sb, height=1, fg_color=SIDEBAR_LINE).grid(
+            row=14, column=0, padx=10, sticky="ew", pady=(10, 6))
+
+        # ── SECCIÓN: MODO GAMER ─────────────────────────────────────────
+        self.frame_gaming_section = ctk.CTkFrame(sb, fg_color="#12121a", corner_radius=8)
+        self.frame_gaming_section.grid(row=15, column=0, padx=10, pady=(2, 10), sticky="ew")
+        self.frame_gaming_section.grid_columnconfigure(0, weight=1)
+
+        self.btn_gaming = ctk.CTkButton(
+            self.frame_gaming_section, text="🎮  Modo Gaming: OFF",
+            anchor="w", font=FONT_UI,
+            fg_color="transparent", hover_color="#1a1a2e",
             text_color=TEXT_DIM, corner_radius=6,
             command=self._toggle_modo_gaming
         )
-        self.btn_gaming.grid(row=12, column=0, padx=10, pady=(4, 2), sticky="ew")
+        self.btn_gaming.grid(row=0, column=0, padx=6, pady=(6, 2), sticky="ew")
 
-        # ── Indicador de gamepad ───────────────────────────────────────
         self.lbl_gamepad = ctk.CTkLabel(
-            sb, text="🎮 Mando: inactivo",
+            self.frame_gaming_section, text="🎮 Mando: inactivo",
             font=FONT_UI_SM, text_color=TEXT_DIM
         )
-        self.lbl_gamepad.grid(row=13, column=0, padx=18, pady=(2, 0), sticky="w")
+        self.lbl_gamepad.grid(row=1, column=0, padx=12, pady=(0, 6), sticky="w")
 
         ctk.CTkLabel(
-            sb, text="v0.3.1 — Optimizado",
+            sb, text="v0.4.0 — EMO & Mentoria",
             font=FONT_UI_SM, text_color=TEXT_DIM
-        ).grid(row=14, column=0, padx=18, pady=16, sticky="sw")
-        sb.grid_rowconfigure(14, weight=1)
-
-    def _on_face_selected(self, valor):
-        self.emo_face.grid_forget()
-        self.argus_face.grid_forget()
-        
-        if valor == "EMO":
-            self.face_widget = self.emo_face
-        else:
-            self.face_widget = self.argus_face
-            
-        self.face_widget.grid(row=0, column=0)
-        self.face_widget.cambiar_estado(self.face_widget_estado, self.face_widget_msg)
+        ).grid(row=16, column=0, padx=18, pady=12, sticky="sw")
+        sb.grid_rowconfigure(16, weight=1)
 
     def _cambiar_estado_rostro(self, estado, msg=""):
         self.face_widget_estado = estado
         self.face_widget_msg = msg
-        if hasattr(self, "face_widget"):
-            self.face_widget.cambiar_estado(estado, msg)
+        if hasattr(self, "emo_face"):
+            self.emo_face.cambiar_estado(estado, msg)
 
     def _on_modelo_changed(self, valor):
         state.modelo_seleccionado = valor
@@ -1627,23 +1635,36 @@ class OmniApp(ctk.CTk):
                 self._agregar_sistema("🎮 Modo Gaming ON — Usá L3+R3 para hablar.")
 
             self._modo_pausa_gaming = True
+            
+            # Exclusión mutua: si estaba en modo mentor, cambiar a general
+            if state.modo_actual == "mentor":
+                self._cambiar_modo("general")
+                
+            self.btn_mentor.configure(state="disabled", text="🎓  Modo Mentor (🔒 Gamer ON)", text_color="#555555", fg_color="transparent")
             self.btn_gaming.configure(
                 text="🎮  Modo Gaming: ON",
-                text_color="#86efac",
-                fg_color=ACCENT_SOFT
+                text_color="#fca5a5",
+                fg_color="#7f1d1d"
             )
+            self.emo_face.set_modo_tema("gamer")
             self.after(500, self._actualizar_estado_gamepad)
 
         else:
             self._gestor_gamepad.detener()
             self._agregar_sistema("🎮 Modo Gaming OFF — Control desconectado. Micrófono de teclado reactivado.")
             self._modo_pausa_gaming = False
+            self.btn_mentor.configure(
+                state="normal", text="🎓  Modo Mentor",
+                text_color="#6ee7b7" if state.modo_actual == "mentor" else TEXT_PRIMARY,
+                fg_color="#064e3b" if state.modo_actual == "mentor" else "transparent"
+            )
             self.btn_gaming.configure(
                 text="🎮  Modo Gaming: OFF",
                 text_color=TEXT_DIM,
                 fg_color="transparent"
             )
             self.lbl_gamepad.configure(text="🎮 Mando: inactivo", text_color=TEXT_DIM)
+            self.emo_face.set_modo_tema(state.modo_actual)
 
     def _mostrar_selector_mando(self, mandos):
         dialogo = ctk.CTkToplevel(self)
@@ -1726,6 +1747,23 @@ class OmniApp(ctk.CTk):
             state.guardar_historial_modo(state.modo_actual, visual, state.contexto_chat)
 
         state.modo_actual = nuevo_modo
+
+        # Actualizar resaltado visual de botones y temas cromáticos por modo
+        if nuevo_modo == "general":
+            self.btn_general.configure(fg_color="#2a2a4a", text_color="#A8C7FA")
+            if not self._modo_pausa_gaming:
+                self.btn_mentor.configure(fg_color="transparent", text_color=TEXT_PRIMARY)
+                self.lbl_header_titulo.configure(text_color=ACCENT)
+                self.lbl_modelo_activo.configure(text_color="#86efac")
+                self.emo_face.set_modo_tema("general")
+        elif nuevo_modo == "mentor":
+            if self._modo_pausa_gaming:
+                return
+            self.btn_general.configure(fg_color="transparent", text_color=TEXT_PRIMARY)
+            self.btn_mentor.configure(fg_color="#064e3b", text_color="#6ee7b7")
+            self.lbl_header_titulo.configure(text_color="#10b981")
+            self.lbl_modelo_activo.configure(text_color="#6ee7b7")
+            self.emo_face.set_modo_tema("mentor")
 
         if state.modelo_seleccionado == "Por Defecto":
             textos_modelos = {
