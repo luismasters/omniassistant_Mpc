@@ -15,7 +15,7 @@ def _dividir_comandos(linea: str) -> list[str]:
     y remueve el texto conversacional previo en la misma línea.
     """
     verbos = [
-        "abrir:", "navegar:", "mover:", "cerrar:", "explorar:", "audio:",
+        "abrir:", "navegar:", "mover:", "cerrar:", "explorar:", "audio:", "recordatorio:",
         "leer_archivo:", "editar_archivo:", "guardar_archivo:", "reemplazar_bloque:",
         "crear_carpeta:", "buscar:", "guardar_en_boveda:", "escanear_proyecto:",
         "github:", "github_reset:", "git_comando:", "snapshot:"
@@ -339,7 +339,7 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
             cmd_limpia = re.sub(r'^(\-\s|\d+\.\s)', '', cmd_limpia)
 
             # Asegurar alineación directa al verbo si existe prefijo conversacional
-            verbos_clave = ["abrir:", "navegar:", "cerrar:", "mover:", "explorar:", "audio:", "leer_archivo:", "editar_archivo:", "guardar_archivo:", "reemplazar_bloque:", "crear_carpeta:", "buscar:", "guardar_en_boveda:", "escanear_proyecto:", "github:"]
+            verbos_clave = ["abrir:", "navegar:", "cerrar:", "mover:", "explorar:", "audio:", "recordatorio:", "leer_archivo:", "editar_archivo:", "guardar_archivo:", "reemplazar_bloque:", "crear_carpeta:", "buscar:", "guardar_en_boveda:", "escanear_proyecto:", "github:"]
             for v_prefix in verbos_clave:
                 pos_v = cmd_limpia.find(v_prefix)
                 if pos_v > 0:
@@ -603,6 +603,60 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                     ui_callback("⚙️ Sistema", f"📁 {res_carp}", "#80868B")
                 continue
 
+            # RECORDATORIOS
+            if cmd_limpia.startswith("recordatorio:"):
+                idx = cmd.lower().find("recordatorio:") + 13
+                subcmd = cmd[idx:].strip()
+                logger.debug(f"[RECORDATORIOS] Procesando subcmd: '{subcmd}'")
+                from modulos.skills.recordatorios.gestor_recordatorios import gestor_recordatorios
+                if subcmd.startswith("crear"):
+                    resto = subcmd.replace("crear", "", 1).lstrip(" |:").strip()
+                    logger.debug(f"[RECORDATORIOS] Resto después de 'crear': '{resto}'")
+                    # Dividir por pipes respetando pipes literales o espacios
+                    partes = [p.strip() for p in resto.split("|") if p.strip()]
+                    logger.debug(f"[RECORDATORIOS] Partes parseadas: {partes}")
+                    p1 = partes[0] if len(partes) > 0 else "en 10 minutos"
+                    p2 = partes[1] if len(partes) > 1 else "Recordatorio sin título"
+                    opciones = partes[2] if len(partes) > 2 else ""
+
+                    # Auto-detectar si p1 o p2 es la expresión de tiempo
+                    def _es_expresion_tiempo(s: str) -> bool:
+                        s_l = s.lower()
+                        return any(kw in s_l for kw in ["en ", "a las", "de ", ":", "mañana", "hoy", "cumple"]) or (any(c.isdigit() for c in s) and len(s) < 25)
+
+                    if _es_expresion_tiempo(p1):
+                        tiempo = p1
+                        mensaje = p2
+                    elif _es_expresion_tiempo(p2):
+                        tiempo = p2
+                        mensaje = p1
+                    else:
+                        tiempo = p1
+                        mensaje = p2
+
+                    logger.info(f"[RECORDATORIOS] Creando: mensaje='{mensaje}', tiempo='{tiempo}', opciones='{opciones}'")
+                    try:
+                        rec = gestor_recordatorios.crear_recordatorio(mensaje, tiempo, opciones)
+                        logger.info(f"[RECORDATORIOS] CREADO OK: ID={rec.get('id')} exp={rec.get('expiracion_iso')}")
+                        if ui_callback:
+                            ui_callback("⚙️ Sistema", f"⏰ Recordatorio programado: '{mensaje}' ({rec['expiracion_iso']})", "#39ff14")
+                    except Exception as e:
+                        logger.exception(f"[RECORDATORIOS] Error creando recordatorio: {e}")
+                        if ui_callback:
+                            ui_callback("⚙️ Sistema", f"❌ Error al crear recordatorio: {str(e)[:80]}", "#ff4500")
+                elif subcmd.startswith("listar"):
+                    recs = gestor_recordatorios.listar_recordatorios()
+                    txt = "\n".join([f"- [{r['id']}] {r['mensaje']} ({r['expiracion_iso']})" for r in recs]) or "No hay recordatorios pendientes."
+                    if ui_callback:
+                        ui_callback("⚙️ Sistema", f"📋 Recordatorios pendientes:\n{txt}", "#80868B")
+                elif subcmd.startswith("cancelar"):
+                    target = subcmd.replace("cancelar", "", 1).strip(" |:")
+                    exito = gestor_recordatorios.cancelar_recordatorio(target)
+                    if ui_callback:
+                        msg_c = f"✅ Recordatorio '{target}' cancelado." if exito else f"❌ No se encontró recordatorio: {target}"
+                        ui_callback("⚙️ Sistema", msg_c, "#39ff14" if exito else "#ff4500")
+                continue
+
             # ESCANEAR PROYECTO CRAWLER
             if cmd_limpia.startswith("escanear_proyecto:"):
                 if WORKSPACE_ACTUAL:
@@ -677,5 +731,16 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
         print(texto_reporte)
         if ui_callback:
             ui_callback("⚙️ Sistema", texto_reporte, "#80868B")
+
+    # Si la petición era una orden de comando/acción directa o se ejecutaron acciones de SO,
+    # ignorar búsquedas web secundarias para evitar retrasos innecesarios.
+    try:
+        from modulos.ia import _es_intencion_comando_directo
+        if _es_intencion_comando_directo(texto_usuario) or reportes_acciones:
+            if comando_busqueda_detectado:
+                logger.info(f"🚫 Ignorando búsqueda web '{comando_busqueda_detectado}' al ejecutar comando de sistema.")
+                comando_busqueda_detectado = None
+    except Exception:
+        pass
 
     return comando_busqueda_detectado

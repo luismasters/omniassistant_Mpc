@@ -89,7 +89,15 @@ def main():
                             f"window.agregarMensajeUsuario({json.dumps(texto)});"
                         )
                         from modulos.ia import enviar_a_gemini
-                        enviar_a_gemini(texto, modo_voz=True, ui_callback=bridge._ui_callback)
+                        try:
+                            enviar_a_gemini(texto, modo_voz=True, ui_callback=bridge._ui_callback)
+                        except Exception as e_inner:
+                            logger.exception(f"[GAMEPAD] Error procesando mensaje en IA: {e_inner}")
+                            from modulos.audio_custom import hablar_no_bloqueante
+                            try:
+                                hablar_no_bloqueante("Lo siento, hubo un error al procesar tu mensaje.")
+                            except Exception:
+                                pass
                 except Exception as e:
                     logger.exception(f"[GAMEPAD] Error en callback de voz: {e}")
 

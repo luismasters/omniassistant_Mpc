@@ -174,6 +174,28 @@ def _procesar_buffer_voz(buffer: str, forzar: bool = False) -> str:
         buffer = ""
     return buffer
 
+def _es_intencion_comando_directo(texto: str) -> bool:
+    """
+    Detecta si la solicitud del usuario es para ejecutar un comando de sistema
+    o abrir una aplicación/página/audio/ventana, para evitar búsquedas web/bóveda innecesarias.
+    """
+    if not texto:
+        return False
+    texto_low = texto.lower().strip()
+    patrones_comando = [
+        r'\b(abrir|abrí|abre|lanzar|lanza|ejecutar|ejecuta|iniciar|inicia)\b',
+        r'\b(cerrar|cerrá|cierra|mover|mové|mueve)\b',
+        r'\b(subir|subí|bajar|bajá|silenciar|mutear|desmutear|pon|poné|establecer)\s+(el\s+)?volumen\b',
+        r'\b(volumen\s+a\s+\d+|subir\s+volumen|bajar\s+volumen|mutear|desmutear)\b',
+        r'\b(pantalla|monitor)\s+[12]\b',
+        r'\b(github|subir\s+cambios|escanear\s+proyecto)\b',
+        r'^(audio:|abrir:|cerrar:|mover:|crear_carpeta:|guardar_archivo:|leer_archivo:)'
+    ]
+    for pat in patrones_comando:
+        if re.search(pat, texto_low):
+            return True
+    return False
+
 # =====================================================================
 # CONFIRMACIONES NATIVAS (sin juez IA)
 # =====================================================================
@@ -408,7 +430,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         logger.info(f"PENSANDO ({MODO_ACTUAL.upper()})...")
 
         MODO_ACTUAL = config.estado.modo_actual
-        if MODO_ACTUAL in ("general", "gamer"):
+        if MODO_ACTUAL in ("general", "gamer") and not _es_intencion_comando_directo(texto_usuario):
             iniciar_busqueda_anticipada(texto_usuario)
 
         try:

@@ -23,10 +23,11 @@
     <aside class="sidebar">
 
       <!-- EMO FACE -->
-      <div class="emo-header">
+      <div class="emo-header" style="position: relative;">
         <div class="emo-bezel-frame">
           <canvas id="emoCanvas" width="230" height="150"></canvas>
         </div>
+
         <div class="emo-status-tag" id="emoStatusTag">
           <span class="status-dot"></span>
           <span id="emoStatusText">REPOSO</span>
@@ -90,6 +91,18 @@
           <div class="mode-btn-content">
             <span class="mode-btn-label" id="lblWorkspace">Anclar Proyecto</span>
             <span class="mode-btn-sub">Carpeta de trabajo</span>
+          </div>
+        </button>
+      </div>
+
+      <!-- RECORDATORIOS -->
+      <div class="sidebar-section">
+        <div class="section-title">Agenda & Alertas</div>
+        <button class="action-btn" id="btnReminders" title="Gestión Manual de Recordatorios">
+          <div class="mode-btn-icon">⏰</div>
+          <div class="mode-btn-content">
+            <span class="mode-btn-label">Recordatorios</span>
+            <span class="mode-btn-sub">Gestión manual y voz</span>
           </div>
         </button>
       </div>
@@ -214,6 +227,82 @@
       </div>
 
     </main>
+  </div>
+
+  <!-- ── MODAL DE GESTIÓN MANUAL DE RECORDATORIOS ────────────────── -->
+  <div class="modal-overlay hidden" id="modalRecordatorios">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span class="modal-icon">⏰</span>
+          <h3>Gestión de Recordatorios</h3>
+        </div>
+        <button class="modal-close-btn" id="btnCloseModalRec">✕</button>
+      </div>
+
+      <div class="modal-tabs">
+        <button class="modal-tab active" id="tabRecActivos">📋 Pendientes</button>
+        <button class="modal-tab" id="tabRecNuevo">➕ Nuevo Manual</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- PESTAÑA: LISTA DE PENDIENTES -->
+        <div class="tab-content" id="contentRecActivos">
+          <div class="rec-list" id="recListContainer">
+            <div class="rec-empty-state">Cargando recordatorios…</div>
+          </div>
+        </div>
+
+        <!-- PESTAÑA: CREAR NUEVO -->
+        <div class="tab-content hidden" id="contentRecNuevo">
+          <form id="formNuevoRec" class="rec-form">
+            <div class="form-group">
+              <label for="recMensaje">Mensaje / Título</label>
+              <input type="text" id="recMensaje" class="hud-input" placeholder="Ej: Tomar la medicina rosuvastatina" required />
+            </div>
+
+            <div class="form-group">
+              <label for="recTiempo">Fecha / Hora / Expansión de tiempo</label>
+              <input type="text" id="recTiempo" class="hud-input" placeholder="Ej: en 15 minutos, a las 21:00, 25 de agosto" required />
+              <small class="form-hint">Acepta tiempo relativo ("en 30 min"), hora ("a las 20:00") o fecha ("6 de diciembre").</small>
+            </div>
+
+            <div class="form-group">
+              <label for="recOpciones">Frecuencia / Opciones</label>
+              <select id="recOpciones" class="hud-select">
+                <option value="">Una sola vez (Puntual)</option>
+                <option value="diario">Todos los días (Recurrente)</option>
+                <option value="sin_hora">Sin hora fija (Primera interacción del día)</option>
+                <option value="cumpleaños">Cumpleaños (Aviso día anterior y hoy)</option>
+              </select>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="hud-btn-primary">
+                <span>➕ Crear Recordatorio</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── BURBUJA FLOTANTE DE RECORDATORIO (fuera del sidebar, no tapa EMO) ── -->
+  <div class="emo-cloud-bubble hidden" id="emoCloudBubble">
+    <div class="cloud-tail"></div>
+    <div class="cloud-content">
+      <div class="cloud-header">
+        <span class="cloud-badge" id="cloudBadge">⏰ RECORDATORIO</span>
+        <span class="cloud-time" id="cloudTime">10:30 AM</span>
+      </div>
+      <div class="cloud-message" id="cloudMessage">Tomar la medicina rosuvastatina</div>
+      <div class="cloud-actions">
+        <button class="cloud-btn-ok" id="btnEmoCloudOk">
+          <span>✅ Entendido / OK</span>
+        </button>
+      </div>
+    </div>
   </div>
 
   <script src="emo_face.js"></script>

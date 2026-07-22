@@ -1,12 +1,12 @@
-# ARGUS — Roadmap de Skills
-**Última actualización:** 2026-06-24  
-**Estado del proyecto:** v0.3.0 — Base sólida, expansión de capacidades en curso.
+# ARGUS — Roadmap de Skills y Funcionalidades
+**Última actualización:** 2026-07-22  
+**Estado del proyecto:** v0.4.0 — Web HUD (PyWebView), Modos Win32, Gamepad XInput y Skill de Control de Audio activas.
 
 ---
 
 ## Cómo funciona el sistema de Skills
 
-Cada skill vive en `modulos/skills/<nombre_skill>/` y contiene tres archivos:
+Cada skill vive en `modulos/skills/<nombre_skill>/` y contiene tres archivos principales:
 
 | Archivo | Propósito |
 |---|---|
@@ -14,17 +14,24 @@ Cada skill vive en `modulos/skills/<nombre_skill>/` y contiene tres archivos:
 | `instructions.md` | Las instrucciones exactas que se inyectan en el prompt de Argus cuando la skill se activa. |
 | `ejemplos.md` | Casos de uso concretos para ilustrar el comportamiento esperado. |
 
-El `gestor_skills.py` detecta si una skill es relevante para la consulta del usuario (por palabras clave) y la inyecta automáticamente en el contexto. Skills activas en modo sin MCP desactivan las herramientas Gemini para forzar el flujo correcto.
+El `gestor_skills.py` detecta si una skill es relevante para la consulta del usuario (por palabras clave) y la inyecta automáticamente en el contexto. Las skills activas sin MCP adaptan las herramientas para forzar el flujo correcto.
 
 ---
 
 ## Skills implementadas
 
 ### ✅ `busqueda_web_actualizada` — v1.0
-**Estado:** Operativa con fixes aplicados (2026-06-24).  
-**Función:** Búsqueda en DuckDuckGo priorizando resultados recientes. Incluye retry automático y limpieza de filtros incompatibles (`after:` removido).  
+**Estado:** Operativa.  
+**Función:** Búsqueda en DuckDuckGo priorizando resultados recientes. Incluye retry automático y limpieza de filtros incompatibles.  
 **Activa cuando:** El usuario usa palabras como "hoy", "actual", "noticias", "precio", "lanzamiento", año actual, etc.  
 **Pendiente:** Detección de relevancia por embeddings en vez de palabras clave hardcodeadas.
+
+### ✅ `control_audio` — v1.0
+**Estado:** Operativa.  
+**Función:** Control completo del sistema de audio en Windows: volumen maestro, volumen por aplicación (Discord, Spotify, navegador, juegos), mute/unmute y detección de aplicaciones con audio activo.  
+**Activa cuando:** El usuario menciona palabras como `volumen`, `subir`, `bajar`, `silenciar`, `mutear`, `audio`, `sonido`, `headset`, `parlantes`, `auriculares`, `salida de audio`.  
+**Dependencias:** `pycaw`, `comtypes`.  
+**Ubicación:** `modulos/skills/control_audio/` (`audio_control.py`).
 
 ---
 
@@ -34,71 +41,20 @@ El `gestor_skills.py` detecta si una skill es relevante para la consulta del usu
 
 ---
 
-#### 🎚️ `control_audio` — Prioridad: ALTA
-**¿Qué hace?**  
-Control completo de audio del sistema: volumen maestro, volumen por aplicación, mute/unmute, cambio de dispositivo de salida (parlantes ↔ headset).
-
-**¿Por qué es prioritaria?**  
-Es la skill más natural para un asistente por voz. "Bajá el volumen", "silenciá Discord", "pasá el audio al headset" son comandos de uso diario que hoy requieren ir al mouse.
-
-**Palabras clave de activación:**  
-`volumen`, `subir`, `bajar`, `silenciar`, `mutear`, `audio`, `sonido`, `headset`, `parlantes`, `salida de audio`
-
-**Dependencias:**  
-- `pycaw` (Control de audio de Windows via COM)  
-- `comtypes` (ya instalado con pycaw)
-
-**Comandos que debe entender Argus:**
-```
-"Subí el volumen al 80%"          → SetMasterVolume(0.8)
-"Silenciá Discord"                 → SetAppVolume("Discord.exe", mute=True)
-"Pasá el audio al headset"         → SetDefaultDevice("headset")
-"¿Cuánto está el volumen?"         → GetMasterVolume()
-```
-
-**Archivos a crear:**
-```
-modulos/skills/control_audio/
-├── SKILL.md
-├── instructions.md
-├── ejemplos.md
-└── audio_control.py       ← funciones reales con pycaw
-```
-
-**Notas de implementación:**  
-`pycaw` expone la API `IAudioEndpointVolume` de Windows. Para volumen por app usar `ISimpleAudioVolume`. El cambio de dispositivo de salida requiere `IPolicyConfig` que no está en la API oficial — hay que usar un wrapper como `AudioDeviceCmdlets` o hacerlo via PowerShell.
-
----
-
 #### ⏰ `recordatorios` — Prioridad: ALTA
 **¿Qué hace?**  
 Programar recordatorios temporales con notificación de Windows y voz. "Recordame en 30 minutos que tengo que tomar agua", "Avisame a las 22hs".
 
 **¿Por qué es prioritaria?**  
-El caso de uso más natural de un asistente. Complementa perfectamente el control por voz — manos libres para programar alertas.
+Es uno de los casos de uso más naturales de un asistente de voz. Manos libres para programar alertas durante sesiones de trabajo o juegos.
 
 **Palabras clave de activación:**  
 `recordame`, `recordatorio`, `avisame`, `alarma`, `en X minutos`, `a las`, `despertame`, `timer`, `temporizador`
 
 **Dependencias:**  
-- `threading.Timer` (stdlib, sin instalación)  
+- `threading.Timer` (stdlib, sin instalación extra)  
 - `win10toast` o `plyer` (notificaciones de Windows)
 - Edge TTS (ya disponible en Argus)
-
-**Comandos que debe entender Argus:**
-```
-"Recordame en 20 minutos cerrar el juego"
-"Poné una alarma a las 23:30"
-"Avisame en 1 hora"
-"¿Qué recordatorios tengo?"
-"Cancelá el recordatorio del juego"
-```
-
-**Comportamiento:**
-1. Argus parsea tiempo (relativo o absoluto) y el mensaje.
-2. Inicia un `threading.Timer` con el delta calculado.
-3. Al dispararse: notificación de Windows + voz de Edge TTS.
-4. Lista activa guardada en memoria volátil (se pierde al cerrar Argus — aceptable por ahora).
 
 **Archivos a crear:**
 ```
@@ -113,131 +69,61 @@ modulos/skills/recordatorios/
 
 #### 🌡️ `monitor_hardware` — Prioridad: ALTA
 **¿Qué hace?**  
-Temperatura real de CPU (no solo carga %), frecuencia de CPU/GPU, velocidad de ventiladores, TDP, y comparativa con límites seguros.
+Temperatura real de CPU (no solo carga %), frecuencia de CPU/GPU, velocidad de ventiladores, TDP y comparativa con límites seguros.
 
 **¿Por qué es prioritaria?**  
-Resuelve directamente el problema diagnosticado hoy: `psutil` no lee temperaturas de CPU en Windows. Se necesita LibreHardwareMonitor como fuente de datos.
+`psutil` estándar no lee temperaturas de CPU en Windows. Se necesita LibreHardwareMonitor como fuente de datos real.
 
 **Palabras clave de activación:**  
 `temperatura`, `temp`, `cpu`, `gpu`, `calor`, `ventilador`, `fan`, `frecuencia`, `overclock`, `throttling`, `hardware`
 
 **Dependencias:**  
-- LibreHardwareMonitor corriendo como servicio (o proceso)  
-- `wmi` Python package  
-- O alternativamente: OpenHardwareMonitor + WMI bridge
+- LibreHardwareMonitor corriendo como servicio o proceso en segundo plano  
+- `wmi` (paquete de Python)
 
 **Arquitectura recomendada:**
 ```
-LibreHardwareMonitor (proceso externo, corre siempre)
+LibreHardwareMonitor (proceso externo)
     ↓ expone namespace WMI: root\LibreHardwareMonitor
 modulos/skills/monitor_hardware/hardware_reader.py
     ↓ lee sensores via wmi.WMI(namespace="root\LibreHardwareMonitor")
-Argus responde con datos reales
+Argus responde con datos de sensores reales
 ```
-
-**Datos que va a poder reportar:**
-```
-CPU Temp:     Núcleo 1-6 individualmente + promedio
-CPU Freq:     Frecuencia actual vs máxima (detecta throttling)
-GPU Temp:     Temperatura GPU (redundante con nvidia-smi, pero unificado)
-GPU Freq:     Frecuencia de memoria y shader
-Fans:         RPM de cada ventilador detectado
-RAM:          Uso real + velocidad
-```
-
-**Notas de implementación:**  
-LibreHardwareMonitor debe iniciarse con permisos de administrador. Se puede agregar al arranque de Argus con `subprocess.Popen` o instrucciones para el usuario de ponerlo en el inicio de Windows.
 
 ---
 
-### Tier 2 — Productividad real
+### Tier 2 — Productividad y entretenimiento
 
 ---
 
 #### 🎮 `steam_integration` — Prioridad: MEDIA
 **¿Qué hace?**  
-Consultar biblioteca de Steam: horas jugadas, logros, juegos instalados, actualizaciones pendientes, amigos online, estado del servidor de un juego.
-
-**¿Por qué vale la pena?**  
-Dado el perfil de uso (SF6, juegos en Steam), es una skill altamente personalizada. "¿Cuántas horas tengo en SF6?", "¿Está caído el servidor de Street Fighter?" son preguntas frecuentes.
+Consultar biblioteca de Steam: horas jugadas, logros, juegos instalados, actualizaciones pendientes y noticias de parches.
 
 **Palabras clave de activación:**  
 `steam`, `juego`, `horas`, `logros`, `logro`, `biblioteca`, `jugué`, `mis juegos`, `actualización de juego`
 
 **Dependencias:**  
-- Steam Web API (API Key gratuita en steamcommunity.com/dev/apikey)  
-- `requests` (ya disponible)  
-- SteamID del usuario (configurar en `.env`)
-
-**Endpoints clave de Steam API:**
-```
-GetOwnedGames       → biblioteca completa + horas
-GetPlayerAchievements → logros por juego
-GetPlayerSummaries  → estado del usuario
-GetNewsForApp       → noticias/parches de un juego
-```
-
-**Archivos a crear:**
-```
-modulos/skills/steam_integration/
-├── SKILL.md
-├── instructions.md
-├── ejemplos.md
-└── steam_api.py       ← wrapper de Steam Web API
-```
+- Steam Web API Key  
+- `requests` (ya disponible)
 
 ---
 
 #### 🌤️ `clima_tiempo` — Prioridad: MEDIA
 **¿Qué hace?**  
-Consultar clima actual y pronóstico para cualquier ciudad. Sin API key — usa `wttr.in` que es público y gratuito.
+Consultar clima actual y pronóstico para cualquier ciudad usando `wttr.in` (servicio público gratuito sin API key).
 
 **Palabras clave de activación:**  
-`clima`, `tiempo`, `temperatura afuera`, `lluvia`, `pronóstico`, `va a llover`, `calor afuera`, `frio`
-
-**Dependencias:**  
-- `requests` (ya disponible)  
-- `wttr.in` (servicio público, sin API key)
-
-**Implementación:**
-```python
-import requests
-def obtener_clima(ciudad="San Martín, Buenos Aires"):
-    r = requests.get(f"https://wttr.in/{ciudad}?format=j1")
-    data = r.json()
-    # Parsear temp_C, weatherDesc, humidity, windspeedKmph
-```
-
-**Archivos a crear:**
-```
-modulos/skills/clima_tiempo/
-├── SKILL.md
-├── instructions.md
-├── ejemplos.md
-└── clima.py
-```
+`clima`, `tiempo`, `temperatura afuera`, `lluvia`, `pronóstico`, `va a llover`
 
 ---
 
 #### 📋 `portapapeles_inteligente` — Prioridad: MEDIA
 **¿Qué hace?**  
-Historial de los últimos N textos copiados, búsqueda en historial, guardado nombrado de clips ("guardá esto como 'API key'").
+Historial de los últimos textos copiados, búsqueda en historial y guardado nombrado de clips.
 
 **Palabras clave de activación:**  
-`portapapeles`, `copié`, `clipboard`, `pegá`, `guardá este texto`, `tenía copiado`
-
-**Dependencias:**  
-- `pyperclip` (leer/escribir portapapeles)  
-- `pywin32` (ya disponible, para hook de eventos de portapapeles)
-
-**Archivos a crear:**
-```
-modulos/skills/portapapeles_inteligente/
-├── SKILL.md
-├── instructions.md
-├── ejemplos.md
-└── clipboard_manager.py
-```
+`portapapeles`, `copié`, `clipboard`, `pegá`, `guardá este texto`
 
 ---
 
@@ -247,118 +133,82 @@ modulos/skills/portapapeles_inteligente/
 
 #### 📺 `resumen_contenido` — Prioridad: BAJA-MEDIA
 **¿Qué hace?**  
-Resumir artículos web o transcripciones de YouTube a partir de una URL. "Resumime este video", "¿De qué trata este artículo?"
-
-**Dependencias:**  
-- `yt-dlp` (transcripciones de YouTube)  
-- `trafilatura` (extracción de texto de artículos web)  
-- DeepSeek Reasoner (ya disponible, para resúmenes largos)
-
-**Palabras clave de activación:**  
-`resumí`, `resumen`, `de qué trata`, `qué dice`, `video`, URL en la consulta
-
----
+Resumir artículos web o transcripciones de YouTube a partir de una URL (`yt-dlp` + `trafilatura`).
 
 #### 🌐 `traductor` — Prioridad: BAJA
 **¿Qué hace?**  
-Traducción rápida de texto o frases sin salir de Argus. "Traducí esto al inglés", "Cómo se dice X en japonés".
-
-**Dependencias:**  
-- `deep-translator` (Google Translate sin API key)  
-- O llamada directa a DeepSeek con prompt de traducción (sin dependencia externa)
-
-**Palabras clave de activación:**  
-`traducí`, `traducir`, `en inglés`, `en japonés`, `cómo se dice`, `qué significa en`
-
----
+Traducción rápida de frases o fragmentos de código contextuales.
 
 #### 💻 `monitor_procesos` — Prioridad: BAJA-MEDIA
 **¿Qué hace?**  
-Listar procesos que más consumen CPU/RAM, matar procesos específicos, detectar procesos sospechosos.
-
-**Dependencias:**  
-- `psutil` (ya disponible)
-
-**Palabras clave de activación:**  
-`qué está consumiendo`, `proceso`, `lento`, `qué está usando la RAM`, `matar proceso`
+Listar procesos que más consumen CPU/RAM y opción de finalizar procesos colgados (`psutil`).
 
 ---
 
 ## Mejoras a funcionalidades existentes
 
-Además de skills nuevas, hay mejoras concretas a lo ya implementado:
-
 ### 🔧 Confirmaciones GUI (reemplazar juez IA)
 **Estado:** Pendiente  
-**Descripción:** Reemplazar el mecanismo actual donde Gemini evalúa si el usuario dijo "sí" por un popup `CTkDialog` nativo en la GUI. Aplica a: borrados de archivos, push a GitHub, comandos git libres.  
-**Beneficio:** Más rápido, sin consumo de tokens, sin riesgo de que la IA malinterprete.
-
-### 🔧 Migración a `google.genai` (nuevo SDK)
-**Estado:** Urgente — el SDK actual `google.generativeai` está deprecado  
-**Descripción:** Migrar `ia.py` de `google.generativeai` a `google.genai`. La API cambia principalmente en cómo se inicializa el cliente y se pasan las herramientas.  
-**Referencia:** https://github.com/google-gemini/deprecated-generative-ai-python
+**Descripción:** Reemplazar el mecanismo donde la IA interpreta confirmaciones por diálogos modales nativos (`CTkDialog` o popups Web). Aplica a borrado de archivos, Git push/reset y comandos críticos.  
+**Beneficio:** Latencia cero, cero gasto de tokens y seguridad total.
 
 ### 🔧 Detección de skills por embeddings
 **Estado:** Planificado  
-**Descripción:** Reemplazar la detección por palabras clave hardcodeadas en `gestor_skills.py` por comparación de embeddings semánticos. Usar el modelo `all-MiniLM-L6-v2` que ya está cargado por ChromaDB.  
-**Beneficio:** Detecta skills aunque el usuario use sinónimos o frases no previstas.
+**Descripción:** Reemplazar la detección por palabras clave hardcodeadas en `gestor_skills.py` por comparación de similitud coseno de embeddings usando el modelo `all-MiniLM-L6-v2` ya cargado en memoria por ChromaDB.
 
-### 🔧 Unificar estado global
-**Estado:** Deuda técnica  
-**Descripción:** Eliminar `_AppState` en `main_gui.py` y usar solo `config.EstadoGlobal` con locks. Evita race conditions en contextos multi-thread.
-
-### 🔧 Inicio de LibreHardwareMonitor automático
-**Estado:** Depende de skill `monitor_hardware`  
-**Descripción:** Al iniciar Argus, verificar si LibreHardwareMonitor está corriendo. Si no, lanzarlo en segundo plano automáticamente.
+### 🔧 Coincidencia de palabras exactas en confirmaciones locales
+**Estado:** Pendiente  
+**Descripción:** Ajustar `_evaluar_confirmacion_local()` usando expresiones regulares `\b` para evitar falsos positivos por subcadenas (ej. "no sé" vs "sí").
 
 ---
 
 ## Tabla resumen de prioridades
 
-| Skill / Mejora | Tipo | Prioridad | Esfuerzo | Dependencias externas |
+| Skill / Mejora | Tipo | Prioridad | Estado | Dependencias externas |
 |---|---|---|---|---|
-| `control_audio` | Nueva skill | 🔴 Alta | Medio | pycaw |
-| `recordatorios` | Nueva skill | 🔴 Alta | Bajo | plyer / win10toast |
-| `monitor_hardware` | Nueva skill | 🔴 Alta | Medio-Alto | LibreHardwareMonitor + wmi |
-| Migración `google.genai` | Mejora | 🔴 Alta | Bajo | — |
-| Confirmaciones GUI | Mejora | 🟡 Media | Bajo | — |
-| `steam_integration` | Nueva skill | 🟡 Media | Medio | Steam Web API key |
-| `clima_tiempo` | Nueva skill | 🟡 Media | Bajo | — (wttr.in público) |
-| `portapapeles_inteligente` | Nueva skill | 🟡 Media | Bajo | pyperclip |
-| Detección skills por embeddings | Mejora | 🟡 Media | Medio | — (MiniLM ya cargado) |
-| `resumen_contenido` | Nueva skill | 🟢 Baja | Alto | yt-dlp, trafilatura |
-| `monitor_procesos` | Nueva skill | 🟢 Baja | Bajo | — (psutil ya instalado) |
-| `traductor` | Nueva skill | 🟢 Baja | Bajo | deep-translator |
-| Unificar estado global | Mejora | 🟢 Baja | Medio | — |
+| `busqueda_web_actualizada` | Skill | 🔴 Alta | ✅ Operativa (v1.0) | — |
+| `control_audio` | Skill | 🔴 Alta | ✅ Operativa (v1.0) | pycaw |
+| Migración `google-genai` | Mejora | 🔴 Alta | ✅ Completado | google-genai |
+| Web HUD PyWebView | Mejora | 🔴 Alta | ✅ Completado | pywebview |
+| Modos Win32 (WorkerW) | Mejora | 🔴 Alta | ✅ Completado | ctypes Win32 |
+| `recordatorios` | Skill | 🔴 Alta | 🔄 Pendiente | plyer / win10toast |
+| `monitor_hardware` | Skill | 🔴 Alta | 🔄 Pendiente | LibreHardwareMonitor + wmi |
+| Confirmaciones GUI | Mejora | 🟡 Media | 🔄 Pendiente | — |
+| Detección por embeddings | Mejora | 🟡 Media | 🔄 Pendiente | — (MiniLM ya en RAM) |
+| `clima_tiempo` | Skill | 🟡 Media | 🔄 Pendiente | wttr.in |
+| `steam_integration` | Skill | 🟡 Media | 🔄 Pendiente | Steam Web API |
+| `portapapeles_inteligente` | Skill | 🟡 Media | 🔄 Pendiente | pyperclip |
+| `resumen_contenido` | Skill | 🟢 Baja | 🔄 Pendiente | yt-dlp, trafilatura |
+| `monitor_procesos` | Skill | 🟢 Baja | 🔄 Pendiente | psutil |
 
 ---
 
-## Orden de implementación sugerido
+## Orden de implementación sugerido (Próximas etapas)
 
 ```
-Fase 1 (esta semana):
-  ① Migración google.genai           ← urgente, SDK deprecado
-  ② control_audio                    ← impacto diario inmediato
-  ③ recordatorios                    ← impacto diario inmediato
+Fase Actual (Completada):
+  ✅ Migración a google-genai (SDK oficial)
+  ✅ Web HUD PyWebView + Edge Chromium
+  ✅ Skill control_audio (pycaw)
+  ✅ Modos de visualización Win32 (WorkerW Wallpaper Mode)
+  ✅ Gamepad subproceso + fallback XInput
 
-Fase 2 (próximas semanas):
-  ④ monitor_hardware + LibreHW       ← resuelve el problema de temperatura CPU
-  ⑤ Confirmaciones GUI               ← seguridad y velocidad
-  ⑥ clima_tiempo                     ← rápido de implementar, muy útil
+Próxima Fase (Fase 1):
+  ① recordatorios                    ← fácil implementación, alto impacto
+  ② monitor_hardware + LibreHW       ← monitoreo real de CPU/GPU
+  ③ Confirmaciones GUI (Modales)     ← cero tokens para confirmaciones
 
-Fase 3 (un mes):
+Fase 2 (Próximas semanas):
+  ④ Detección de skills por embeddings
+  ⑤ clima_tiempo (wttr.in)
+  ⑥ portapapeles_inteligente
+
+Fase 3 (Futuro):
   ⑦ steam_integration
-  ⑧ portapapeles_inteligente
-  ⑨ Detección skills por embeddings
-
-Fase 4 (futuro):
-  ⑩ resumen_contenido
-  ⑪ monitor_procesos
-  ⑫ traductor
-  ⑬ Unificar estado global
+  ⑧ resumen_contenido
+  ⑨ monitor_procesos
 ```
 
 ---
 
-*Documento generado en sesión de desarrollo — Argus v0.3.0*  
-*Próxima revisión sugerida: después de implementar Fase 1*
+*Documento actualizado según el estado real del repositorio — Argus v0.4.0*

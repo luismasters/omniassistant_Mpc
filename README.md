@@ -1,32 +1,33 @@
 # Argus — Asistente de IA Multimodal para Windows
 
-**Argus** es un asistente de IA integrado al escritorio de Windows, diseñado para operar en dos modos (General y Mentor Tecnológico) con cambio dinámico de modelo de lenguaje (Gemini 3.1 Flash Lite / DeepSeek Reasoner). Soporta voz, visión, gamepad, búsqueda web, control de sistema, memoria persistente, y un sistema extensible de Skills.
+**Argus** es un asistente de IA integrado al escritorio de Windows, diseñado para operar en tres modos (**General**, **Mentor Tecnológico** y **Gamer**) con cambio dinámico de modelo de lenguaje (Gemini 3.1 Flash Lite / DeepSeek Reasoner / Groq Llama 3.1 8B). Soporta interfaz dual (CustomTkinter nativa y Web HUD flotante/escritorio basado en PyWebView + Edge Chromium WebView2), voz, visión, gamepad multi-mando, búsqueda web, control de audio maestro y por app, memoria persistente, y un sistema extensible de Skills.
 
 ---
 
 ## ✨ Características principales
 
-- **Interfaz gráfica con CustomTkinter + Web**: Chat con renderizado de Markdown (código, tablas, listas), selección de modo, adjuntar archivos, guardar en memoria. Integra en la cabecera de la barra lateral la **pantalla interactiva EMO** con expresiones y animaciones vectoriales fluidas en tiempo real (reposo, escucha, pensamiento, habla, confirmaciones de SO y errores). También incluye una **interfaz web** (`main_web.py`) accesible desde el navegador.
-- **Voz completa**: Captura con Whisper (GPU acelerada), síntesis con Edge TTS, reproducción con cola thread-safe y corte por tecla.
-- **Modelos múltiples**: Gemini 3.1 Flash Lite, DeepSeek Reasoner y soporte integrado para Groq (Llama 3.3, Llama 3.1, Qwen 3.6, GPT-OSS) seleccionables directamente desde un menú desplegable en la GUI.
-- **Memoria persistente (ChromaDB)**: Guardado y búsqueda de recuerdos con caché de embeddings.
+- **Interfaz dual (CustomTkinter + PyWebView Web HUD)**: Chat con renderizado de Markdown (código, tablas, listas), selección de modo, adjuntar archivos, guardar en memoria. Integra rostros de expresión vectorial en tiempo real: tanto EMO (`EmoBezelFace`) como Argus v2 (`RostroArgus`) a 60 FPS con temas neón dinámicos.
+- **3 Modos de Visualización Win32**: Alterna dinámicamente entre Ventana Tradicional, Widget Flotante y Modo Escritorio / Wallpaper anclado al fondo del escritorio de Windows (`WorkerW` estilo Wallpaper Engine / Rainmeter).
+- **Voz completa**: Captura STT con Whisper (acelerado por GPU/CPU), síntesis TTS con Edge TTS, reproducción con cola thread-safe y corte por tecla.
+- **Modelos múltiples**: Gemini 3.1 Flash Lite (SDK `google-genai`), DeepSeek Reasoner y soporte integrado para Groq (Llama 3.3 70B, Llama 3.1 8B, Qwen 3.6 27B, GPT-OSS 120B) seleccionables en caliente.
+- **Memoria persistente (ChromaDB)**: Guardado y búsqueda de recuerdos con caché de embeddings y radar de cambios en proyectos (`watchdog`).
 - **Control de sistema**: Abrir/cerrar/mover ventanas, explorar directorios, apagar PC, búsqueda inteligente de programas.
-- **Control de audio**: Volumen maestro y por aplicación (pycaw), cambio de dispositivo de salida.
-- **Git integrado**: Push/pull con confirmación nativa, comandos libres, reset de remoto.
-- **Gamepad**: Soporte DualSense y Xbox One, combo L3+R3 push-to-talk.
-- **Skills extensibles**: Sistema de inyección contextual para búsqueda web, control de audio y más.
-- **Seguridad**: Sandbox de archivos, confirmaciones nativas (sin gasto de tokens).
+- **Control de audio (`control_audio`)**: Gestión de volumen maestro, volumen por aplicación (pycaw), mute/unmute y cambio de dispositivos de salida.
+- **Git integrado**: Push/pull con confirmaciones nativas por palabra clave, comandos libres, reset de remoto.
+- **Gamepad avanzado**: Servicio continuo en subproceso con fallback a XInput nativo (`ctypes Win32`) para capturar combos L3+R3 (push-to-talk) incluso dentro de juegos en pantalla completa.
+- **Skills extensibles**: Sistema de inyección contextual para búsqueda web, control de audio y capacidades personalizadas.
+- **Seguridad**: Sandbox de archivos, confirmaciones nativas (sin gasto innecesario de tokens).
 - **Visión**: Captura de pantalla multi-monitor.
 
 ---
 
 ## 📋 Requisitos
 
-- **Sistema operativo**: Windows 10/11 (usa APIs nativas de Windows)
+- **Sistema operativo**: Windows 10/11 (utiliza APIs nativas de Windows y Win32 `WorkerW`)
 - **Python**: 3.10 o superior
 - **GPU (opcional)**: NVIDIA con CUDA para aceleración de Whisper
-- **Gamepad (opcional)**: DualSense o Xbox One para modo gaming
-- **Conexión a internet**: Para APIs de Gemini y DeepSeek
+- **Gamepad (opcional)**: DualSense, Xbox One / Series X|S para modo gaming
+- **Conexión a internet**: Para APIs de Gemini, DeepSeek y Groq
 
 ---
 
@@ -71,8 +72,14 @@ GITHUB_TOKEN=tu_token_de_github_opcional
 
 ### 5. Ejecutar
 
+Para iniciar la **GUI Desktop (CustomTkinter)**:
 ```bash
 python main_gui.py
+```
+
+Para iniciar el **Web HUD (PyWebView + Edge Chromium)**:
+```bash
+python main_web.py
 ```
 
 ---
@@ -87,14 +94,7 @@ Algunas skills requieren dependencias extra:
 pip install pycaw comtypes
 ```
 
-> ⚠️ Para cambiar dispositivo de salida de audio, puede requerir el módulo PowerShell `AudioDeviceCmdlets`.
-
-### Ejecutar tests
-
-```bash
-pip install pytest
-python -m pytest tests/ -v
-```
+> ⚠️ Para cambiar el dispositivo de salida de audio, puede requerir el módulo PowerShell `AudioDeviceCmdlets`.
 
 ---
 
@@ -102,16 +102,17 @@ python -m pytest tests/ -v
 
 | Modo | Modelo por Defecto | Descripción |
 |------|--------------------|-------------|
-| **General** | Gemini 3.1 Flash Lite | Asistente cotidiano: chat, web, control de PC, memoria |
-| **Mentor Tecnológico** | DeepSeek Reasoner | Asesoría de stack, proyectos de portafolio, simulación de entrevistas y radar de tendencias (soporta anclaje opcional de proyecto) |
+| **General** | Gemini 3.1 Flash Lite | Asistente cotidiano: chat, web, control de PC, memoria persistente |
+| **Mentor Tecnológico** | DeepSeek Reasoner | Asesoría de stack, proyectos de portafolio, simulación de entrevistas y perfil de mentor (`perfil_mentor.json`) |
+| **Gamer** | Groq Llama 3.1 8B | Respuesta ultra rápida para consultas breves durante juegos. Desactiva micrófono de teclado y activa PTT por mando (L3+R3) |
 
-> 🧠 **Nota:** Los modelos indicados arriba son los asignados *por defecto*, pero puedes cambiar a cualquiera de los modelos de **Groq** (o forzar el uso de uno específico) usando el selector desplegable de la barra lateral en la interfaz gráfica.
+> 🧠 **Nota:** Los modelos indicados arriba son los asignados *por defecto*, pero podés cambiar a cualquiera de los modelos disponibles usando el selector desplegable en tiempo real.
 
 ### Atajos
 
-- **F8**: Push-to-talk (mantener presionado para hablar)
-- **L3+R3 (gamepad)**: Push-to-talk en modo gaming
-- **Esc / Espacio**: Cortar reproducción de voz
+- **F8**: Push-to-talk (mantener presionado para hablar en teclado)
+- **L3+R3 (gamepad)**: Push-to-talk en mando (funciona en primer plano y dentro de juegos vía XInput)
+- **Esc / Espacio**: Cortar reproducción de voz en curso
 
 ---
 
@@ -119,23 +120,21 @@ python -m pytest tests/ -v
 
 | Skill | Descripción | Estado |
 |-------|-------------|--------|
-| `busqueda_web_actualizada` | Búsqueda en DuckDuckGo con prioridad de resultados recientes | ✅ v1.0 |
-| `control_audio` | Control de volumen maestro y por aplicación | ✅ v1.0 |
-| `monitor_hardware` | Monitoreo de temperatura CPU/GPU | 🔄 Planificada |
-| `recordatorios` | Recordatorios programados | 🔄 Planificada |
+| `busqueda_web_actualizada` | Búsqueda en DuckDuckGo con prioridad de resultados recientes | ✅ v1.0 Operativa |
+| `control_audio` | Control de volumen maestro, por app y silenciar/activar | ✅ v1.0 Operativa |
+| `monitor_hardware` | Monitoreo de temperatura CPU/GPU con LibreHardwareMonitor | 🔄 Planificada |
+| `recordatorios` | Recordatorios programados con notificación y voz | 🔄 Planificada |
 
 ---
 
-## 🔍 ¿Cómo funciona el escaneo de proyectos (Crawler)?
+## 🔍 Escaneo de proyectos (Crawler)
 
-El comando `escanear_proyecto:` se ejecuta en dos fases:
+El comando `escanear_proyecto:` analiza la arquitectura del workspace actual en dos fases:
 
 | Fase | Motor | Descripción |
 |------|-------|-------------|
-| **Recorrido de archivos** | **Python** (`modulos/crawler.py`) | Recorre el workspace ignorando carpetas no deseadas (`.git`, `__pycache__`, `venv`), concatena archivos `.py`, `.md`, `.json`, `.txt` en un solo bloque de texto. |
-| **Análisis y generación del PROJECT_STATE.md** | **Gemini 3.1 Flash Lite** | Recibe el código completo y un prompt de análisis arquitectónico. Devuelve el documento Markdown estructurado con resumen ejecutivo, arquitectura, estado actual y deuda técnica. |
-
-> **Nota:** El crawler funciona en cualquier modo siempre que haya un Workspace seleccionado.
+| **Recorrido de archivos** | **Python** (`modulos/crawler.py`) | Recorre el workspace ignorando carpetas no deseadas (`.git`, `__pycache__`, `venv`), concatena archivos de código y documentación. |
+| **Análisis y generación de PROJECT_STATE.md** | **Gemini 3.1 Flash Lite** | Procesa el contenido consolidado y genera un resumen estructurado de arquitectura, estado y deuda técnica. |
 
 ---
 
@@ -143,96 +142,74 @@ El comando `escanear_proyecto:` se ejecuta en dos fases:
 
 ```
 OmniAssistant/
-├── config.py                  # Configuración y estado global
+├── config.py                  # Configuración y estado global thread-safe
 ├── main_gui.py                # Interfaz gráfica principal (CustomTkinter)
-├── main_web.py                # Interfaz web alternativa
-├── gestor_boveda.py           # CLI para gestión de memoria
-├── test_emo_face.py           # Prototipo autónomo de pruebas para el rostro EMO
+├── main_web.py                # Punto de entrada Web HUD (PyWebView + Edge Chromium)
+├── gestor_boveda.py           # CLI para gestión directa de memoria
+├── test_emo_face.py           # Prototipo autónomo de pruebas para rostro EMO
+├── mapeo_control_prueba.py    # Herramienta de pruebas para mandos gamepad
 ├── requirements.txt           # Dependencias del proyecto
 ├── .env                       # API Keys (no versionado)
-├── web/
-│   └── index.html             # Frontend web
+├── gui/
+│   ├── index.html             # Frontend HTML del Web HUD
+│   ├── app.js                 # Lógica del cliente Web HUD
+│   ├── emo_face.js            # Renderizado 60 FPS del rostro EMO
+│   └── styles.css             # Estilos y temas neón
 ├── modulos/
-│   ├── ia.py                  # Enrutador IA (Gemini + DeepSeek)
-│   ├── prompts.py             # Plantillas de system prompt
-│   ├── audio_custom.py        # Captura y síntesis de voz
-│   ├── memoria.py             # Persistencia ChromaDB
-│   ├── controlador_acciones.py # Parseo y ejecución de acciones
-│   ├── sistema.py             # Control de sistema Windows
+│   ├── ia.py                  # Enrutador IA (Gemini + DeepSeek + Groq)
+│   ├── prompts.py             # Plantillas de system prompt por modo
+│   ├── audio_custom.py        # Captura y síntesis de voz (Whisper + Edge TTS)
+│   ├── memoria.py             # Persistencia ChromaDB y radar de cambios
+│   ├── perfil_usuario.py      # Extracción y gestión del perfil de usuario
+│   ├── perfil_mentor.py       # Gestor del perfil del mentor
+│   ├── ui_manager.py          # Gestor Strategy de modos de visualización Win32
+│   ├── win32_desktop.py       # Integración ctypes Win32 (WorkerW reparenting & DPI)
+│   ├── web_bridge.py          # Puente bidireccional Python <-> JS (PyWebView API)
+│   ├── controlador_acciones.py # Parseo y ejecución de acciones del sistema
+│   ├── sistema.py             # Control de procesos y ventanas Windows
 │   ├── archivos.py            # I/O con sandbox de seguridad
 │   ├── busqueda.py            # Búsqueda DuckDuckGo
-│   ├── vision.py              # Captura de pantalla
-│   ├── git_bot.py             # Automatización Git
-│   ├── gamepad_control.py     # Soporte de gamepad
+│   ├── vision.py              # Captura de pantalla multi-monitor
+│   ├── git_bot.py             # Automatización Git con confirmación nativa
+│   ├── gamepad_control.py     # Integración de gamepad con la interfaz
+│   ├── gamepad_service.py     # Subproceso independiente de lectura de gamepad
+│   ├── xinput_reader.py       # Lector XInput nativo Win32 (fallback para juegos)
+│   ├── gamepad_inputs.py      # Mapeos de entradas de mandos
 │   ├── cliente_mcp.py         # Cliente MCP
 │   ├── servidor_sistema_mcp.py # Servidor MCP
-│   ├── crawler.py             # Generación de PROJECT_STATE
-│   ├── logger.py              # Logging
-│   ├── limpiar.py             # Limpieza de ChromaDB
+│   ├── crawler.py             # Generación automática de PROJECT_STATE.md
+│   ├── logger.py              # Logging estructurado
+│   ├── limpiar.py             # Limpieza de contexto y memoria
 │   └── skills/                # Skills extensibles
 │       ├── __init__.py
 │       ├── gestor_skills.py   # Gestor de skills con detección contextual
 │       ├── busqueda_web_actualizada/
-│       │   ├── __init__.py
-│       │   ├── SKILL.md
-│       │   ├── instructions.md
-│       │   └── ejemplos.md
-│       └── control_audio/
-│           ├── __init__.py
-│           ├── audio_control.py
-│           ├── SKILL.md
-│           ├── instructions.md
-│           └── ejemplos.md
-├── tests/
-│   ├── __init__.py
-│   └── test_ia.py             # Tests unitarios
+│       └── control_audio/     # Control de audio via pycaw
+├── tests/                     # Suite de pruebas unitarias e integrales
 └── logs/
     └── omniassistant.log      # Logs de la aplicación
 ```
 
 ---
 
-## 🧪 Tests
+## 🛠️ Prioridades actuales y Roadmap
 
-```bash
-# Ejecutar todos los tests
-python -m pytest tests/ -v
+### Tareas completadas
+- [x] Migración completa a `google-genai` (nuevo SDK oficial) ✅
+- [x] Web HUD nativo flotante/escritorio con PyWebView (`main_web.py` + `gui/`) ✅
+- [x] Skill `control_audio` (volumen maestro, por app y mute) ✅
+- [x] Arquitectura de visualización Win32 (Fondo de Escritorio / WorkerW, Flotante, Tradicional) ✅
+- [x] Subproceso Gamepad con fallback XInput nativo para juegos ✅
 
-# Tests específicos
-python -m pytest tests/test_ia.py -v -k "confirmacion"
-python -m pytest tests/test_ia.py -v -k "voz"
-python -m pytest tests/test_ia.py -v -k "EstadoGlobal"
-```
-
----
-
-## 🛠️ Deuda técnica y próximos pasos
-
-Ver [`PROJECT_STATE.md`](PROJECT_STATE.md) para el estado detallado del proyecto y el roadmap.
-
-### Prioridades actuales
-- [x] Migración completa a `google-genai` (nuevo SDK) ✅
-- [x] Tests unitarios y de integración ✅
-- [x] README con guía de instalación ✅
-- [ ] Skill `monitor_hardware` (temperatura CPU/GPU)
-- [ ] Skill `recordatorios`
-- [ ] Confirmaciones GUI con popups nativos (CTkDialog)
-- [ ] Detección de skills por embeddings semánticos
-- [ ] Interfaz web (`main_web.py`)
+### Próximos pasos
+- [ ] Skill `monitor_hardware` (temperatura CPU/GPU via LibreHardwareMonitor)
+- [ ] Skill `recordatorios` (alertas temporales con voz)
+- [ ] Confirmaciones GUI con diálogos popups nativos (`CTkDialog` / Modales Web)
+- [ ] Detección de skills por embeddings semánticos (`all-MiniLM-L6-v2`)
+- [ ] Estructuración de la suite de tests en `tests/`
 
 ---
 
 ## 📄 Licencia
 
 Uso personal y educativo.
-
----
-
-## 🤝 Contribuciones
-
-Las contribuciones son bienvenidas. Por favor:
-1. Hacé fork del proyecto
-2. Creá una rama para tu feature (`git checkout -b feature/nueva-skill`)
-3. Hacé commit de tus cambios (`git commit -m 'Agrega nueva skill'`)
-4. Hacé push a la rama (`git push origin feature/nueva-skill`)
-5. Abrí un Pull Request

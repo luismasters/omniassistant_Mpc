@@ -142,10 +142,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (comboPressed && !gamepadComboActivoJS) {
       gamepadComboActivoJS = true;
+      // ⚠️ La activación de voz por L3+R3 la maneja EXCLUSIVAMENTE
+      // el subproceso Python (gamepad_service.py vía XInput).
+      // El JS solo notifica el estado para que Python sepa cuándo
+      // soltó el combo. Si se llamara también desde acá, se dispararían
+      // DOS grabaciones simultáneas (duplicando Whisper en RAM/VRAM).
       if (window.iniciarEscuchaVozUI) window.iniciarEscuchaVozUI();
-      if (pyApi && typeof pyApi.iniciar_escucha_voz_gamepad === 'function') {
-        pyApi.iniciar_escucha_voz_gamepad();
-      }
     } else if (!comboPressed && gamepadComboActivoJS) {
       gamepadComboActivoJS = false;
     }
@@ -977,5 +979,173 @@ document.addEventListener('DOMContentLoaded', () => {
 
   window.mostrarTypingIndicator = function() { mostrarTyping(); };
   window.ocultarTypingIndicator = function() { ocultarTyping(); };
+
+  // ─── EMO SPEECH CLOUD BUBBLE & MODAL RECORDATORIOS LOGIC ───────────────
+  const emoCloudBubble = document.getElementById('emoCloudBubble');
+  const cloudBadge     = document.getElementById('cloudBadge');
+  const cloudTime      = document.getElementById('cloudTime');
+  const cloudMessage   = document.getElementById('cloudMessage');
+  const btnEmoCloudOk  = document.getElementById('btnEmoCloudOk');
+
+  const btnReminders     = document.getElementById('btnReminders');
+  const modalRecordatorios = document.getElementById('modalRecordatorios');
+  const btnCloseModalRec = document.getElementById('btnCloseModalRec');
+  const tabRecActivos    = document.getElementById('tabRecActivos');
+  const tabRecNuevo      = document.getElementById('tabRecNuevo');
+  const contentRecActivos = document.getElementById('contentRecActivos');
+  const contentRecNuevo   = document.getElementById('contentRecNuevo');
+  const recListContainer = document.getElementById('recListContainer');
+  const formNuevoRec     = document.getElementById('formNuevoRec');
+
+  // Función invocada por Python cuando expira/dispara un recordatorio
+  window.mostrarNubeRecordatorioEmo = function(data) {
+    if (!data) return;
+    const msg = data.mensaje || 'Sin título';
+    const hora = data.expiracion_iso ? data.expiracion_iso.split(' ')[1] || '' : '';
+    const esPrevio = data.es_aviso_previo || false;
+
+    if (cloudBadge) cloudBadge.innerText = esPrevio ? '📌 AVISO PARA MAÑANA' : '⏰ RECORDATORIO';
+    if (cloudTime) cloudTime.innerText = hora;
+    if (cloudMessage) cloudMessage.innerText = msg;
+
+    if (emoCloudBubble) {
+      emoCloudBubble.classList.remove('hidden');
+    }
+
+    if (window.emoFace) {
+      window.emoFace.setEstado('confirm', esPrevio ? 'MAÑANA' : 'AVISO');
+    }
+  };
+
+  if (btnEmoCloudOk) {
+    btnEmoCloudOk.addEventListener('click', () => {
+      if (emoCloudBubble) emoCloudBubble.classList.add('hidden');
+      if (window.emoFace) window.emoFace.setEstado('idle');
+    });
+  }
+
+  // Modal Recordatorios Handlers
+  if (btnReminders) {
+    btnReminders.addEventListener('click', () => {
+      if (modalRecordatorios) modalRecordatorios.classList.remove('hidden');
+      cargarListaRecordatorios();
+    });
+  }
+
+  if (btnCloseModalRec) {
+    btnCloseModalRec.addEventListener('click', () => {
+      if (modalRecordatorios) modalRecordatorios.classList.add('hidden');
+    });
+  }
+
+  if (modalRecordatorios) {
+    modalRecordatorios.addEventListener('click', (e) => {
+      if (e.target === modalRecordatorios) {
+        modalRecordatorios.classList.add('hidden');
+      }
+    });
+  }
+
+  if (tabRecActivos && tabRecNuevo) {
+    tabRecActivos.addEventListener('click', () => {
+      tabRecActivos.classList.add('active');
+      tabRecNuevo.classList.remove('active');
+      contentRecActivos.classList.remove('hidden');
+      contentRecNuevo.classList.add('hidden');
+      cargarListaRecordatorios();
+    });
+
+    tabRecNuevo.addEventListener('click', () => {
+      tabRecNuevo.classList.add('active');
+      tabRecActivos.classList.remove('active');
+      contentRecNuevo.classList.remove('hidden');
+      contentRecActivos.classList.add('hidden');
+    });
+  }
+
+  async function cargarListaRecordatorios() {
+    if (!pyApi || typeof pyApi.obtener_recordatorios !== 'function') return;
+    try {
+      if (recListContainer) recListContainer.innerHTML = '<div class="rec-empty-state">Cargando...</div>';
+      const res = await pyApi.obtener_recordatorios();
+      if (res && res.exito) {
+        renderizarListaRecordatorios(res.recordatorios || []);
+      } else {
+        if (recListContainer) recListContainer.innerHTML = `<div class="rec-empty-state">Error: ${res.error || 'No disponible'}</div>`;
+      }
+    } catch (e) {
+      console.error('Error cargando recordatorios:', e);
+      if (recListContainer) recListContainer.innerHTML = `<div class="rec-empty-state">Error al conectar con el motor.</div>`;
+    }
+  }
+
+  function renderizarListaRecordatorios(lista) {
+    if (!recListContainer) return;
+    if (lista.length === 0) {
+      recListContainer.innerHTML = '<div class="rec-empty-state">No tienes recordatorios pendientes. 🎉</div>';
+      return;
+    }
+
+    recListContainer.innerHTML = '';
+    lista.forEach(r => {
+      const item = document.createElement('div');
+      item.className = 'rec-item';
+
+      const tagTipo = r.tipo === 'recurrente' ? '🔄 Recurrente' : (r.sin_hora_especifica ? '☀️ Día Completo' : '⏱️ Puntual');
+
+      item.innerHTML = `
+        <div class="rec-item-info">
+          <div class="rec-item-title">${escapeHtml(r.mensaje)}</div>
+          <div class="rec-item-meta">
+            <span class="rec-badge">${tagTipo}</span>
+            <span>📅 ${escapeHtml(r.expiracion_iso)}</span>
+          </div>
+        </div>
+        <button class="rec-btn-del" data-id="${r.id}" title="Eliminar recordatorio">🗑️ Borrar</button>
+      `;
+
+      const btnDel = item.querySelector('.rec-btn-del');
+      if (btnDel) {
+        btnDel.addEventListener('click', async () => {
+          const id = btnDel.dataset.id;
+          if (pyApi && typeof pyApi.cancelar_recordatorio_manual === 'function') {
+            await pyApi.cancelar_recordatorio_manual(id);
+            cargarListaRecordatorios();
+          }
+        });
+      }
+
+      recListContainer.appendChild(item);
+    });
+  }
+
+  if (formNuevoRec) {
+    formNuevoRec.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const msgInput = document.getElementById('recMensaje');
+      const tiempoInput = document.getElementById('recTiempo');
+      const opcSelect = document.getElementById('recOpciones');
+
+      if (!msgInput || !tiempoInput) return;
+
+      const mensaje = msgInput.value.trim();
+      const tiempo = tiempoInput.value.trim();
+      const opciones = opcSelect ? opcSelect.value : '';
+
+      if (!mensaje || !tiempo) return;
+
+      if (pyApi && typeof pyApi.crear_recordatorio_manual === 'function') {
+        const res = await pyApi.crear_recordatorio_manual(mensaje, tiempo, opciones);
+        if (res && res.exito) {
+          msgInput.value = '';
+          tiempoInput.value = '';
+          if (opcSelect) opcSelect.value = '';
+          if (tabRecActivos) tabRecActivos.click();
+        } else {
+          alert('Error creando recordatorio: ' + (res.error || 'desconocido'));
+        }
+      }
+    });
+  }
 
 });

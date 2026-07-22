@@ -48,9 +48,79 @@ class ArgusWebBridge:
     def __init__(self, app_window=None):
         self._window = app_window
         self._gestor_gamepad = None  # instanciado en main_web.py
+        # Cola de notificaciones de recordatorios que llegaron antes
+        # de que la ventana PyWebView estuviera lista
+        self._cola_recordatorios_pendientes: list = []
+        self._suscribir_recordatorios()
+
+    def _suscribir_recordatorios(self):
+        try:
+            from modulos.skills.recordatorios.gestor_recordatorios import gestor_recordatorios
+            gestor_recordatorios.suscribir_callback_aviso(self._on_recordatorio_disparado)
+            logger.info("[RECORDATORIOS] Callback de aviso suscrito correctamente en web_bridge.")
+        except Exception as e:
+            logger.warning(f"No se pudo suscribir callback de recordatorios: {e}")
+
+    def _on_recordatorio_disparado(self, data: dict):
+        """Llamado por el scheduler cuando un recordatorio expira.
+        Si la ventana no está lista aún, encola la notificación para reenviarla.
+        La síntesis de voz se ejecuta en un hilo separado para no bloquear el scheduler.
+        """
+        try:
+            win = self._window or (webview.windows[0] if webview.windows else None)
+            if win:
+                js_cmd = f"if (window.mostrarNubeRecordatorioEmo) window.mostrarNubeRecordatorioEmo({json.dumps(data)});"
+                try:
+                    win.evaluate_js(js_cmd)
+                    logger.info(f"[RECORDATORIOS] Nube EMO mostrada para: '{data.get('mensaje', '')}' ")
+                except Exception as e_js:
+                    logger.warning(f"[RECORDATORIOS] evaluate_js fallido, encolando: {e_js}")
+                    self._cola_recordatorios_pendientes.append(data)
+            else:
+                # Ventana aún no disponible: encolar para reenviar en set_window
+                logger.warning("[RECORDATORIOS] Ventana no disponible, encolando notificacion para reenvio.")
+                self._cola_recordatorios_pendientes.append(data)
+
+            # Síntesis de voz en hilo separado (no bloquear el scheduler)
+            msg = data.get("mensaje", "")
+            es_previo = data.get("es_aviso_previo", False)
+            prefix = "Aviso para mañana: " if es_previo else "Recordatorio: "
+            threading.Thread(
+                target=hablar_no_bloqueante,
+                args=(f"{prefix}{msg}",),
+                daemon=True
+            ).start()
+        except Exception as e:
+            logger.exception(f"Error procesando disparo de recordatorio en bridge: {e}")
+
+    def _reenviar_recordatorios_encolados(self):
+        """Reenvía al frontend todas las notificaciones que llegaron
+        antes de que la ventana PyWebView estuviera lista.
+        Se llama automáticamente desde set_window() con un delay
+        para asegurar que el JS del frontend ya haya cargado.
+        """
+        if not self._cola_recordatorios_pendientes:
+            return
+        # Esperar 4 segundos para que el frontend JS termine de cargar
+        import time
+        time.sleep(4)
+        win = self._window or (webview.windows[0] if webview.windows else None)
+        if not win:
+            return
+        pendientes = list(self._cola_recordatorios_pendientes)
+        self._cola_recordatorios_pendientes.clear()
+        for data in pendientes:
+            try:
+                js_cmd = f"if (window.mostrarNubeRecordatorioEmo) window.mostrarNubeRecordatorioEmo({json.dumps(data)});"
+                win.evaluate_js(js_cmd)
+                logger.info(f"[RECORDATORIOS] Notificacion re-enviada (encolada): '{data.get('mensaje', '')}' ")
+            except Exception as e:
+                logger.warning(f"[RECORDATORIOS] Error re-enviando notificacion encolada: {e}")
 
     def set_window(self, window):
         self._window = window
+        # Reenviar cualquier recordatorio que haya disparado antes de que la ventana existiera
+        threading.Thread(target=self._reenviar_recordatorios_encolados, daemon=True).start()
 
     def set_gestor_gamepad(self, gestor):
         """Recibe el GestorGamepad ya iniciado desde main_web.py."""
@@ -96,6 +166,13 @@ class ArgusWebBridge:
             return {"exito": False, "error": "Prompt vacío"}
 
         try:
+            # Hook de primera interacción del día para recordatorios sin hora / cumpleaños
+            try:
+                from modulos.skills.recordatorios.gestor_recordatorios import gestor_recordatorios
+                gestor_recordatorios.comprobar_primera_interaccion_dia()
+            except Exception as e_rec:
+                logger.warning(f"Error en comprobar_primera_interaccion_dia: {e_rec}")
+
             win = self._window or (webview.windows[0] if webview.windows else None)
             if win:
                 win.evaluate_js("if (window.mostrarTypingIndicator) window.mostrarTypingIndicator();")
@@ -108,6 +185,36 @@ class ArgusWebBridge:
         except Exception as e:
             logger.exception(f"Error procesando mensaje en web bridge: {e}")
             return {"exito": False, "respuesta": f"❌ Error: {str(e)}"}
+
+    def obtener_recordatorios(self) -> dict:
+        """Devuelve la lista de recordatorios pendientes."""
+        try:
+            from modulos.skills.recordatorios.gestor_recordatorios import gestor_recordatorios
+            recs = gestor_recordatorios.listar_recordatorios(incluir_completados=False)
+            return {"exito": True, "recordatorios": recs}
+        except Exception as e:
+            logger.exception(f"Error obteniendo recordatorios: {e}")
+            return {"exito": False, "error": str(e)}
+
+    def crear_recordatorio_manual(self, mensaje: str, tiempo_str: str, opciones: str = "") -> dict:
+        """Crea un recordatorio desde la GUI manual."""
+        try:
+            from modulos.skills.recordatorios.gestor_recordatorios import gestor_recordatorios
+            rec = gestor_recordatorios.crear_recordatorio(mensaje, tiempo_str, opciones, origen="gui_manual")
+            return {"exito": True, "recordatorio": rec}
+        except Exception as e:
+            logger.exception(f"Error creando recordatorio manual: {e}")
+            return {"exito": False, "error": str(e)}
+
+    def cancelar_recordatorio_manual(self, id_rec: str) -> dict:
+        """Cancela un recordatorio desde la GUI manual."""
+        try:
+            from modulos.skills.recordatorios.gestor_recordatorios import gestor_recordatorios
+            exito = gestor_recordatorios.cancelar_recordatorio(id_rec)
+            return {"exito": exito}
+        except Exception as e:
+            logger.exception(f"Error cancelando recordatorio manual: {e}")
+            return {"exito": False, "error": str(e)}
 
     def cambiar_modo_interfaz(self, modo: str) -> dict:
         """

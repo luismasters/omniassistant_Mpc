@@ -205,7 +205,12 @@ def radar_inteligente(nombre_buscado):
     mejor_coincidencia, puntaje = process.extractOne(nombre_buscado_limpio, nombres_posibles)
     print(f"[RADAR INTELIGENTE] Buscando Programa: '{nombre_buscado_limpio}'")
     print(f"Mejor coincidencia: '{mejor_coincidencia}' (Similitud: {puntaje}%)")
-    if puntaje >= 70:
+    # Umbral más alto: 75% para evitar falsos positivos como
+    # "youtube" → "Netmarble Launcher" (71%) o "Computer Management" (51%).
+    # Si no hay un match suficientemente bueno, mejor devolver None y
+    # que el sistema intente abrirlo como URL web o informe que no lo encontró.
+    MATCH_THRESHOLD = 75
+    if puntaje >= MATCH_THRESHOLD:
         ruta_final = archivos_encontrados[mejor_coincidencia]
         print(f"[EXITO] Programa encontrado: {ruta_final}")
         return ruta_final
@@ -218,10 +223,10 @@ def radar_inteligente(nombre_buscado):
         ]
         for variante in variantes:
             mejor_var, puntaje_var = process.extractOne(variante, nombres_posibles)
-            if puntaje_var >= 70:
+            if puntaje_var >= MATCH_THRESHOLD:
                 print(f"[RADAR] Encontrado con variante '{variante}': {mejor_var} (Score: {puntaje_var}%)")
                 return archivos_encontrados[mejor_var]
-        print("[FALLO] No se encontro ningun programa parecido.")
+        print(f"[FALLO] No se encontró '{nombre_buscado}' con suficiente precisión (umbral {MATCH_THRESHOLD}%).")
         return None
 
 
@@ -375,12 +380,32 @@ def _abrir_url_en_navegador(url, num_monitor=None, navegador="brave"):
     return f"Abriendo {url} en {navegador.capitalize()}."
 
 
+def _startfile_seguro(ruta):
+    """
+    Wrapper sobre os.startfile() que maneja errores como WinError 1223
+    (el usuario canceló la operación) con un reintento vía subprocess.Popen.
+    """
+    try:
+        os.startfile(ruta)
+        logger.info(f"✅ Archivo abierto con os.startfile: {ruta}")
+        return True
+    except OSError as e:
+        logger.warning(f"⚠️ os.startfile falló para '{ruta}': {e}. Reintentando con subprocess.Popen...")
+        try:
+            subprocess.Popen(f'start "" "{ruta}"', shell=True)
+            logger.info(f"✅ Archivo abierto con subprocess.Popen (fallback): {ruta}")
+            return True
+        except Exception as e2:
+            logger.error(f"❌ También falló subprocess.Popen para '{ruta}': {e2}")
+            return False
+
+
 def _abrir_programa_o_carpeta(objetivo, num_monitor=None, navegador=None):
     if objetivo == "navegador":
         objetivo = "brave"
 
     if objetivo.startswith("steam://"):
-        os.startfile(objetivo)
+        _startfile_seguro(objetivo)
         return "Juego de Steam lanzado instantaneamente por ID."
 
     if objetivo.startswith("http") or "://" in objetivo or objetivo.startswith("www."):
@@ -405,20 +430,21 @@ def _abrir_programa_o_carpeta(objetivo, num_monitor=None, navegador=None):
     }
 
     if objetivo_limpio.lower() in atajos_carpetas:
-        os.startfile(atajos_carpetas[objetivo_limpio.lower()])
+        _startfile_seguro(atajos_carpetas[objetivo_limpio.lower()])
         return f"Carpeta '{objetivo_limpio}' abierta al instante."
 
     if ultima_palabra in atajos_carpetas:
-        os.startfile(atajos_carpetas[ultima_palabra])
+        _startfile_seguro(atajos_carpetas[ultima_palabra])
         return "Carpeta del sistema abierta al instante desde ruta."
 
     if os.path.exists(objetivo_limpio):
-        os.startfile(objetivo_limpio)
+        _startfile_seguro(objetivo_limpio)
         return f"Ruta exacta '{objetivo_limpio}' abierta."
 
     ruta_acceso = radar_inteligente(objetivo)
     if ruta_acceso:
-        os.startfile(ruta_acceso)
+        if not _startfile_seguro(ruta_acceso):
+            return f"⚠️ No se pudo abrir '{objetivo}'. Windows canceló la operación debido a permisos."
         msg = f"Programa '{objetivo}' abierto."
         es_juego_steam = ruta_acceso.endswith(".url")
         if num_monitor and not es_juego_steam:
@@ -443,7 +469,7 @@ def _abrir_programa_o_carpeta(objetivo, num_monitor=None, navegador=None):
         if ruta_elemento.endswith(('.py', '.scr')):
             return f"Encontre '{objetivo}' ({ruta_elemento}) pero no lo abro automaticamente por seguridad (es un script ejecutable)."
         else:
-            os.startfile(ruta_elemento)
+            _startfile_seguro(ruta_elemento)
             return f"Elemento '{objetivo}' encontrado y abierto."
 
     return f"No encontre el programa '{objetivo}'. Quieres que abra la pagina web en su lugar? (responde 'si' o 'no')"

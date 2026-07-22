@@ -105,6 +105,27 @@ class GestorSkills:
             logger.debug(f"🔍 Skill relevante detectada: {nombre}")
             return nombre, instrucciones
 
+        # ── SKILL: recordatorios ─────────────────────────────────────────────
+        palabras_clave_rec = [
+            'recordatorio', 'recordatorios', 'recuérdame', 'recuerdame', 'recordame',
+            'avísame', 'avisame', 'alarma', 'timer', 'temporizador', 'cumpleaños',
+            'cumple', 'agenda', 'mis recordatorios', 'borrar recordatorio',
+            'cancelar recordatorio', 'ver recordatorios'
+        ]
+        patrones_rec = [
+            r'\brecu[eé]rda[me]*\b', r'\bavi[sś]a[me]*\b', r'\brecordatorio[s]?\b',
+            r'\ben \d+ (minuto|min|hora|segundo)s?\b', r'\ba las \d{1,2}(:\d{2})?\s*(am|pm)?\b',
+            r'\bcumplea[ñn]o[s]?\b', r'\btodos los d[íi]as a las\b'
+        ]
+        es_rec = any(p in consulta_lower for p in palabras_clave_rec)
+        es_rec = es_rec or any(re.search(p, consulta_lower) for p in patrones_rec)
+
+        if es_rec and 'recordatorios' in self.skills:
+            nombre = 'recordatorios'
+            instrucciones = self.skills[nombre].get('instrucciones', '')
+            logger.debug(f"⏰ Skill relevante detectada: {nombre}")
+            return nombre, instrucciones
+
         return None
     
     def obtener_instrucciones(self, nombre_skill: str) -> str:
