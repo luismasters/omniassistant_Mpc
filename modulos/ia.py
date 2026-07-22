@@ -35,7 +35,8 @@ from modulos.cliente_mcp import cliente_sistema
 
 from modulos.prompts import (
     obtener_prompt_mentor,
-    obtener_prompt_general
+    obtener_prompt_general,
+    obtener_prompt_gamer
 )
 
 # ─── Perfil de usuario persistente ─────────────────────────────────────
@@ -407,11 +408,11 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         logger.info(f"PENSANDO ({MODO_ACTUAL.upper()})...")
 
         MODO_ACTUAL = config.estado.modo_actual
-        if MODO_ACTUAL == "general":
+        if MODO_ACTUAL in ("general", "gamer"):
             iniciar_busqueda_anticipada(texto_usuario)
 
         try:
-            fecha_hoy = datetime.datetime.now().strftime("%A, %d de %B de %Y")
+            fecha_hoy = datetime.datetime.now().strftime("%A, %d de %B de %Y, %H:%M")
             ventanas_abiertas = obtener_ventanas_activas()
 
             from modulos.perfil_usuario import texto_perfil_para_prompt
@@ -424,6 +425,12 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 contexto_sistema = obtener_prompt_mentor(
                     texto_workspace, texto_snapshot, texto_doc_volatil, texto_perfil
                 )
+            elif MODO_ACTUAL == "gamer":
+                ruta_home = os.path.expanduser("~")
+                contexto_sistema = obtener_prompt_gamer(
+                    fecha_hoy, ruta_home, ventanas_abiertas,
+                    texto_workspace, texto_snapshot, texto_doc_volatil, texto_perfil
+                )
             else:
                 ruta_home = os.path.expanduser("~")
                 contexto_sistema = obtener_prompt_general(
@@ -433,8 +440,15 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
 
             # Determinar modelo_activo según la selección del usuario o por defecto
             modelo_sel = getattr(config.estado, 'modelo_seleccionado', 'Por Defecto')
+            gemini_model_str = "gemini-3.1-flash-lite"
             if modelo_sel == "Gemini 3.1 Flash Lite":
                 modelo_activo = "gemini"
+            elif modelo_sel == "Gemini 3.1 Pro (High)":
+                modelo_activo = "gemini"
+                gemini_model_str = "gemini-3.1-pro"
+            elif modelo_sel == "Gemini 3.6 Flash (High)":
+                modelo_activo = "gemini"
+                gemini_model_str = "gemini-3.6-flash"
             elif modelo_sel == "DeepSeek Reasoner":
                 modelo_activo = "deepseek-reasoner"
             elif modelo_sel == "Groq Llama 3.3 70B":
@@ -449,6 +463,8 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 # "Por Defecto" -> usa los del modo
                 if MODO_ACTUAL == "mentor":
                     modelo_activo = "deepseek-reasoner"
+                elif MODO_ACTUAL == "gamer":
+                    modelo_activo = "groq:llama-3.1-8b-instant"
                 else:
                     modelo_activo = "gemini"
 
@@ -515,7 +531,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
 
                 try:
                     response_stream = cliente_genai.models.generate_content_stream(
-                        model="gemini-3.1-flash-lite",
+                        model=gemini_model_str,
                         contents=mensajes_para_gemini,
                         config=gemini_config
                     )
@@ -850,7 +866,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         if comando_busqueda == "INTERRUPTED":
             return
 
-        if comando_busqueda and getattr(config.estado, 'modo_actual', 'general') == "general":
+        if comando_busqueda and getattr(config.estado, 'modo_actual', 'general') in ("general", "gamer"):
             if ui_callback:
                 ui_callback("⚙️ Sistema", f"🌍 Buscando en internet: {comando_busqueda}", "#80868B")
             datos_encontrados = buscar_en_internet(comando_busqueda, reciente=skill_activa)

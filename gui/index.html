@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Argus — OmniAssistant HUD</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  <!-- Highlight.js -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark-dimmed.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <!-- Marked.js (Markdown parser) -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
+  <!-- Styles -->
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="theme-chat">
+  <div class="app-container">
+
+    <!-- ── SIDEBAR ──────────────────────────────────────────────── -->
+    <aside class="sidebar">
+
+      <!-- EMO FACE -->
+      <div class="emo-header">
+        <div class="emo-bezel-frame">
+          <canvas id="emoCanvas" width="230" height="150"></canvas>
+        </div>
+        <div class="emo-status-tag" id="emoStatusTag">
+          <span class="status-dot"></span>
+          <span id="emoStatusText">REPOSO</span>
+        </div>
+        <!-- WIDGET DE CLIMA -->
+        <div class="weather-widget" id="weatherWidget">
+          <div class="weather-main-row">
+            <span class="weather-icon" id="weatherIcon">🌤</span>
+            <span class="weather-temp" id="weatherTemp">--°</span>
+            <span class="weather-desc" id="weatherDesc">Obteniendo clima…</span>
+          </div>
+          <div class="weather-sub-row">
+            <span class="weather-detail" id="weatherHumidity">💧 --%</span>
+            <span class="weather-divider">·</span>
+            <span class="weather-detail" id="weatherWind">💨 -- km/h</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- MODOS DE OPERACIÓN -->
+      <div class="sidebar-section">
+        <div class="section-title">Modo Activo</div>
+        <div class="mode-buttons-group">
+          <button class="mode-btn active" id="btnModeChat" data-mode="chat">
+            <div class="mode-btn-icon">💬</div>
+            <div class="mode-btn-content">
+              <span class="mode-btn-label">Chat General</span>
+              <span class="mode-btn-sub">Asistente multimodal</span>
+            </div>
+            <span class="mode-active-dot"></span>
+          </button>
+          <button class="mode-btn" id="btnModeMentor" data-mode="mentor">
+            <div class="mode-btn-icon">🎓</div>
+            <div class="mode-btn-content">
+              <span class="mode-btn-label">Modo Mentor</span>
+              <span class="mode-btn-sub">Guía técnica & carrera</span>
+            </div>
+            <span class="mode-active-dot"></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- VISUALIZACIÓN -->
+      <div class="sidebar-section">
+        <div class="section-title">Visualización</div>
+        <div class="select-wrapper">
+          <select id="visualModeSelect" class="hud-select">
+            <option value="traditional">🪟 Ventana Tradicional</option>
+            <option value="floating">📌 Widget Flotante</option>
+            <option value="desktop_full">📺 Escritorio (Ambos)</option>
+            <option value="desktop_side">🌆 Escritorio (Lateral)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- PROYECTO -->
+      <div class="sidebar-section">
+        <div class="section-title">Proyecto</div>
+        <button class="action-btn" id="btnWorkspace" title="Anclar carpeta de proyecto">
+          <div class="mode-btn-icon">📁</div>
+          <div class="mode-btn-content">
+            <span class="mode-btn-label" id="lblWorkspace">Anclar Proyecto</span>
+            <span class="mode-btn-sub">Carpeta de trabajo</span>
+          </div>
+        </button>
+      </div>
+
+      <!-- GAMING & GAMEPAD -->
+      <div class="sidebar-section">
+        <div class="section-title">Gaming</div>
+        <button class="mode-btn gaming-btn" id="btnModeGamer">
+          <div class="mode-btn-icon">🎮</div>
+          <div class="mode-btn-content">
+            <span class="mode-btn-label" id="lblGamerMode">Modo Gaming</span>
+            <span class="mode-btn-sub" id="lblGamepadStatus">Sin mando detectado</span>
+          </div>
+          <span class="mode-active-dot gaming-dot"></span>
+        </button>
+        <div class="select-wrapper" style="margin-top: 4px;">
+          <select id="gamepadSelect" class="hud-select" title="Seleccionar mando para Modo Gaming">
+            <option value="-1">Escaneando mandos...</option>
+          </select>
+        </div>
+        <button class="action-btn" id="btnRescanGamepad" title="Re-escanear mandos" style="margin-top: 4px;">
+          <div class="mode-btn-icon">🔄</div>
+          <div class="mode-btn-content">
+            <span class="mode-btn-label">Re-escanear mandos</span>
+            <span class="mode-btn-sub">Forzar detección</span>
+          </div>
+        </button>
+      </div>
+
+      <!-- FOOTER -->
+      <div class="sidebar-footer">
+        <span class="version-badge">v0.5.0 HUD</span>
+        <span class="status-indicator online">● F8 Mic</span>
+      </div>
+    </aside>
+
+    <!-- ── MAIN CHAT ──────────────────────────────────────────────── -->
+    <main class="chat-main">
+
+      <!-- HEADER -->
+      <header class="chat-header">
+        <div class="header-info">
+          <h1 id="headerModeTitle">💬 Chat General</h1>
+          <p id="headerModeSubtitle">Asistente IA multimodal con integración MCP activa</p>
+        </div>
+        <div class="header-actions">
+          <span class="hotkey-badge">Presiona <strong>F8</strong> para hablar</span>
+          <button class="icon-btn" id="btnUpdateMemoria" title="Actualizar memoria de perfil (Extraer datos de la sesión)">🧠</button>
+          <button class="icon-btn" id="btnClearContext" title="Limpiar contexto de IA (Reiniciar memoria del modelo)">🔄</button>
+          <button class="icon-btn" id="btnClearChat" title="Limpiar pantalla (Borrar chat visible)">🗑️</button>
+        </div>
+      </header>
+
+      <!-- MENSAJES -->
+      <div class="chat-messages" id="chatMessages">
+        <!-- Mensaje de bienvenida (generado por JS) -->
+      </div>
+
+      <!-- INPUT -->
+      <div class="chat-input-area">
+        <div class="input-wrapper">
+
+          <!-- Attach menu popup -->
+          <div class="attach-menu" id="attachMenu">
+            <button class="attach-menu-item" id="btnAttachFile">
+              <span class="attach-icon">📄</span>
+              <span>Adjuntar archivo</span>
+            </button>
+            <button class="attach-menu-item" id="btnAttachImage">
+              <span class="attach-icon">🖼️</span>
+              <span>Adjuntar imagen</span>
+            </button>
+            <button class="attach-menu-item" id="btnAttachProject">
+              <span class="attach-icon">📁</span>
+              <span>Anclar proyecto</span>
+            </button>
+          </div>
+
+          <div class="input-container" id="inputContainer">
+
+            <!-- + (adjuntar) -->
+            <button class="input-side-btn attach-btn" id="btnAttach" title="Adjuntar archivo">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+
+            <!-- Textarea -->
+            <textarea id="promptInput" placeholder="Escribe tu mensaje a Argus..." rows="1"></textarea>
+
+            <!-- Selector de modelo -->
+            <div class="model-pill-wrapper">
+              <select id="modelSelect" class="model-pill-select" title="Seleccionar modelo">
+                <option value="Por Defecto">Default</option>
+                <option value="Gemini 3.1 Flash Lite">Flash Lite</option>
+                <option value="DeepSeek Reasoner">DeepSeek</option>
+                <option value="Groq Llama 3.3 70B">Llama 70B</option>
+                <option value="Groq Llama 3.1 8B">Llama 8B</option>
+                <option value="Groq Qwen 3.6 27B">Qwen 27B</option>
+                <option value="Groq GPT-OSS 120B">GPT-OSS</option>
+              </select>
+              <svg class="model-pill-arrow" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+
+            <!-- Mic (derecha) -->
+            <button class="input-mic-btn" id="btnVoice" title="Hablar (F8)">
+              <svg class="mic-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                <line x1="12" y1="19" x2="12" y2="23"/>
+                <line x1="8" y1="23" x2="16" y2="23"/>
+              </svg>
+              <span class="pulse-ring"></span>
+            </button>
+
+            <!-- Send -->
+            <button class="send-btn" id="btnSend" title="Enviar (Enter)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+            </button>
+
+          </div>
+          <div class="input-hint">Enter para enviar · Shift+Enter para nueva línea</div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <script src="emo_face.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

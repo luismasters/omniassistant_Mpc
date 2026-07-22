@@ -419,7 +419,7 @@ class EmoBezelFace(ctk.CTkFrame):
         self.tiempo_lagrima = (self.tiempo_lagrima + 0.3) % 20.0
         
         # Detección automática del estado "talking" basándose en el motor de audio
-        if self.estado not in ["confirm", "error", "thinking", "listening"]:
+        if self.estado not in ["confirm", "error", "thinking", "listening", "happy", "sad", "angry"]:
             if audio_modulo.hablando_actualmente:
                 if self.estado != "talking":
                     self.cambiar_estado("talking")
@@ -1168,7 +1168,8 @@ class OmniApp(ctk.CTk):
         threading.Thread(target=self._ciclo_extraccion_perfil, daemon=True).start()
 
         self._gestor_gamepad = GestorGamepad(
-            callback_activar_voz=self._activar_voz_desde_gamepad
+            callback_activar_voz=self._activar_voz_desde_gamepad,
+            callback_mandos_changed=self._on_mandos_changed
         )
 
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -1390,18 +1391,45 @@ class OmniApp(ctk.CTk):
             dropdown_text_color=TEXT_PRIMARY,
             height=28
         )
-        self.opt_modelo.grid(row=8, column=0, padx=14, pady=(2, 8), sticky="ew")
+        self.opt_modelo.grid(row=8, column=0, padx=14, pady=(2, 6), sticky="ew")
         self.opt_modelo.set("Por Defecto")
+
+        # ── SECCIÓN: MODO DE VISUALIZACIÓN ──────────────────────────────
+        ctk.CTkLabel(
+            sb, text="VISUALIZACIÓN", font=("Segoe UI", 9, "bold"),
+            text_color=TEXT_DIM
+        ).grid(row=9, column=0, padx=18, pady=(2, 2), sticky="w")
+
+        self.opt_modo_vis = ctk.CTkOptionMenu(
+            sb,
+            values=[
+                "🪟 Ventana Tradicional",
+                "📌 Widget Flotante",
+                "📺 Escritorio (Ambos Monitores)",
+                "🌆 Escritorio (Lateral)"
+            ],
+            command=self._on_modo_visualizacion_changed,
+            font=FONT_UI_SM,
+            fg_color="#1a1a2e",
+            button_color="#23233c",
+            button_hover_color="#303054",
+            dropdown_fg_color="#131324",
+            dropdown_hover_color="#23233c",
+            dropdown_text_color=TEXT_PRIMARY,
+            height=28
+        )
+        self.opt_modo_vis.grid(row=10, column=0, padx=14, pady=(2, 8), sticky="ew")
+        self.opt_modo_vis.set("🪟 Ventana Tradicional")
 
         # Separador 2
         ctk.CTkFrame(sb, height=1, fg_color=SIDEBAR_LINE).grid(
-            row=9, column=0, padx=10, sticky="ew", pady=(4, 6))
+            row=11, column=0, padx=10, sticky="ew", pady=(4, 6))
 
         # ── SECCIÓN: HERRAMIENTAS & PROYECTO ────────────────────────────
         ctk.CTkLabel(
             sb, text="PROYECTO & MEMORIA", font=("Segoe UI", 9, "bold"),
             text_color=TEXT_DIM
-        ).grid(row=10, column=0, padx=18, pady=(2, 2), sticky="w")
+        ).grid(row=12, column=0, padx=18, pady=(2, 2), sticky="w")
 
         self.btn_workspace = ctk.CTkButton(
             sb, text="📁  Anclar Proyecto", anchor="w", font=FONT_UI,
@@ -1409,7 +1437,7 @@ class OmniApp(ctk.CTk):
             text_color=TEXT_DIM, corner_radius=6,
             command=self._click_workspace
         )
-        self.btn_workspace.grid(row=11, column=0, padx=10, pady=2, sticky="ew")
+        self.btn_workspace.grid(row=13, column=0, padx=10, pady=2, sticky="ew")
         self._actualizar_boton_workspace()
 
         self.btn_memoria = ctk.CTkButton(
@@ -1418,7 +1446,7 @@ class OmniApp(ctk.CTk):
             text_color=TEXT_DIM, corner_radius=6,
             command=self._actualizar_memoria_manual
         )
-        self.btn_memoria.grid(row=12, column=0, padx=10, pady=2, sticky="ew")
+        self.btn_memoria.grid(row=14, column=0, padx=10, pady=2, sticky="ew")
 
         self.btn_limpiar = ctk.CTkButton(
             sb, text="🧹  Limpiar contexto", anchor="w", font=FONT_UI,
@@ -1426,15 +1454,15 @@ class OmniApp(ctk.CTk):
             text_color=TEXT_DIM, corner_radius=6,
             command=self._limpiar_contexto_directo
         )
-        self.btn_limpiar.grid(row=13, column=0, padx=10, pady=2, sticky="ew")
+        self.btn_limpiar.grid(row=15, column=0, padx=10, pady=2, sticky="ew")
 
         # Separador 3
         ctk.CTkFrame(sb, height=1, fg_color=SIDEBAR_LINE).grid(
-            row=14, column=0, padx=10, sticky="ew", pady=(10, 6))
+            row=16, column=0, padx=10, sticky="ew", pady=(10, 6))
 
         # ── SECCIÓN: MODO GAMER ─────────────────────────────────────────
         self.frame_gaming_section = ctk.CTkFrame(sb, fg_color="#12121a", corner_radius=8)
-        self.frame_gaming_section.grid(row=15, column=0, padx=10, pady=(2, 10), sticky="ew")
+        self.frame_gaming_section.grid(row=17, column=0, padx=10, pady=(2, 10), sticky="ew")
         self.frame_gaming_section.grid_columnconfigure(0, weight=1)
 
         self.btn_gaming = ctk.CTkButton(
@@ -1450,19 +1478,74 @@ class OmniApp(ctk.CTk):
             self.frame_gaming_section, text="🎮 Mando: inactivo",
             font=FONT_UI_SM, text_color=TEXT_DIM
         )
-        self.lbl_gamepad.grid(row=1, column=0, padx=12, pady=(0, 6), sticky="w")
+        self.lbl_gamepad.grid(row=1, column=0, padx=12, pady=(0, 2), sticky="w")
+
+        self.btn_rescan = ctk.CTkButton(
+            self.frame_gaming_section, text="🔄 Re-escanear mandos",
+            anchor="w", font=FONT_UI_SM,
+            fg_color="transparent", hover_color="#1a1a2e",
+            text_color=TEXT_DIM, corner_radius=6,
+            command=self._reintentar_escaneo_mandos
+        )
+        self.btn_rescan.grid(row=2, column=0, padx=6, pady=(0, 6), sticky="ew")
 
         ctk.CTkLabel(
-            sb, text="v0.4.0 — EMO & Mentoria",
+            sb, text="v0.4.0 — EMO & Desktop",
             font=FONT_UI_SM, text_color=TEXT_DIM
-        ).grid(row=16, column=0, padx=18, pady=12, sticky="sw")
-        sb.grid_rowconfigure(16, weight=1)
+        ).grid(row=18, column=0, padx=18, pady=12, sticky="sw")
+        sb.grid_rowconfigure(18, weight=1)
+
+    def _on_modo_visualizacion_changed(self, valor):
+        from modulos.ui_manager import ui_manager
+        if valor == "📺 Escritorio (Ambos Monitores)":
+            modo_clave = "desktop"
+            opts = {"full_span": True}
+        elif valor == "🌆 Escritorio (Lateral)":
+            modo_clave = "desktop"
+            opts = {"full_span": False}
+        elif valor == "📌 Widget Flotante":
+            modo_clave = "floating"
+            opts = {}
+        else:
+            modo_clave = "traditional"
+            opts = {}
+
+        state.cambiar_modo_visualizacion(modo_clave)
+        exito = ui_manager.cambiar_modo(self, modo_clave, config_opts=opts)
+        if exito:
+            if "Escritorio" in valor:
+                self._agregar_sistema(f"🌆 {valor} activo — Argus integrado en WorkerW.")
+            elif modo_clave == "floating":
+                self._agregar_sistema("📌 Modo Widget Flotante activo.")
+            else:
+                self._agregar_sistema("🪟 Modo Ventana Tradicional activo.")
+        else:
+            self._agregar_sistema(f"❌ Error al cambiar a modo {valor}.")
+
+    def _normalizar_emocion(self, emo):
+        if not emo:
+            return "idle"
+        e = emo.lower().strip()
+        if e in ["happy", "joy", "excited", "smile", "content"]:
+            return "happy"
+        if e in ["sad", "cry", "depressed", "sorrow"]:
+            return "sad"
+        if e in ["angry", "mad", "furious", "annoyed"]:
+            return "angry"
+        if e in ["thinking", "thoughtful", "curious", "pondering"]:
+            return "thinking"
+        if e in ["error", "fail", "failed"]:
+            return "error"
+        if e in ["confirm", "wink", "success"]:
+            return "confirm"
+        return e
 
     def _cambiar_estado_rostro(self, estado, msg=""):
-        self.face_widget_estado = estado
+        estado_norm = self._normalizar_emocion(estado)
+        self.face_widget_estado = estado_norm
         self.face_widget_msg = msg
         if hasattr(self, "emo_face"):
-            self.emo_face.cambiar_estado(estado, msg)
+            self.emo_face.cambiar_estado(estado_norm, msg)
 
     def _on_modelo_changed(self, valor):
         state.modelo_seleccionado = valor
@@ -1585,16 +1668,40 @@ class OmniApp(ctk.CTk):
         config.estado.limpiar_memoria()
         self._agregar_sistema("🧹 Contexto limpiado. Argus empieza desde cero.")
 
-    def _actualizar_estado_gamepad(self):
+    def _on_mandos_changed(self, mandos):
+        """Callback invocado desde GestorGamepad cuando cambia la lista de mandos."""
+        self.after(0, lambda: self._actualizar_label_gamepad(mandos))
+
+    def _actualizar_label_gamepad(self, mandos=None):
+        """Actualiza el label del mando en la sidebar con la información real."""
+        if mandos is None:
+            mandos = GestorGamepad.listar_mandos_disponibles()
+        if mandos:
+            nombres = []
+            for m in mandos:
+                nombre_corto = (m["nombre"][:18] + "…") if len(m["nombre"]) > 18 else m["nombre"]
+                nombres.append(nombre_corto)
+            texto = "🎮 " + ", ".join(nombres)
+            self.lbl_gamepad.configure(text=texto, text_color="#86efac")
+        else:
+            self.lbl_gamepad.configure(text="🎮 Mando: no detectado", text_color=TEXT_DIM)
+
+    def _reintentar_escaneo_mandos(self):
+        """Fuerza un re-escaneo completo de mandos desde la UI."""
+        self._agregar_sistema("🔄 Re-escanenado mandos...")
         try:
-            if hasattr(self, '_gestor_gamepad') and self._gestor_gamepad._disponible:
-                nombre = self._gestor_gamepad._joystick.get_name() if self._gestor_gamepad._joystick else "Conectado"
-                nombre_corto = (nombre[:22] + "…") if len(nombre) > 22 else nombre
-                self.lbl_gamepad.configure(text=f"🎮 {nombre_corto}", text_color="#86efac")
-            else:
-                self.lbl_gamepad.configure(text="🎮 Mando: no detectado", text_color=TEXT_DIM)
-        except Exception:
-            pass
+            self._gestor_gamepad.reintentar_escaneo()
+            self.after(2000, lambda: self._agregar_sistema(
+                "✅ Escaneo completado." if GestorGamepad.listar_mandos_disponibles()
+                else "❌ No se detectaron mandos. ¿Están encendidos y conectados?"
+            ))
+        except Exception as e:
+            self._agregar_sistema(f"❌ Error al re-escanear: {e}")
+
+    def _actualizar_estado_gamepad(self):
+        """Loop periódico para refrescar el estado del gamepad en la UI."""
+        mandos = GestorGamepad.listar_mandos_disponibles()
+        self._actualizar_label_gamepad(mandos)
         self.after(3000, self._actualizar_estado_gamepad)
 
     def _toggle_modo_gaming(self):
@@ -2086,24 +2193,30 @@ class OmniApp(ctk.CTk):
                 self._scroll_abajo()
                 return
 
+            import re
             texto_a_mostrar = texto
             if not self._emocion_extraida:
                 self._buffer_inicio_ia += texto
-                import re
-                match = re.search(r"\[EMOTION:\s*(\w+)\]", self._buffer_inicio_ia)
+                match = re.search(r"\[EMOTION:\s*(\w+)\]", self._buffer_inicio_ia, re.IGNORECASE)
                 if match:
                     emocion = match.group(1).lower()
                     self._cambiar_estado_rostro(emocion)
-                    self._buffer_inicio_ia = re.sub(r"\[EMOTION:\s*\w+\]", "", self._buffer_inicio_ia)
+                    self._buffer_inicio_ia = re.sub(r"\[EMOTION:\s*\w+\]", "", self._buffer_inicio_ia, flags=re.IGNORECASE)
                     self._emocion_extraida = True
                     texto_a_mostrar = self._buffer_inicio_ia
                     self._buffer_inicio_ia = ""
-                elif len(self._buffer_inicio_ia) >= 45:
+                elif len(self._buffer_inicio_ia) >= 80:
                     self._emocion_extraida = True
-                    texto_a_mostrar = self._buffer_inicio_ia
+                    texto_a_mostrar = re.sub(r"\[EMOTION:\s*\w+\]", "", self._buffer_inicio_ia, flags=re.IGNORECASE)
                     self._buffer_inicio_ia = ""
                 else:
                     texto_a_mostrar = ""
+            else:
+                if "EMOTION:" in texto_a_mostrar.upper():
+                    match = re.search(r"\[EMOTION:\s*(\w+)\]", texto_a_mostrar, re.IGNORECASE)
+                    if match:
+                        self._cambiar_estado_rostro(match.group(1).lower())
+                    texto_a_mostrar = re.sub(r"\[EMOTION:\s*\w+\]", "", texto_a_mostrar, flags=re.IGNORECASE)
 
             if not self.burbuja_ia_actual:
                 if self.face_widget_estado == "thinking":

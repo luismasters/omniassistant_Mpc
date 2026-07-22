@@ -1,9 +1,31 @@
+# Environment & Virtual Env
 .env
 venv/
 .cortana/
+.pytest_cache/
+
+# Python Cache
 __pycache__/
+*.py[cod]
+
+# Logs & Diagnostics
 logs/
+*.log
+diagnostico*
+
+# Installers & Diffs
+*.msi
+*.exe
+*.diff
+*_diff.txt
+*.tmp
+
+# Temp Audio & Output
+*.mp3
+*.wav
+
+# Data & Memory Boveda
 modulos/boveda_memoria/
 scratch/
 *.bin
-*.sqlite3
+*.sqlite3

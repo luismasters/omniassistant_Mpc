@@ -3,7 +3,15 @@ import time
 import threading
 import keyboard
 import numpy as np
-import sounddevice as sd
+
+try:
+    import sounddevice as sd
+    HAY_SOUNDDEVICE = True
+except Exception as e:
+    sd = None
+    HAY_SOUNDDEVICE = False
+    print(f"[AUDIO] ⚠️ Advertencia: No se pudo inicializar sounddevice/PortAudio: {e}")
+
 import scipy.io.wavfile as wav
 import queue
 import re
@@ -18,6 +26,15 @@ from config import WHISPER_MODEL_SIZE, WHISPER_DEVICE, WHISPER_COMPUTE_TYPE
 from config import TECLA_HABLAR, FS_AUDIO, MAX_GRABACION_SEGUNDOS
 
 hablando_actualmente = False
+escuchando_actualmente = False
+
+def esta_escuchando():
+    global escuchando_actualmente
+    return escuchando_actualmente
+
+def esta_hablando():
+    global hablando_actualmente
+    return hablando_actualmente
 
 # ==============================================================
 # CONFIGURACION DE VOZ — Edge TTS
@@ -332,58 +349,61 @@ def detener_voz():
 def capturar_voz_micro(condicion_seguir_grabando=None):
     """
     Graba del micrófono mientras la condición de corte siga siendo True.
-
-    condicion_seguir_grabando: función sin argumentos que retorna True
-        mientras se debe seguir grabando. Si no se pasa, usa el
-        comportamiento original (mantener F8 presionado).
-
-    Esto desacopla la captura de voz de 'keyboard' directamente, para
-    que pueda ser disparada también por el gamepad (que usa su propia
-    condición de "stick presionado") sin depender de un hook de teclado
-    que nunca se cumpliría en ese caso (BUG anterior: el loop esperaba
-    F8 sin importar qué disparó la grabación).
     """
-    if condicion_seguir_grabando is None:
-        condicion_seguir_grabando = lambda: keyboard.is_pressed(TECLA_HABLAR)
-        print(f"\n[GRABANDO] Habla ahora... (Solta {TECLA_HABLAR.upper()} para terminar)")
-    else:
-        print(f"\n[GRABANDO] Habla ahora... (Soltá el control para terminar)")
+    global escuchando_actualmente, sd, HAY_SOUNDDEVICE
+    if not HAY_SOUNDDEVICE or sd is None:
+        try:
+            import sounddevice as _sd
+            sd = _sd
+            HAY_SOUNDDEVICE = True
+        except Exception as e:
+            print(f"[AUDIO] ❌ No se puede grabar audio del micrófono. PortAudio no está disponible: {e}")
+            return ""
 
-    audio_data = []
+    escuchando_actualmente = True
+    try:
+        if condicion_seguir_grabando is None:
+            condicion_seguir_grabando = lambda: keyboard.is_pressed(TECLA_HABLAR)
+            print(f"\n[GRABANDO] Habla ahora... (Soltá {TECLA_HABLAR.upper()} para terminar)")
+        else:
+            print(f"\n[GRABANDO] Habla ahora... (Soltá el control para terminar)")
 
-    def callback(indata, frames, time, status):
-        audio_data.append(indata.copy())
+        audio_data = []
 
-    with sd.InputStream(samplerate=FS_AUDIO, channels=1, callback=callback):
-        time.sleep(0.2)
-        # Límite de seguridad: máximo MAX_GRABACION_SEGUNDOS de grabación
-        # continua para evitar que un error en la condición deje el
-        # stream colgado indefinidamente. Antes estaba hardcodeado a 30s,
-        # lo que cortaba la grabación de forma prematura aunque el botón
-        # siguiera presionado; ahora se controla desde config.py.
-        inicio = time.time()
-        while condicion_seguir_grabando():
-            if time.time() - inicio > MAX_GRABACION_SEGUNDOS:
-                print(f"[GRABANDO] ⚠️ Límite de {MAX_GRABACION_SEGUNDOS}s alcanzado, cortando grabación por seguridad.")
-                break
-            time.sleep(0.02)
+        def callback(indata, frames, time, status):
+            audio_data.append(indata.copy())
 
-    print("--- PROCESANDO VOZ ---")
-    if not audio_data:
-        return ""
+        try:
+            with sd.InputStream(samplerate=FS_AUDIO, channels=1, callback=callback):
+                time.sleep(0.2)
+                inicio = time.time()
+                while condicion_seguir_grabando():
+                    if time.time() - inicio > MAX_GRABACION_SEGUNDOS:
+                        print(f"[GRABANDO] ⚠️ Límite de {MAX_GRABACION_SEGUNDOS}s alcanzado, cortando grabación por seguridad.")
+                        break
+                    time.sleep(0.02)
+        except Exception as e:
+            print(f"[AUDIO] ❌ Error al acceder al dispositivo de captura de audio: {e}")
+            return ""
 
-    archivo_temporal = 'output.wav'
-    wav.write(archivo_temporal, FS_AUDIO, np.concatenate(audio_data, axis=0))
-    modelo_activo = _cargar_whisper_si_necesario()
+        print("--- PROCESANDO VOZ ---")
+        if not audio_data:
+            return ""
 
-    segmentos, _ = modelo_activo.transcribe(
-        archivo_temporal,
-        beam_size=4,
-        language="es",
-        vad_filter=True
-    )
+        archivo_temporal = 'output.wav'
+        wav.write(archivo_temporal, FS_AUDIO, np.concatenate(audio_data, axis=0))
+        modelo_activo = _cargar_whisper_si_necesario()
 
-    texto = "".join([s.text for s in segmentos]).strip()
-    if os.path.exists(archivo_temporal):
-        os.remove(archivo_temporal)
-    return texto
+        segmentos, _ = modelo_activo.transcribe(
+            archivo_temporal,
+            beam_size=4,
+            language="es",
+            vad_filter=True
+        )
+
+        texto = "".join([s.text for s in segmentos]).strip()
+        if os.path.exists(archivo_temporal):
+            os.remove(archivo_temporal)
+        return texto
+    finally:
+        escuchando_actualmente = False

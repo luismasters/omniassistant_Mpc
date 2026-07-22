@@ -43,6 +43,9 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
+# Ciudad para el widget de clima (configurable desde .env)
+CIUDAD_CLIMA = os.getenv("CIUDAD_CLIMA", "San Martin, Buenos Aires, Argentina")
+
 if not GEMINI_API_KEY:
     raise ValueError("⚠️ No se encontró la API Key")
 
@@ -71,6 +74,8 @@ MAX_GRABACION_SEGUNDOS = 180
 class EstadoGlobal:
     def __init__(self):
         self._lock = threading.Lock()
+        # Contextos de chat aislados por modo (general, mentor, gamer)
+        self._contextos_por_modo = {"general": [], "mentor": [], "gamer": []}
         # Atributos públicos (acceso directo pero con locks en los métodos)
         self.modo_actual = "general"
         self.modelo_seleccionado = "Por Defecto"
@@ -87,6 +92,7 @@ class EstadoGlobal:
         # extracción de hechos. Se incrementa en agregar_mensaje_chat y se
         # resetea vía obtener_y_reiniciar_mensajes_pendientes().
         self.mensajes_desde_ultima_extraccion = 0
+        self.modo_visualizacion = "traditional" # "traditional" | "floating" | "desktop"
 
     # ─── MÉTODOS SEGUROS PARA MODIFICAR EL ESTADO ──────────────────────
 
@@ -155,10 +161,37 @@ class EstadoGlobal:
         with self._lock:
             return set(self.archivos_en_memoria)
 
-    def cambiar_modo(self, nuevo_modo):
-        """Cambia el modo actual de forma thread-safe."""
+    @property
+    def gamer_mode_activo(self) -> bool:
+        """Devuelve True si el Modo Gamer está activo."""
         with self._lock:
+            return self.modo_actual == "gamer"
+
+    def cambiar_modo(self, nuevo_modo):
+        """Cambia el modo actual de forma thread-safe.
+        
+        Aísla el contexto de chat por modo: guarda el contexto del modo anterior
+        y restaura el del nuevo modo. Cada modo (general, mentor, gamer) mantiene
+        su propio histórico de conversación.
+        """
+        with self._lock:
+            # Guardar contexto actual en el modo que estamos dejando
+            modo_anterior = self.modo_actual
+            self._contextos_por_modo[modo_anterior] = list(self.contexto_chat)
+            
+            # Cambiar al nuevo modo
             self.modo_actual = nuevo_modo
+            
+            # Restaurar contexto del nuevo modo (o vacío si nunca se usó)
+            self.contexto_chat = list(self._contextos_por_modo.get(nuevo_modo, []))
+            
+            # Resetear contador de perfil al cambiar de modo
+            self.mensajes_desde_ultima_extraccion = 0
+
+    def cambiar_modo_visualizacion(self, nuevo_modo_vis):
+        """Cambia el modo de visualización (tradicional, flotante, escritorio) de forma thread-safe."""
+        with self._lock:
+            self.modo_visualizacion = nuevo_modo_vis
 
     def cambiar_modelo_seleccionado(self, nuevo_modelo):
         """Cambia el modelo seleccionado de forma thread-safe."""

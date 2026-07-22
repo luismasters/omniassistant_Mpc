@@ -1,5 +1,6 @@
 chromadb==1.5.9
 customtkinter==5.2.2
+pywebview>=6.2.1
 ddgs==9.14.4
 edge_tts==7.2.8
 faster_whisper==1.2.1

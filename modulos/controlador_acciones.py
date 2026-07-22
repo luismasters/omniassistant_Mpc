@@ -10,17 +10,27 @@ from modulos.logger import logger
 
 # ─── Función para dividir comandos múltiples en una línea ──────────────
 def _dividir_comandos(linea: str) -> list[str]:
-    """Divide una línea en múltiples comandos si contiene varios verbos."""
-    verbos = ["abrir:", "navegar:", "mover:", "cerrar:", "explorar:", "mover."]
+    """
+    Divide una línea en múltiples comandos si contiene varios verbos de acción
+    y remueve el texto conversacional previo en la misma línea.
+    """
+    verbos = [
+        "abrir:", "navegar:", "mover:", "cerrar:", "explorar:", "audio:",
+        "leer_archivo:", "editar_archivo:", "guardar_archivo:", "reemplazar_bloque:",
+        "crear_carpeta:", "buscar:", "guardar_en_boveda:", "escanear_proyecto:",
+        "github:", "github_reset:", "git_comando:", "snapshot:"
+    ]
     indices = []
     lower = linea.lower()
     for v in verbos:
         pos = lower.find(v)
         while pos != -1:
             indices.append((pos, v))
-            pos = lower.find(v, pos + 1)
-    if len(indices) <= 1:
+            pos = lower.find(v, pos + len(v))
+
+    if not indices:
         return [linea]
+
     indices.sort(key=lambda x: x[0])
     comandos = []
     for i, (pos, v) in enumerate(indices):
@@ -29,7 +39,10 @@ def _dividir_comandos(linea: str) -> list[str]:
         else:
             next_pos = indices[i+1][0]
             cmd = linea[pos:next_pos].strip()
-        comandos.append(cmd)
+        # Limpiar conjunciones o puntuaciones al final (ej. "abrir: youtube y")
+        cmd = re.sub(r'(\s+(y|e|and|\.|\,)\s*)$', '', cmd, flags=re.IGNORECASE).strip()
+        if cmd:
+            comandos.append(cmd)
     return comandos
 
 # ─── Función auxiliar para normalizar rutas ──────────────────────────────
@@ -324,6 +337,15 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
         for cmd in comandos:
             cmd_limpia = cmd.lower().replace("[", "").replace("]", "").replace("*", "").replace("`", "").strip()
             cmd_limpia = re.sub(r'^(\-\s|\d+\.\s)', '', cmd_limpia)
+
+            # Asegurar alineación directa al verbo si existe prefijo conversacional
+            verbos_clave = ["abrir:", "navegar:", "cerrar:", "mover:", "explorar:", "audio:", "leer_archivo:", "editar_archivo:", "guardar_archivo:", "reemplazar_bloque:", "crear_carpeta:", "buscar:", "guardar_en_boveda:", "escanear_proyecto:", "github:"]
+            for v_prefix in verbos_clave:
+                pos_v = cmd_limpia.find(v_prefix)
+                if pos_v > 0:
+                    cmd_limpia = cmd_limpia[pos_v:].strip()
+                    cmd = cmd[pos_v:].strip()
+                    break
 
             if "guardar_archivo:" in cmd_limpia or "---contenido---" in cmd_limpia or "<write_file>" in cmd_limpia:
                 continue
