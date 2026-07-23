@@ -398,107 +398,129 @@ class ArgusWebBridge:
         """
         Obtiene el clima actual desde wttr.in (gratuito, sin API key).
         Retorna temperatura, descripción, humedad, viento, ícono y condición para EMO.
+        Incluye reintento automático en caso de timeout (hasta 2 intentos).
         """
+        import urllib.request, urllib.parse, json as _json
+        import socket
+        import time
+        import config as _cfg
+
+        ciudad = getattr(_cfg, 'CIUDAD_CLIMA', 'San Martin, Buenos Aires, Argentina')
+        ciudad_enc = urllib.parse.quote(ciudad)
+        url = f"https://wttr.in/{ciudad_enc}?format=j1"
+        timeout_total = 4  # segundos por intento (más rápido que 8s)
+        data = None
+
+        for intento in range(1, 3):  # hasta 2 intentos
+            try:
+                req = urllib.request.Request(url, headers={'User-Agent': 'OmniAssistant/1.0'})
+                # Socket-level timeout para cortar antes del timeout de urllib
+                socket.setdefaulttimeout(timeout_total)
+                with urllib.request.urlopen(req, timeout=timeout_total) as resp:
+                    data = _json.loads(resp.read().decode('utf-8'))
+                break  # éxito, salir del bucle de reintentos
+            except (urllib.error.URLError, socket.timeout, OSError) as e:
+                if intento < 2:
+                    logger.warning(f"[Clima] Intento {intento} falló: {e}. Reintentando en 1s...")
+                    time.sleep(1)
+                else:
+                    logger.warning(f"[Clima] Error obteniendo clima tras {intento} intentos: {e}")
+                    return {'exito': False, 'error': f"Timeout conectando con wttr.in: {e}"}
+
+        # Si llegamos acá sin data, algo raro pasó
+        if data is None:
+            logger.warning("[Clima] No se obtuvo data tras reintentos.")
+            return {'exito': False, 'error': 'No se recibieron datos del clima'}
+
         try:
-            import urllib.request, urllib.parse, json as _json
-            import config as _cfg
-
-            ciudad = getattr(_cfg, 'CIUDAD_CLIMA', 'San Martin, Buenos Aires, Argentina')
-            ciudad_enc = urllib.parse.quote(ciudad)
-            url = f"https://wttr.in/{ciudad_enc}?format=j1"
-
-            req = urllib.request.Request(url, headers={'User-Agent': 'OmniAssistant/1.0'})
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                data = _json.loads(resp.read().decode('utf-8'))
-
             cc = data['current_condition'][0]
             temp = int(cc['temp_C'])
             humedad = int(cc['humidity'])
             viento = int(cc['windspeedKmph'])
             descripcion_en = cc['weatherDesc'][0]['value']
             codigo = int(cc['weatherCode'])
+        except (KeyError, IndexError, ValueError) as e:
+            logger.warning(f"[Clima] Error parseando datos: {e}")
+            return {'exito': False, 'error': f"Datos climáticos inválidos: {e}"}
 
-            # Mapear código a condición climática para EMO
-            _storm  = {200, 386, 389, 392, 395}
-            _rain   = {176, 182, 185, 263, 266, 281, 284, 293, 296, 299,
-                       302, 305, 308, 311, 314, 353, 356, 359}
-            _snow   = {179, 227, 230, 317, 320, 323, 326, 329, 332, 335,
-                       338, 362, 365, 368, 371}
-            _fog    = {143, 248, 260}
-            _cloudy = {119, 122}
+        # Mapear código a condición climática para EMO
+        _storm  = {200, 386, 389, 392, 395}
+        _rain   = {176, 182, 185, 263, 266, 281, 284, 293, 296, 299,
+                   302, 305, 308, 311, 314, 353, 356, 359}
+        _snow   = {179, 227, 230, 317, 320, 323, 326, 329, 332, 335,
+                   338, 362, 365, 368, 371}
+        _fog    = {143, 248, 260}
+        _cloudy = {119, 122}
 
-            if codigo in _storm:
-                condicion = 'stormy'
-            elif codigo in _rain:
-                condicion = 'rainy'
-            elif codigo in _snow or temp <= 4:
-                condicion = 'cold'
-            elif temp >= 30:
-                condicion = 'hot'
-            elif viento >= 30:
-                condicion = 'windy'
-            elif codigo in _fog or codigo in _cloudy:
-                condicion = 'cloudy'
-            else:
-                condicion = 'clear'
+        if codigo in _storm:
+            condicion = 'stormy'
+        elif codigo in _rain:
+            condicion = 'rainy'
+        elif codigo in _snow or temp <= 4:
+            condicion = 'cold'
+        elif temp >= 30:
+            condicion = 'hot'
+        elif viento >= 30:
+            condicion = 'windy'
+        elif codigo in _fog or codigo in _cloudy:
+            condicion = 'cloudy'
+        else:
+            condicion = 'clear'
 
-            # Descripción en español (mapeo parcial)
-            _desc = {
-                'Clear': 'Despejado', 'Sunny': 'Soleado',
-                'Partly cloudy': 'Parcialmente nublado', 'Partly Cloudy': 'Parcialmente nublado',
-                'Cloudy': 'Nublado', 'Overcast': 'Cubierto',
-                'Mist': 'Neblina', 'Fog': 'Niebla', 'Freezing fog': 'Niebla helada',
-                'Light rain': 'Lluvia leve', 'Moderate rain': 'Lluvia moderada',
-                'Heavy rain': 'Lluvia intensa', 'Light drizzle': 'Llovizna',
-                'Heavy drizzle': 'Llovizna intensa', 'Drizzle': 'Llovizna',
-                'Freezing drizzle': 'Llovizna helada', 'Patchy rain possible': 'Posible lluvia',
-                'Patchy light rain': 'Lluvia leve', 'Light snow': 'Nieve leve',
-                'Moderate snow': 'Nieve moderada', 'Heavy snow': 'Nevada intensa',
-                'Blizzard': 'Ventisca', 'Blowing snow': 'Nieve con viento',
-                'Sleet': 'Aguanieve', 'Thunder': 'Tormenta',
-                'Thundery outbreaks': 'Posible tormenta',
-                'Patchy light rain with thunder': 'Lluvia con tormenta',
-                'Moderate or heavy rain with thunder': 'Tormenta',
-                'Patchy snow possible': 'Posible nieve', 'Ice pellets': 'Granizo',
-            }
-            descripcion = descripcion_en
-            for en, es in _desc.items():
-                if en.lower() in descripcion_en.lower():
-                    descripcion = es
-                    break
+        # Descripción en español (mapeo parcial)
+        _desc = {
+            'Clear': 'Despejado', 'Sunny': 'Soleado',
+            'Partly cloudy': 'Parcialmente nublado', 'Partly Cloudy': 'Parcialmente nublado',
+            'Cloudy': 'Nublado', 'Overcast': 'Cubierto',
+            'Mist': 'Neblina', 'Fog': 'Niebla', 'Freezing fog': 'Niebla helada',
+            'Light rain': 'Lluvia leve', 'Moderate rain': 'Lluvia moderada',
+            'Heavy rain': 'Lluvia intensa', 'Light drizzle': 'Llovizna',
+            'Heavy drizzle': 'Llovizna intensa', 'Drizzle': 'Llovizna',
+            'Freezing drizzle': 'Llovizna helada', 'Patchy rain possible': 'Posible lluvia',
+            'Patchy light rain': 'Lluvia leve', 'Light snow': 'Nieve leve',
+            'Moderate snow': 'Nieve moderada', 'Heavy snow': 'Nevada intensa',
+            'Blizzard': 'Ventisca', 'Blowing snow': 'Nieve con viento',
+            'Sleet': 'Aguanieve', 'Thunder': 'Tormenta',
+            'Thundery outbreaks': 'Posible tormenta',
+            'Patchy light rain with thunder': 'Lluvia con tormenta',
+            'Moderate or heavy rain with thunder': 'Tormenta',
+            'Patchy snow possible': 'Posible nieve', 'Ice pellets': 'Granizo',
+        }
+        descripcion = descripcion_en
+        for en, es in _desc.items():
+            if en.lower() in descripcion_en.lower():
+                descripcion = es
+                break
 
-            # Ícono emoji
-            if codigo == 113:
-                icono = '☀️'
-            elif codigo == 116:
-                icono = '⛅'
-            elif codigo in _cloudy:
-                icono = '☁️'
-            elif codigo in _fog:
-                icono = '🌫'
-            elif codigo in _rain:
-                icono = '🌧'
-            elif codigo in _storm:
-                icono = '⛈'
-            elif codigo in _snow:
-                icono = '❄️'
-            else:
-                icono = '🌤'
+        # Ícono emoji
+        if codigo == 113:
+            icono = '☀️'
+        elif codigo == 116:
+            icono = '⛅'
+        elif codigo in _cloudy:
+            icono = '☁️'
+        elif codigo in _fog:
+            icono = '🌫'
+        elif codigo in _rain:
+            icono = '🌧'
+        elif codigo in _storm:
+            icono = '⛈'
+        elif codigo in _snow:
+            icono = '❄️'
+        else:
+            icono = '🌤'
 
-            logger.info(f"☁️ Clima: {temp}°C, {descripcion}, {condicion}")
-            return {
-                'exito': True,
-                'temp': temp,
-                'humedad': humedad,
-                'viento': viento,
-                'descripcion': descripcion,
-                'condicion': condicion,
-                'icono': icono,
-                'ciudad': ciudad,
-            }
-        except Exception as e:
-            logger.warning(f"[Clima] Error obteniendo clima: {e}")
-            return {'exito': False, 'error': str(e)}
+        logger.info(f"☁️ Clima: {temp}°C, {descripcion}, {condicion}")
+        return {
+            'exito': True,
+            'temp': temp,
+            'humedad': humedad,
+            'viento': viento,
+            'descripcion': descripcion,
+            'condicion': condicion,
+            'icono': icono,
+            'ciudad': ciudad,
+        }
 
 
 

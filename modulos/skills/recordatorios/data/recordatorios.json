@@ -184,8 +184,8 @@
   {
     "id": "rec_6ec560f6",
     "mensaje": "Beber 250ml de agua",
-    "timestamp_expiracion": 1784761200.0,
-    "expiracion_iso": "2026-07-22 20:00:00",
+    "timestamp_expiracion": 1784847600.0,
+    "expiracion_iso": "2026-07-23 20:00:00",
     "creado_en": 1784753783.8610606,
     "estado": "pendiente",
     "tipo": "recurrente",
@@ -198,8 +198,8 @@
   {
     "id": "rec_13ff644a",
     "mensaje": "Beber 250ml de agua",
-    "timestamp_expiracion": 1784766600.0,
-    "expiracion_iso": "2026-07-22 21:30:00",
+    "timestamp_expiracion": 1784853000.0,
+    "expiracion_iso": "2026-07-23 21:30:00",
     "creado_en": 1784753783.8631616,
     "estado": "pendiente",
     "tipo": "recurrente",
@@ -240,14 +240,28 @@
   {
     "id": "rec_bd5e74e4",
     "mensaje": "Tomar la pastilla rosuvastatina",
-    "timestamp_expiracion": 1784764800.0,
-    "expiracion_iso": "2026-07-22 21:00:00",
+    "timestamp_expiracion": 1784851200.0,
+    "expiracion_iso": "2026-07-23 21:00:00",
     "creado_en": 1784754946.1752765,
     "estado": "pendiente",
     "tipo": "recurrente",
     "patron_recurrencia": "diario",
     "sin_hora_especifica": false,
     "aviso_previo_dias": 0,
+    "notificado_previo": false,
+    "origen": "ia"
+  },
+  {
+    "id": "rec_e8df49ee",
+    "mensaje": "Cumpleaños de Yuskeli",
+    "timestamp_expiracion": 1796558400.0,
+    "expiracion_iso": "2026-12-06 09:00:00",
+    "creado_en": 1784763078.7876103,
+    "estado": "pendiente",
+    "tipo": "puntual",
+    "patron_recurrencia": null,
+    "sin_hora_especifica": true,
+    "aviso_previo_dias": 1,
     "notificado_previo": false,
     "origen": "ia"
   }

@@ -70,19 +70,6 @@
         </div>
       </div>
 
-      <!-- VISUALIZACIÓN -->
-      <div class="sidebar-section">
-        <div class="section-title">Visualización</div>
-        <div class="select-wrapper">
-          <select id="visualModeSelect" class="hud-select">
-            <option value="traditional">🪟 Ventana Tradicional</option>
-            <option value="floating">📌 Widget Flotante</option>
-            <option value="desktop_full">📺 Escritorio (Ambos)</option>
-            <option value="desktop_side">🌆 Escritorio (Lateral)</option>
-          </select>
-        </div>
-      </div>
-
       <!-- PROYECTO -->
       <div class="sidebar-section">
         <div class="section-title">Proyecto</div>
@@ -91,18 +78,6 @@
           <div class="mode-btn-content">
             <span class="mode-btn-label" id="lblWorkspace">Anclar Proyecto</span>
             <span class="mode-btn-sub">Carpeta de trabajo</span>
-          </div>
-        </button>
-      </div>
-
-      <!-- RECORDATORIOS -->
-      <div class="sidebar-section">
-        <div class="section-title">Agenda & Alertas</div>
-        <button class="action-btn" id="btnReminders" title="Gestión Manual de Recordatorios">
-          <div class="mode-btn-icon">⏰</div>
-          <div class="mode-btn-content">
-            <span class="mode-btn-label">Recordatorios</span>
-            <span class="mode-btn-sub">Gestión manual y voz</span>
           </div>
         </button>
       </div>
@@ -150,6 +125,7 @@
         </div>
         <div class="header-actions">
           <span class="hotkey-badge">Presiona <strong>F8</strong> para hablar</span>
+          <button class="icon-btn" id="btnReminders" title="Recordatorios (Agenda & Alertas)">⏰</button>
           <button class="icon-btn" id="btnUpdateMemoria" title="Actualizar memoria de perfil (Extraer datos de la sesión)">🧠</button>
           <button class="icon-btn" id="btnClearContext" title="Limpiar contexto de IA (Reiniciar memoria del modelo)">🔄</button>
           <button class="icon-btn" id="btnClearChat" title="Limpiar pantalla (Borrar chat visible)">🗑️</button>

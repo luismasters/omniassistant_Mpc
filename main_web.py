@@ -121,7 +121,10 @@ def main():
 
     threading.Thread(target=_iniciar_gamepad, daemon=True).start()
 
-    # 5. Crear ventana PyWebView (Edge Chromium WebView2)
+    # 5. Configurar carpeta de almacenamiento persistente (evita errores de borrado temporal en WebView2)
+    user_data_dir = os.path.join(os.getenv("LOCALAPPDATA", os.path.expanduser("~")), "ArgusCopilot", "webview_data")
+    os.makedirs(user_data_dir, exist_ok=True)
+
     window = webview.create_window(
         title="Argus — OmniAssistant HUD",
         url=url_target,
@@ -137,7 +140,7 @@ def main():
 
     # 6. Iniciar bucle de eventos de PyWebView (bloquea hasta cerrar la ventana)
     try:
-        webview.start()
+        webview.start(private_mode=False, storage_path=user_data_dir)
     except Exception as e:
         logger.exception(f"Error al iniciar ventana PyWebView: {e}")
     finally:

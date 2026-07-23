@@ -207,6 +207,151 @@ Fase 3 (Futuro):
   ⑦ steam_integration
   ⑧ resumen_contenido
   ⑨ monitor_procesos
+
+Fase 4 (Expansión Multiplataforma):
+  ⑩ Migración a FastAPI + PWA          ← Acceso desde celular/tablet
+```
+
+---
+
+## Expansión Multiplataforma: FastAPI + PWA (Fase 4)
+
+**Estado:** 📄 Documentado — Pendiente de implementación  
+**Objetivo:** Convertir Argus en un asistente multiplataforma accesible desde PC y dispositivos móviles (celular, tablet) de forma unificada.
+
+### 📐 Arquitectura Propuesta
+
+```
+                ┌─── PC Escritorio ────┐
+                │  Navegador Chrome    │
+                │  o PyWebView (local) │
+                │  localhost:9876      │
+                └──────────┬───────────┘
+                           │ HTTP / WebSocket
+                           ▼
+┌─────────────────────────────────────────────────────┐
+│              FastAPI Server (Python)                 │
+│  Host: 0.0.0.0  |  Puerto: 9876                     │
+│                                                      │
+│  Rutas REST:                                         │
+│    GET  /          → Sirve frontend (SPA)            │
+│    POST /api/chat  → Enviar mensaje a la IA         │
+│    GET  /api/clima → Obtener clima                  │
+│    POST /api/voz   → Subir audio para Whisper       │
+│    GET  /api/estado→ Estado del sistema (PC info)   │
+│    POST /api/comando→ Ejecutar comando de sistema   │
+│                                                      │
+│  WebSocket /ws/chat → Streaming de respuestas IA    │
+│                                                      │
+│  Backend COMPLETO (sin cambios):                     │
+│    modulos/ia.py, sistema.py, control_audio.py       │
+│    gamepad_service.py, web_bridge.py (refactorizado) │
+└─────────────────────┬───────────────────────────────┘
+                      │
+        ┌────────────┴────────────┐
+        ▼                         ▼
+┌──────────────┐      ┌──────────────────┐
+│  Celular     │      │  Tablet / Otro   │
+│  Navegador   │      │  Navegador       │
+│  (PWA)       │      │  (misma red)     │
+│  Instalable  │      │  http://IP:9876  │
+│  en Home     │      │                  │
+└──────────────┘      └──────────────────┘
+```
+
+### ✅ Por qué FastAPI + PWA
+
+| Aspecto | PyWebView (hoy) | FastAPI + PWA |
+|---------|----------------|---------------|
+| **Unificado** | ❌ Solo Windows | ✅ Mismo servidor para todos |
+| **Celular** | ❌ No | ✅ PWA instalable en Android/iOS |
+| **Voz** | ✅ Whisper local | ✅ Mismo Whisper (server-side) |
+| **Gamepad** | ✅ XInput Windows | ✅ Se mantiene en PC |
+| **Comandos PC desde celu** | ❌ No | ✅ `http://192.168.x.x:9876` — cualquier comando |
+| **Tiempo de implementación** | — | **~2-3 días** |
+| **Recarga en caliente** | ❌ Reiniciar app | ✅ Solo refrescar navegador |
+| **DevTools** | ❌ Limitadas | ✅ Chrome DevTools completas |
+| **WebSockets streaming** | ❌ Polling | ✅ Tiempo real |
+
+### 🎯 Capacidades desde el Celular
+
+Desde cualquier dispositivo en la misma red WiFi, abriendo `http://192.168.x.x:9876`:
+
+| Acción en celular | Resultado en PC |
+|------------------|-----------------|
+| Escribir "abrir Chrome en monitor 2" | Chrome se abre en el monitor 2 |
+| Escribir "cerrar Steam" | Steam se cierra |
+| Escribir "explorar descargas" | Se abre el Explorador en Downloads |
+| Escribir "subir volumen al 50%" | Volumen del sistema cambia |
+| Escribir "qué temperatura tiene la GPU?" | Responde con datos de hardware |
+| Tocar botón rápido 🎮 "Abrir YouTube" | Se abre YouTube en Brave |
+| Programar recordatorio por voz | Se agenda y notifica en PC |
+| Preguntar "qué ventanas están abiertas?" | Lista las apps activas en PC |
+
+### 🧱 Plan de implementación
+
+```
+Fase 4a — Migrar capa de transporte (2 días)
+  □ Instalar FastAPI + Uvicorn + python-multipart + websockets
+  □ Crear modulos/servidor_web.py con rutas REST
+  □ Migrar ArgusWebBridge a funciones de ruta (reutilizando la misma lógica)
+  □ Agregar WebSocket para streaming de respuestas IA
+  □ Modificar gui/app.js: reemplazar pywebview.api por fetch() + WebSocket
+  □ Probar en PC: http://localhost:9876
+
+Fase 4b — PWA (medio día)
+  □ Crear gui/manifest.json (nombre, íconos, theme_color)
+  □ Crear gui/service-worker.js (caché offline básico)
+  □ Agregar <link rel="manifest"> en index.html
+  □ Agregar íconos PNG (192x192, 512x512)
+  □ Probar instalación en Android Home Screen
+
+Fase 4c — Modo escritorio híbrido (opcional, 1 día)
+  □ PyWebView apunta a http://localhost:9876 en vez de file://
+  □ Se mantienen: hotkey F8, gamepad L3+R3, modo escritorio Win32
+  □ El servidor FastAPI se inicia desde main_web.py antes de PyWebView
+
+Fase 4d — Seguridad (1 día, opcional)
+  □ Token de acceso simple para red local
+  □ Endpoint /api/parear que muestra código en PC y se ingresa en celular
+  □ HTTPS self-signed para evitar advertencias del navegador (opcional)
+```
+
+### ⚠️ Consideraciones
+
+| Aspecto | Detalle |
+|---------|---------|
+| **Micrófono** | El audio capturado en el celular se envía al servidor para Whisper. Latencia extra de ~100-200ms vs local. Aceptable. |
+| **Gamepad** | Solo funciona en PC con mando conectado via XInput.gamepad_service.py se mantiene intacto. |
+| **Notificaciones push** | Los recordatorios pueden notificarse vía Web Push API al celular cuando esté conectado. |
+| **Cámara** | Posibilidad futura: capturar imagen desde el celular y enviarla a la skill de visión. |
+| **Consumo** | Uvicorn agrega ~10-20MB RAM. Overhead de HTTP local vs llamada directa: <1ms. **Imperceptible.** |
+
+### 🧬 Diagrama de migración del bridge
+
+```
+HOY (PyWebView):
+  JS (app.js) → window.pywebview.api.obtener_clima()
+              → ArgusWebBridge.obtener_clima()  ← objeto en memoria
+              → wttr.in / sistema.py / etc.
+
+MAÑANA (FastAPI):
+  JS (app.js) → fetch('/api/clima')
+              → FastAPI route → ArgusWebBridge.obtener_clima()  ← mismo código
+              → JSON response
+              → JS renderiza igual
+```
+
+**El backend Python no cambia.** Solo cambia el mecanismo de comunicación entre el frontend JS y el backend. Toda la lógica de Argus (IA, sistema, audio, skills) se reutiliza sin modificaciones.
+
+### 📦 Dependencias a agregar
+
+```txt
+# requirements.txt (adicionales)
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+websockets>=12.0
 ```
 
 ---
