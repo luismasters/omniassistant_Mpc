@@ -25,14 +25,38 @@ SITIOS_WEB_COMUNES = [
 ]
 
 # =====================================================================
-# MAPEO DE MONITORES (intercambia 1 <-> 2)
+# MAPEO DE MONITORES (resuelve por posición física, no por índice)
 # =====================================================================
 def _mapear_monitor(numero: int) -> int:
-    if numero == 1:
-        return 2
-    elif numero == 2:
-        return 1
     return numero
+
+
+def obtener_monitor_por_numero(numero: int):
+    """
+    Retorna el objeto monitor de screeninfo correspondiente al número:
+    - 1 = monitor principal (is_primary = True)
+    - 2 = primer monitor secundario (is_primary = False)
+    - Si solo hay un monitor, retorna ese siempre.
+    - Si el número no existe, retorna None.
+    """
+    from screeninfo import get_monitors
+    monitores = get_monitors()
+    
+    if len(monitores) == 1:
+        return monitores[0]
+    
+    if numero == 1:
+        # Monitor principal
+        for m in monitores:
+            if m.is_primary:
+                return m
+        return monitores[0]  # fallback
+    else:
+        # Monitor secundario (primero que no sea primary)
+        for m in monitores:
+            if not m.is_primary:
+                return m
+        return None
 
 
 # =====================================================================
@@ -59,11 +83,10 @@ def ventana_visible_existe(nombre_parcial):
 
 def forzar_ventana_a_monitor(nombre_parcial_ventana, numero_monitor):
     numero_monitor = _mapear_monitor(numero_monitor)
-    monitors = get_monitors()
-    if numero_monitor > len(monitors):
+    monitor_objetivo = obtener_monitor_por_numero(numero_monitor)
+    if monitor_objetivo is None:
         print(f"[WINDOWS REAL] Monitor {numero_monitor} no detectado.")
         return
-    monitor_objetivo = monitors[numero_monitor - 1]
     for _ in range(15):
         time.sleep(0.3)
         for hwnd, titulo in buscar_todas_las_ventanas():

@@ -1,21 +1,14 @@
 from PIL import ImageGrab
-from screeninfo import get_monitors
-from modulos.sistema import _mapear_monitor
+from modulos.sistema import obtener_monitor_por_numero
 
 def capturar_pantalla(numero_monitor=None):
     """Saca una captura de pantalla de un monitor específico o de todos si no se le pasa número."""
     try:
         if numero_monitor:
-            numero_monitor = _mapear_monitor(numero_monitor)
-            monitores = get_monitors()
-            # Chequeamos si el monitor que pediste existe realmente
-            if numero_monitor <= len(monitores):
-                # Restamos 1 porque en programación las listas empiezan en 0
-                m = monitores[numero_monitor - 1] 
-                
+            m = obtener_monitor_por_numero(numero_monitor)
+            if m:
                 # Calculamos las coordenadas: (Izquierda, Arriba, Derecha, Abajo)
                 caja_del_monitor = (m.x, m.y, m.x + m.width, m.y + m.height)
-                
                 # Sacamos la foto solo de ese cuadradito
                 captura = ImageGrab.grab(bbox=caja_del_monitor, all_screens=True)
                 print(f"📸 [PYTHON REAL] Captura de la pantalla {numero_monitor} realizada.")

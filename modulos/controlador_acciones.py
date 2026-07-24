@@ -18,7 +18,7 @@ def _dividir_comandos(linea: str) -> list[str]:
         "abrir:", "navegar:", "mover:", "cerrar:", "explorar:", "audio:", "recordatorio:",
         "leer_archivo:", "editar_archivo:", "guardar_archivo:", "reemplazar_bloque:",
         "crear_carpeta:", "buscar:", "guardar_en_boveda:", "escanear_proyecto:",
-        "github:", "github_reset:", "git_comando:", "snapshot:"
+        "github:", "github_reset:", "git_comando:", "snapshot:", "capturar:"
     ]
     indices = []
     lower = linea.lower()
@@ -339,7 +339,7 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
             cmd_limpia = re.sub(r'^(\-\s|\d+\.\s)', '', cmd_limpia)
 
             # Asegurar alineación directa al verbo si existe prefijo conversacional
-            verbos_clave = ["abrir:", "navegar:", "cerrar:", "mover:", "explorar:", "audio:", "recordatorio:", "leer_archivo:", "editar_archivo:", "guardar_archivo:", "reemplazar_bloque:", "crear_carpeta:", "buscar:", "guardar_en_boveda:", "escanear_proyecto:", "github:"]
+            verbos_clave = ["abrir:", "navegar:", "cerrar:", "mover:", "explorar:", "audio:", "recordatorio:", "leer_archivo:", "editar_archivo:", "guardar_archivo:", "reemplazar_bloque:", "crear_carpeta:", "buscar:", "guardar_en_boveda:", "escanear_proyecto:", "github:", "capturar:"]
             for v_prefix in verbos_clave:
                 pos_v = cmd_limpia.find(v_prefix)
                 if pos_v > 0:
@@ -587,6 +587,41 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                     config.estado.agregar_mensaje_chat({'role': 'user', 'parts': [texto_usuario]})
                     config.estado.agregar_mensaje_chat({'role': 'model', 'parts': [msg_alerta]})
                     return "INTERRUPTED"
+                continue
+
+            # CAPTURAR PANTALLA
+            triggers_captura = ["capturar:", "mira la pantalla", "qué ves", "fijate"]
+            # "compara estos objetos" solo en modo gamer
+            if MODO_ACTUAL == "gamer":
+                triggers_captura.append("compara estos objetos")
+            # También "captura" suelto pero evitar falsos con "capturar:"
+            if "captura" in cmd_limpia and "capturar:" not in cmd_limpia:
+                # Asegurar que no sea parte de otra palabra
+                palabras = cmd_limpia.split()
+                if any(p in ("captura", "capturá") for p in palabras):
+                    cmd_limpia = "capturar: " + cmd_limpia
+
+            if any(t in cmd_limpia for t in triggers_captura):
+                try:
+                    from modulos.vision import capturar_pantalla
+                    # Extraer número si se especificó "pantalla 2", "monitor 2", etc.
+                    num_pantalla = 1  # Siempre pantalla 1 por defecto
+                    for palabra in cmd_limpia.lower().split():
+                        if palabra.isdigit():
+                            num_pantalla = int(palabra)
+                            break
+                    img = capturar_pantalla(num_pantalla)
+                    if img:
+                        config.estado.agregar_mensaje_chat(
+                            {'role': 'user', 'parts': [f"[SISTEMA] Captura de pantalla {num_pantalla or 'completa'} tomada."]},
+                            contar_para_perfil=False
+                        )
+                        if ui_callback:
+                            ui_callback("⚙️ Sistema", f"📸 Captura de pantalla {num_pantalla or 'completa'} tomada.", "#80868B")
+                except Exception as e:
+                    logger.exception("Error en captura de pantalla desde comando")
+                    if ui_callback:
+                        ui_callback("⚙️ Sistema", f"❌ Error capturando pantalla: {str(e)[:80]}", "#FF4500")
                 continue
 
             # CREAR CARPETA
