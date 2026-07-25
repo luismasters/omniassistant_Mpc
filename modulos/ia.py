@@ -437,8 +437,26 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             fecha_hoy = datetime.datetime.now().strftime("%A, %d de %B de %Y, %H:%M")
             ventanas_abiertas = obtener_ventanas_activas()
 
+            # ─── DATOS DE CLIMA PARA INYECTAR AL CONTEXTO ────────────────────
+            texto_clima = ""
+            try:
+                from modulos.web_bridge import obtener_texto_clima_para_contexto
+                resultado_clima = obtener_texto_clima_para_contexto()
+                if resultado_clima:
+                    texto_clima = resultado_clima
+            except Exception as e:
+                logger.debug(f"No se pudo obtener clima para contexto: {e}")
+            # ─── FIN DATOS DE CLIMA ──────────────────────────────────────────
+
             from modulos.perfil_usuario import texto_perfil_para_prompt
-            texto_perfil = texto_perfil_para_prompt()
+
+            # En modo Gamer usar perfil Gamer separado; en otros modos usar perfil general
+            if MODO_ACTUAL == "gamer":
+                from modulos.perfil_gamer import texto_perfil_gamer_para_prompt
+                texto_perfil = texto_perfil_gamer_para_prompt()
+            else:
+                texto_perfil = texto_perfil_para_prompt()
+
             texto_workspace = f"[WORKSPACE ANCLADO]: {WORKSPACE_ACTUAL}\n" if WORKSPACE_ACTUAL else ""
             texto_snapshot = f"[ESTADO DEL PROYECTO]:\n{SNAPSHOT_ACTUAL}\n\n" if SNAPSHOT_ACTUAL else ""
             texto_doc_volatil = f"[DOCUMENTOS EN MEMORIA]:\n{DOCUMENTO_VOLATIL}\n\n" if DOCUMENTO_VOLATIL else ""
@@ -459,6 +477,11 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                     fecha_hoy, ruta_home, ventanas_abiertas,
                     texto_workspace, texto_snapshot, texto_doc_volatil, texto_perfil
                 )
+
+            # ─── INYECTAR DATOS DE CLIMA EN EL CONTEXTO ─────────────────────
+            if texto_clima:
+                contexto_sistema += f"\n\n⚠️ [CLIMA ACTUAL] (Datos en tiempo real):\n{texto_clima}\n[FIN CLIMA]\n"
+                contexto_sistema += "\n⚠️ IMPORTANTE: Cuando el usuario pregunte sobre el clima, actividades al aire libre (lavar ropa, salir, etc.), USÁ estos datos. No necesitás buscar en internet para responder sobre el clima actual.\n"
 
             # Determinar modelo_activo según la selección del usuario o por defecto
             modelo_sel = getattr(config.estado, 'modelo_seleccionado', 'Por Defecto')
@@ -486,7 +509,8 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 if MODO_ACTUAL == "mentor":
                     modelo_activo = "deepseek-reasoner"
                 elif MODO_ACTUAL == "gamer":
-                    modelo_activo = "groq:llama-3.1-8b-instant"
+                    modelo_activo = "gemini"
+                    gemini_model_str = "gemini-3.6-flash"
                 else:
                     modelo_activo = "gemini"
 
@@ -532,13 +556,17 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 partes_usuario = [types.Part.from_text(text=texto_usuario)]
                 from PIL import Image as PIL_Image
 
-                verbos_vision = ["captura", "capturá", "capturar", "mirar", "ves"]
-                objetivos_vision = ["pantalla", "monitor", "1", "2", "uno", "dos", "la 1", "el 1", "la 2", "el 2"]
+                verbos_vision = ["captura", "capturá", "capturar", "mirar", "ves", "compara", "comparar", "fijate"]
+                objetivos_vision = ["pantalla", "monitor", "1", "2", "uno", "dos", "la 1", "el 1", "la 2", "el 2", "objetos"]
                 if any(v in texto_usuario_lower for v in verbos_vision) and any(o in texto_usuario_lower for o in objetivos_vision):
                     if ui_callback:
                         ui_callback("⚙️ Sistema", "📸 Capturando pantalla...", "#80868B")
                     winsound.Beep(1500, 100)
-                    num_pantalla = 1 if any(p in texto_usuario_lower for p in ["1", "uno", "la 1", "el 1"]) else 2
+                    # Determinar pantalla: si dice "2" explícitamente, usar 2. Sino 1 por defecto.
+                    if any(p in texto_usuario_lower for p in ["pantalla 2", "monitor 2", "la 2", "pantalla dos"]):
+                        num_pantalla = 2
+                    else:
+                        num_pantalla = 1
                     img = capturar_pantalla(num_pantalla)
                     if img:
                         import io
