@@ -439,13 +439,15 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
 
             # ─── DATOS DE CLIMA PARA INYECTAR AL CONTEXTO ────────────────────
             texto_clima = ""
-            try:
-                from modulos.web_bridge import obtener_texto_clima_para_contexto
-                resultado_clima = obtener_texto_clima_para_contexto()
-                if resultado_clima:
-                    texto_clima = resultado_clima
-            except Exception as e:
-                logger.debug(f"No se pudo obtener clima para contexto: {e}")
+            # En modo gamer no se consulta clima para no gastar tiempo de respuesta
+            if MODO_ACTUAL != "gamer":
+                try:
+                    from modulos.web_bridge import obtener_texto_clima_para_contexto
+                    resultado_clima = obtener_texto_clima_para_contexto()
+                    if resultado_clima:
+                        texto_clima = resultado_clima
+                except Exception as e:
+                    logger.debug(f"No se pudo obtener clima para contexto: {e}")
             # ─── FIN DATOS DE CLIMA ──────────────────────────────────────────
 
             from modulos.perfil_usuario import texto_perfil_para_prompt
@@ -510,7 +512,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                     modelo_activo = "deepseek-reasoner"
                 elif MODO_ACTUAL == "gamer":
                     modelo_activo = "gemini"
-                    gemini_model_str = "gemini-3.6-flash"
+                    gemini_model_str = "gemini-3.1-flash-lite"
                 else:
                     modelo_activo = "gemini"
 
