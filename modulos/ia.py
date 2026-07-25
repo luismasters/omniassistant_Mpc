@@ -556,8 +556,13 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 partes_usuario = [types.Part.from_text(text=texto_usuario)]
                 from PIL import Image as PIL_Image
 
-                verbos_vision = ["captura", "capturá", "capturar", "mirar", "ves", "compara", "comparar", "fijate"]
-                objetivos_vision = ["pantalla", "monitor", "1", "2", "uno", "dos", "la 1", "el 1", "la 2", "el 2", "objetos"]
+                verbos_vision = ["captura", "capturá", "capturar", "mirar", "ves", "fijate"]
+                objetivos_vision = ["pantalla", "monitor", "1", "2", "uno", "dos", "la 1", "el 1", "la 2", "el 2"]
+                # "compara estos objetos" solo en modo gamer para evitar falsos positivos
+                if MODO_ACTUAL == "gamer":
+                    verbos_vision.append("compara")
+                    verbos_vision.append("comparar")
+                    objetivos_vision.append("objetos")
                 if any(v in texto_usuario_lower for v in verbos_vision) and any(o in texto_usuario_lower for o in objetivos_vision):
                     if ui_callback:
                         ui_callback("⚙️ Sistema", "📸 Capturando pantalla...", "#80868B")
