@@ -174,9 +174,23 @@ document.addEventListener('DOMContentLoaded', () => {
         if (estado.modelo_real) actualizarModeloLabel(estado.modelo_real);
       }
     } catch (e) { console.error('Error init:', e); }
+    // Iniciar reloj digital cada segundo
+    actualizarReloj();
+    setInterval(actualizarReloj, 1000);
     // Cargar clima al iniciar y luego cada 10 minutos
     actualizarClima();
     setInterval(actualizarClima, 10 * 60 * 1000);
+  }
+
+  // ─── RELOJ DIGITAL ───────────────────────────────────────────────────
+  function actualizarReloj() {
+    const clockEl = document.getElementById('digitalClock');
+    if (!clockEl) return;
+    const ahora = new Date();
+    const hh = String(ahora.getHours()).padStart(2, '0');
+    const mm = String(ahora.getMinutes()).padStart(2, '0');
+    const ss = String(ahora.getSeconds()).padStart(2, '0');
+    clockEl.textContent = `${hh}:${mm}:${ss}`;
   }
 
   // ─── WIDGET DE CLIMA ───────────────────────────────────────────────────
@@ -190,11 +204,44 @@ document.addEventListener('DOMContentLoaded', () => {
         const wDesc = document.getElementById('weatherDesc');
         const wHum  = document.getElementById('weatherHumidity');
         const wWind = document.getElementById('weatherWind');
+        const wFeels = document.getElementById('weatherFeelsLike');
+        const wPrecip = document.getElementById('weatherPrecip');
+        const wWindDir = document.getElementById('weatherWindDir');
+        const wSunrise = document.getElementById('weatherSunrise');
+        const wSunset = document.getElementById('weatherSunset');
+        const wExtraRow = document.getElementById('weatherExtraRow');
+        const wSunRow = document.getElementById('weatherSunRow');
+
         if (wIcon) wIcon.textContent = clima.icono;
         if (wTemp) wTemp.textContent = `${clima.temp}°`;
         if (wDesc) wDesc.textContent = clima.descripcion;
         if (wHum)  wHum.textContent  = `💧 ${clima.humedad}%`;
         if (wWind) wWind.textContent = `💨 ${clima.viento} km/h`;
+
+        // Métricas extra (mostrar si hay datos)
+        if (clima.sensacion !== undefined && wFeels) {
+          wFeels.textContent = `🌡️ ${clima.sensacion}°`;
+          if (wExtraRow) wExtraRow.style.display = '';
+        }
+        if (clima.precipitacion !== undefined && wPrecip) {
+          wPrecip.textContent = `💧 ${clima.precipitacion}mm`;
+          if (wExtraRow) wExtraRow.style.display = '';
+        }
+        if (clima.viento_dir && wWindDir) {
+          wWindDir.textContent = `🧭 ${clima.viento_dir}`;
+          if (wExtraRow) wExtraRow.style.display = '';
+        }
+
+        // Amanecer/Atardecer
+        if (clima.amanecer && clima.amanecer !== 'N/A' && wSunrise) {
+          wSunrise.textContent = `🌅 ${clima.amanecer}`;
+          if (wSunRow) wSunRow.style.display = '';
+        }
+        if (clima.atardecer && clima.atardecer !== 'N/A' && wSunset) {
+          wSunset.textContent = `🌇 ${clima.atardecer}`;
+          if (wSunRow) wSunRow.style.display = '';
+        }
+
         if (window.emoFace && window.emoFace.setClima) {
           window.emoFace.setClima(clima.condicion);
         }
@@ -229,9 +276,39 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // ─── HISTORIAL AISLADO POR MODO ───────────────────────────────────────
+  // Cada modo (general/mentor/gamer) mantiene su propio historial visual de mensajes.
+  // El backend (config.py → EstadoGlobal._contextos_por_modo) ya aísla los contextos
+  // de chat para el LLM. Esto es SOLO para la interfaz visual del frontend.
+  let historialPorModo = { general: '', mentor: '', gamer: '' };
+
+  function _detectarModoActual() {
+    // Detecta el modo actual basado en las clases del body
+    const cls = body.className;
+    if (cls.includes('theme-mentor')) return 'mentor';
+    if (cls.includes('theme-gamer')) return 'gamer';
+    return 'chat'; // default (general)
+  }
+
+  function _modoAKey(modo) {
+    // Normaliza el nombre del modo a la clave usada en historialPorModo
+    if (modo === 'mentor') return 'mentor';
+    if (modo === 'gamer') return 'gamer';
+    return 'general';
+  }
+
   // ─── MODO INTERFAZ ─────────────────────────────────────────────────────
   function aplicarModoInterfaz(modo) {
     modo = (modo || 'chat').toLowerCase();
+
+    // ─── 1. Guardar historial del modo actual antes de cambiarlo ────────
+    const modoAnterior = _detectarModoActual();
+    const keyAnterior = _modoAKey(modoAnterior);
+    if (chatMessages) {
+      historialPorModo[keyAnterior] = chatMessages.innerHTML;
+    }
+
+    // ─── 2. Actualizar interfaz visual (temas, botones, etc.) ───────────
     if (btnChat) btnChat.classList.remove('active');
     if (btnMentor) btnMentor.classList.remove('active');
     if (btnGamer) btnGamer.classList.remove('active');
@@ -257,6 +334,33 @@ document.addEventListener('DOMContentLoaded', () => {
       if (headerSubtitle) headerSubtitle.innerText = 'Asistente IA multimodal con integración MCP activa';
       if (lblGamerMode) lblGamerMode.innerText = 'Modo Gaming';
       if (window.emoFace) { window.emoFace.setAccentColor('#00f3ff'); window.emoFace.setEstado('idle'); }
+    }
+
+    // ─── 3. Resetear estado de streaming ────────────────────────────────
+    currentAiBodyDiv = null;
+    currentAiRow = null;
+    currentAiRawText = '';
+    currentAiAvatarDiv = null;
+    ocultarTyping();
+
+    // ─── 4. Restaurar historial del nuevo modo ──────────────────────────
+    const nuevaKey = _modoAKey(modo);
+    if (chatMessages) {
+      if (historialPorModo[nuevaKey]) {
+        // Restaurar historial guardado
+        chatMessages.innerHTML = historialPorModo[nuevaKey];
+      } else {
+        // Primera vez en este modo: mostrar mensaje de bienvenida
+        chatMessages.innerHTML = '';
+        if (nuevaKey === 'general') {
+          agregarMensajeSistema('¡Hola, Luis! Soy <strong>Argus</strong> — tu asistente IA. Presiona <strong>F8</strong> o <strong>L3+R3</strong> en tu mando para hablar.');
+        } else if (nuevaKey === 'mentor') {
+          agregarMensajeSistema('🎓 <strong>Modo Mentor</strong> activado. Estoy aquí para guiarte en tu desarrollo profesional y técnico.');
+        } else if (nuevaKey === 'gamer') {
+          agregarMensajeSistema('🎮 <strong>Modo Gamer</strong> activado. ¡Modo arcade de alto rendimiento sin interrupciones!');
+        }
+      }
+      scrollBottom();
     }
   }
 
@@ -531,6 +635,10 @@ document.addEventListener('DOMContentLoaded', () => {
       currentAiBodyDiv = null;
       currentAiRow = null;
       currentAiRawText = '';
+      // También limpiar el historial guardado del modo actual para que al cambiar
+      // de modo y volver no se restaure el contenido viejo
+      const keyActual = _modoAKey(_detectarModoActual());
+      historialPorModo[keyActual] = '';
       agregarMensajeSistema('🧹 Conversación de pantalla limpiada.');
     });
   }
@@ -952,6 +1060,8 @@ document.addEventListener('DOMContentLoaded', () => {
         currentAiRow = result.row;
         currentAiAvatarDiv = result.avatarDiv;
       }
+      // Primera respuesta: pasar de "thinking" (transcripción) a "talking" (respuesta)
+      if (window.emoFace) window.emoFace.setEstado('talking');
       resetEmoFaceTimer(6000);
     }
   };
@@ -968,8 +1078,8 @@ document.addEventListener('DOMContentLoaded', () => {
   window.detenerEscuchaVozUI = function() {
     isListening = false;
     if (btnVoice) btnVoice.classList.remove('listening');
-    ocultarTyping();
-    if (window.emoFace) window.emoFace.setEstado('idle');
+    // No ocultar typing ni ir a idle — mientras Whisper transcribe mostramos "thinking"
+    if (window.emoFace) window.emoFace.setEstado('thinking');
   };
 
   window.actualizarEstadoGamepad = function(conectado) {
