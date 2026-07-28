@@ -7,6 +7,8 @@ temas neón dinámicos, escucha de micrófono por F8/L3+R3 y soporte completo pa
 
 import os
 import sys
+import traceback
+import threading
 
 # Forzar UTF-8 en consola para Windows (evita UnicodeEncodeError con emojis)
 if sys.platform == "win32":
@@ -15,7 +17,46 @@ if sys.platform == "win32":
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-import threading
+# ─── GLOBAL UNHANDLED EXCEPTION HOOK (captura crashes en cualquier hilo) ──
+_original_excepthook = sys.excepthook
+def _global_excepthook(exctype, value, tb):
+    try:
+        from modulos.logger import logger
+        logger.critical(f"❌ EXCEPCIÓN NO CAPTURADA: {exctype.__name__}: {value}")
+        logger.critical("".join(traceback.format_tb(tb)))
+    except Exception:
+        pass
+    print(f"\n{'='*60}", file=sys.stderr)
+    print(f"❌ ERROR CRÍTICO NO CAPTURADO: {exctype.__name__}: {value}", file=sys.stderr)
+    traceback.print_exception(exctype, value, tb, file=sys.stderr)
+    print(f"{'='*60}\n", file=sys.stderr)
+    if _original_excepthook:
+        _original_excepthook(exctype, value, tb)
+sys.excepthook = _global_excepthook
+
+# También capturar excepciones en hilos (threading.Thread)
+_threading_original_excepthook = None
+def _thread_excepthook(args):
+    try:
+        from modulos.logger import logger
+        logger.critical(f"❌ EXCEPCIÓN EN HILO: {args.exc_type.__name__}: {args.exc_value}")
+        if args.exc_traceback:
+            logger.critical("".join(traceback.format_tb(args.exc_traceback)))
+    except Exception:
+        pass
+    print(f"\n{'='*60}", file=sys.stderr)
+    print(f"❌ ERROR EN HILO: {args.exc_type.__name__}: {args.exc_value}", file=sys.stderr)
+    if args.exc_traceback:
+        traceback.print_exception(args.exc_type, args.exc_value, args.exc_traceback, file=sys.stderr)
+    print(f"{'='*60}\n", file=sys.stderr)
+    if _threading_original_excepthook:
+        _threading_original_excepthook(args)
+try:
+    _threading_original_excepthook = threading.excepthook
+    threading.excepthook = _thread_excepthook
+except AttributeError:
+    pass
+
 import json
 import webview
 from config import TECLA_HABLAR
@@ -40,17 +81,60 @@ def main():
     url_target = f"file:///{html_path.replace(chr(92), '/')}"
     logger.info(f"Cargando frontend web desde: {url_target}")
 
-    # 3. Hotkey F8 (teclado)
-    def _iniciar_teclado():
+    # 3. Hotkey F8 (teclado) — usa Win32 API GetAsyncKeyState para funcionar en juegos fullscreen
+    def _iniciar_teclado_windows():
+        """Hilo dedicado que lee F8 via GetAsyncKeyState (funciona incluso en juegos fullscreen)."""
+        import ctypes
+        import time
+        user32 = ctypes.windll.user32
+        VK_F8 = 0x77
+        estado_anterior = False
+
+        try:
+            from modulos.audio_custom import esta_escuchando, esta_hablando, detener_voz
+        except Exception:
+            return
+
+        while True:
+            try:
+                # GetAsyncKeyState devuelve el bit más significativo (presionado ahora)
+                presionado = bool(user32.GetAsyncKeyState(VK_F8) & 0x8000)
+                if presionado and not estado_anterior:
+                    # Transición: no presionado → presionado (flanco de subida)
+                    if not esta_escuchando():
+                        if esta_hablando():
+                            detener_voz()
+                        else:
+                            res = bridge.iniciar_escucha_voz()
+                            win = bridge._window or (webview.windows[0] if webview.windows else None)
+                            if res and res.get("exito") and win:
+                                win.evaluate_js("if (window.iniciarEscuchaVozUI) window.iniciarEscuchaVozUI();")
+                    estado_anterior = True
+                elif not presionado and estado_anterior:
+                    # Transición: presionado → no presionado (flanco de bajada)
+                    estado_anterior = False
+                    # Apagar micrófono inmediatamente al soltar F8 (sin esperar a Whisper)
+                    win = bridge._window or (webview.windows[0] if webview.windows else None)
+                    if win:
+                        try:
+                            win.evaluate_js("if (window.detenerEscuchaVozUI) window.detenerEscuchaVozUI();")
+                        except Exception:
+                            pass
+                time.sleep(0.03)  # ~33 Hz — suficiente para capturar F8 sin saturar CPU
+            except Exception as _e:
+                logger.error(f"Error en hilo de detección F8 (se omite, loop continúa): {_e}")
+                time.sleep(0.03)
+
+    if sys.platform == "win32":
+        # Usar GetAsyncKeyState (funciona en juegos fullscreen)
+        logger.info(f"🎤 Iniciando detector F8 vía Win32 API GetAsyncKeyState (compatible con juegos fullscreen).")
+        threading.Thread(target=_iniciar_teclado_windows, daemon=True).start()
+    else:
+        # Fallback al módulo keyboard para otros SO
         try:
             import keyboard
             def _on_f8():
                 try:
-                    from config import estado
-                    if getattr(estado, "gamer_mode_activo", False):
-                        logger.debug("🎮 Modo Gamer activo: ignorando hotkey F8 del teclado.")
-                        return
-
                     from modulos.audio_custom import esta_escuchando, esta_hablando, detener_voz
                     if esta_escuchando():
                         return
@@ -63,11 +147,9 @@ def main():
                 except Exception as e:
                     logger.exception(f"Error F8: {e}")
             keyboard.add_hotkey(TECLA_HABLAR, _on_f8)
-            logger.info(f"🎤 Global hotkey '{TECLA_HABLAR}' registrado OK.")
+            logger.info(f"🎤 Global hotkey '{TECLA_HABLAR}' registrado OK (fallback keyboard module).")
         except Exception as e:
             logger.warning(f"Error global hotkey: {e}")
-
-    _iniciar_teclado()
 
     # 4. Gamepad — L3+R3 push-to-talk (GestorGamepad via subproceso aislado gamepad_service.py)
     def _iniciar_gamepad():

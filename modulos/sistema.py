@@ -35,28 +35,269 @@ def obtener_monitor_por_numero(numero: int):
     """
     Retorna el objeto monitor de screeninfo correspondiente al número:
     - 1 = monitor principal (is_primary = True)
-    - 2 = primer monitor secundario (is_primary = False)
-    - Si solo hay un monitor, retorna ese siempre.
-    - Si el número no existe, retorna None.
+    - 2+ = monitores secundarios (is_primary = False)
     """
     from screeninfo import get_monitors
     monitores = get_monitors()
+    if not monitores:
+        return None
     
     if len(monitores) == 1:
         return monitores[0]
     
+    principal = None
+    secundarios = []
+    for m in monitores:
+        if m.is_primary:
+            principal = m
+        else:
+            secundarios.append(m)
+            
+    if not principal:
+        principal = monitores[0]
+        
     if numero == 1:
-        # Monitor principal
-        for m in monitores:
-            if m.is_primary:
-                return m
-        return monitores[0]  # fallback
+        return principal
     else:
-        # Monitor secundario (primero que no sea primary)
+        idx = numero - 2
+        if 0 <= idx < len(secundarios):
+            return secundarios[idx]
+        elif secundarios:
+            return secundarios[0]
+        else:
+            return principal
+
+
+# =====================================================================
+# AUTO-CONTROL DE VENTANA DE ARGUS (PyWebView / Win32)
+# =====================================================================
+
+def obtener_hwnd_por_titulo(titulo_parcial):
+    """Busca un HWND por título parcial de ventana."""
+    import win32gui
+    resultados = []
+    def callback(hwnd, extra):
+        if win32gui.IsWindowVisible(hwnd):
+            titulo = win32gui.GetWindowText(hwnd)
+            if titulo_parcial.lower() in titulo.lower():
+                resultados.append(hwnd)
+        return True
+    win32gui.EnumWindows(callback, None)
+    return resultados[0] if resultados else None
+
+
+def argus_mover_a_monitor(hwnd, numero_monitor: int) -> str:
+    """
+    Mueve la ventana de Argus al monitor especificado y la maximiza allí.
+    """
+    if not hwnd:
+        hwnd = obtener_hwnd_por_titulo("Argus")
+    if not hwnd:
+        return ""
+
+    monitor = obtener_monitor_por_numero(numero_monitor)
+    if monitor is None:
+        return ""
+    
+    try:
+        import win32gui, win32con
+        import ctypes
+        
+        # Restaurar primero
+        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        
+        # Mover ventana al monitor objetivo (dentro de sus límites)
+        w = min(1200, monitor.width - 100)
+        h = min(800, monitor.height - 100)
+        win32gui.MoveWindow(hwnd, monitor.x + 50, monitor.y + 50, w, h, True)
+        
+        # Maximizar en ese monitor
+        win32gui.ShowWindow(hwnd, win32con.SW_SHOWMAXIMIZED)
+        
+        # Aplicar HWND_TOPMOST
+        ctypes.windll.user32.SetWindowPos(
+            hwnd, -1,  # HWND_TOPMOST
+            0, 0, 0, 0,
+            0x0002 | 0x0001  # SWP_NOMOVE | SWP_NOSIZE
+        )
+        logger.info(f"🪟 Argus movido y maximizado al monitor {numero_monitor} (x={monitor.x})")
+        return ""
+    except Exception as e:
+        logger.exception("Error moviendo ventana de Argus")
+        return ""
+
+
+def argus_maximizar_con_topmost(hwnd) -> str:
+    """
+    Maximiza Argus EXACTAMENTE en el monitor donde se encuentra actualmente la ventana
+    y la pone SIEMPRE ENCIMA de todas las ventanas (topmost).
+    """
+    if not hwnd:
+        hwnd = obtener_hwnd_por_titulo("Argus")
+    if not hwnd:
+        return ""
+    try:
+        import win32gui, win32con
+        import ctypes
+        from screeninfo import get_monitors
+        
+        monitores = get_monitors()
+        if not monitores:
+            return ""
+
+        # Determinar coordenadas ANTES de restaurar (si está minimizada, usar Placement)
+        cx, cy = None, None
+        if win32gui.IsIconic(hwnd):
+            try:
+                placement = win32gui.GetWindowPlacement(hwnd)
+                rc = placement[4]  # rcNormalPosition (left, top, right, bottom)
+                cx = (rc[0] + rc[2]) // 2
+                cy = (rc[1] + rc[3]) // 2
+            except Exception:
+                pass
+        
+        if cx is None or cy is None:
+            rect = win32gui.GetWindowRect(hwnd)
+            cx = (rect[0] + rect[2]) // 2
+            cy = (rect[1] + rect[3]) // 2
+
+        # Encontrar qué monitor contiene el punto centro (cx, cy)
+        monitor_actual = None
         for m in monitores:
-            if not m.is_primary:
-                return m
-        return None
+            if m.x <= cx <= m.x + m.width and m.y <= cy <= m.y + m.height:
+                monitor_actual = m
+                break
+                
+        if not monitor_actual:
+            def dist_mon(m):
+                mcx = m.x + m.width // 2
+                mcy = m.y + m.height // 2
+                return (cx - mcx) ** 2 + (cy - mcy) ** 2
+            monitor_actual = min(monitores, key=dist_mon)
+
+        # Restaurar primero si estaba minimizada
+        if win32gui.IsIconic(hwnd):
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+
+        # Posicionar dentro del monitor actual
+        w = min(1200, monitor_actual.width - 100)
+        h = min(800, monitor_actual.height - 100)
+        win32gui.MoveWindow(
+            hwnd,
+            monitor_actual.x + 50,
+            monitor_actual.y + 50,
+            w,
+            h,
+            True
+        )
+
+        # Maximizar en el monitor actual
+        win32gui.ShowWindow(hwnd, win32con.SW_SHOWMAXIMIZED)
+
+        # Aplicar HWND_TOPMOST
+        ctypes.windll.user32.SetWindowPos(
+            hwnd, -1,  # HWND_TOPMOST
+            0, 0, 0, 0,
+            0x0002 | 0x0001  # SWP_NOMOVE | SWP_NOSIZE
+        )
+        logger.info(f"🪟 Argus maximizado con topmost en monitor actual (x={monitor_actual.x}).")
+        return ""
+    except Exception as e:
+        logger.exception("Error maximizando Argus")
+        return ""
+
+
+def argus_minimizar(hwnd) -> str:
+    """Minimiza la ventana de Argus (silencioso)."""
+    if not hwnd:
+        hwnd = obtener_hwnd_por_titulo("Argus")
+    if not hwnd:
+        return ""
+    try:
+        import win32gui, win32con
+        win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+        logger.info("🪟 Argus minimizado.")
+        return ""
+    except Exception as e:
+        logger.exception("Error minimizando Argus")
+        return ""
+
+
+def argus_traer_al_frente(hwnd) -> str:
+    """
+    Restaura (si está minimizada) y trae la ventana de Argus al frente.
+    
+    NOTA: SetForegroundWindow() tiene restricciones en Windows: un proceso no puede
+    robar el foco de una ventana de otro proceso a menos que el hilo actual esté
+    attachado al input del hdueño de la ventana objetivo. Esta función usa
+    AttachThreadInput para sortear esa restricción, y si aún falla, fuerza con
+    HWND_TOP + SWP_SHOWWINDOW como último recurso.
+    """
+    if not hwnd:
+        hwnd = obtener_hwnd_por_titulo("Argus")
+    if not hwnd:
+        return ""
+    try:
+        import win32gui, win32con
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+
+        # 1. Restaurar si está minimizada
+        if win32gui.IsIconic(hwnd):
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            time.sleep(0.05)  # dar tiempo a que se restaure
+
+        # 2. Traer al frente con AttachThreadInput (sortea restricción de foco)
+        try:
+            # Obtener thread ID de la ventana objetivo y del foreground actual
+            target_tid = ctypes.windll.user32.GetWindowThreadProcessId(hwnd, None)
+            actual_hwnd = user32.GetForegroundWindow()
+            actual_tid = user32.GetWindowThreadProcessId(actual_hwnd, None) if actual_hwnd else 0
+
+            if actual_tid != target_tid:
+                user32.AttachThreadInput(actual_tid, target_tid, True)
+                user32.SetForegroundWindow(hwnd)
+                user32.AttachThreadInput(actual_tid, target_tid, False)
+            else:
+                user32.SetForegroundWindow(hwnd)
+        except Exception:
+            pass
+
+        # 3. Forzar visibilidad: HWND_TOP + SWP_SHOWWINDOW (funciona incluso si
+        #    SetForegroundWindow falló por restricciones de seguridad)
+        user32.SetWindowPos(
+            hwnd, 0,  # HWND_TOP
+            0, 0, 0, 0,
+            0x0002 | 0x0001 | 0x0040  # SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW
+        )
+
+        # 4. Topmost temporal de 2 segundos para que quede encima
+        user32.SetWindowPos(
+            hwnd, -1,  # HWND_TOPMOST
+            0, 0, 0, 0,
+            0x0002 | 0x0001  # SWP_NOMOVE | SWP_NOSIZE
+        )
+
+        # Quitar topmost después de 2s para no interferir con otras apps
+        def _quitar_topmost():
+            try:
+                hwnd_actual = obtener_hwnd_por_titulo("Argus")
+                if hwnd_actual:
+                    ctypes.windll.user32.SetWindowPos(
+                        hwnd_actual, -2,  # HWND_NOTOPMOST
+                        0, 0, 0, 0,
+                        0x0002 | 0x0001
+                    )
+            except Exception:
+                pass
+        threading.Timer(2.0, _quitar_topmost).start()
+        logger.info("🪟 Argus traído al frente.")
+        return ""
+    except Exception as e:
+        logger.exception("Error trayendo Argus al frente")
+        return ""
 
 
 # =====================================================================

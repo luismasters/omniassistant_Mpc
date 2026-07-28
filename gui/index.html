@@ -22,29 +22,49 @@
     <!-- ── SIDEBAR ──────────────────────────────────────────────── -->
     <aside class="sidebar">
 
-      <!-- EMO FACE -->
+      <!-- EMO FACE (Preservado en segundo plano) -->
       <div class="emo-header" style="position: relative;">
-        <div class="emo-bezel-frame">
+        <div class="emo-bezel-frame" style="display: none;">
           <canvas id="emoCanvas" width="230" height="150"></canvas>
         </div>
 
-        <div class="emo-status-tag" id="emoStatusTag">
+        <div class="emo-status-tag" id="emoStatusTag" style="display: none;">
           <span class="status-dot"></span>
           <span id="emoStatusText">REPOSO</span>
         </div>
-        <!-- WIDGET DE CLIMA -->
-        <div class="weather-widget" id="weatherWidget">
-          <div class="weather-main-row">
-            <span class="weather-icon" id="weatherIcon">🌤</span>
-            <span class="weather-temp" id="weatherTemp">--°</span>
-            <span class="weather-desc" id="weatherDesc">Obteniendo clima…</span>
-          </div>
-          <div class="weather-sub-row">
-            <span class="weather-detail" id="weatherHumidity">💧 --%</span>
-            <span class="weather-divider">·</span>
-            <span class="weather-detail" id="weatherWind">💨 -- km/h</span>
+
+        <!-- STAGE HOLOGRÁFICO INTERACTIVO (HUD) -->
+        <div class="holo-stage-container" id="holoStageContainer">
+          <div class="hud-corner tl"></div>
+          <div class="hud-corner tr"></div>
+          <div class="hud-corner bl"></div>
+          <div class="hud-corner br"></div>
+          <div class="reticle-ring"></div>
+          <div class="scanlines"></div>
+          <div class="vignette"></div>
+
+          <canvas id="holoCanvas"></canvas>
+
+          <div class="stage-telemetry">
+            <div>FPS: <span id="holoFpsCount">60</span></div>
+            <div>SYNC: <span>99.8%</span></div>
+            <div id="holoStateHexCode">#2DD4BF</div>
           </div>
         </div>
+
+        <!-- TARJETA DE LECTURA DE ESTADO -->
+        <div class="holo-readout-card">
+          <div class="readout-header">
+            <div class="readout-label-group">
+              <span class="state-code" id="holoStateCode">ST-01</span>
+              <span class="state-name" id="holoStateName">ACTIVO</span>
+            </div>
+            <span class="state-freq" id="holoStateFreq">120 Hz</span>
+          </div>
+          <p class="readout-desc" id="holoStateDesc">Sistema en reposo pasivo. Esperando comando de voz o interacción.</p>
+        </div>
+        <!-- RELOJ DIGITAL -->
+        <div class="digital-clock" id="digitalClock">--:--:--</div>
       </div>
 
       <!-- MODOS DE OPERACIÓN -->
@@ -124,6 +144,16 @@
           <p id="headerModeSubtitle">Asistente IA multimodal con integración MCP activa</p>
         </div>
         <div class="header-actions">
+          <!-- WIDGET DE CLIMA COMPACTO EN HEADER -->
+          <div class="header-weather" id="weatherWidget">
+            <span class="header-weather-icon" id="weatherIcon">🌤</span>
+            <span class="header-weather-temp" id="weatherTemp">--°</span>
+            <span class="header-weather-desc" id="weatherDesc">Obteniendo clima…</span>
+            <span class="header-weather-divider">·</span>
+            <span class="header-weather-detail" id="weatherHumidity">💧 --%</span>
+            <span class="header-weather-divider">·</span>
+            <span class="header-weather-detail" id="weatherWind">💨 -- km/h</span>
+          </div>
           <span class="hotkey-badge">Presiona <strong>F8</strong> para hablar</span>
           <button class="icon-btn" id="btnReminders" title="Recordatorios (Agenda & Alertas)">⏰</button>
           <button class="icon-btn" id="btnUpdateMemoria" title="Actualizar memoria de perfil (Extraer datos de la sesión)">🧠</button>
@@ -282,6 +312,7 @@
   </div>
 
   <script src="emo_face.js"></script>
+  <script src="holo_hud.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

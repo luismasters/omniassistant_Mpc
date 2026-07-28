@@ -28,6 +28,34 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnUpdateMemoria    = document.getElementById('btnUpdateMemoria');
   const btnClearContext     = document.getElementById('btnClearContext');
 
+  // ─── DELEGATED COPY EVENT LISTENER (Code Blocks & Messages) ───────────
+  if (chatMessages) {
+    chatMessages.addEventListener('click', (e) => {
+      // 1. Code block copy button
+      const copyBtn = e.target.closest('.copy-btn');
+      if (copyBtn) {
+        const wrapper = copyBtn.closest('.code-block-wrapper');
+        const codeEl = wrapper ? wrapper.querySelector('pre code') : null;
+        if (codeEl) {
+          const codeText = codeEl.innerText || codeEl.textContent;
+          copyTextBtn(copyBtn, codeText);
+        }
+        return;
+      }
+
+      // 2. Message action copy button
+      const actionBtn = e.target.closest('.msg-action-btn');
+      if (actionBtn) {
+        const row = actionBtn.closest('.msg-row');
+        if (row) {
+          const textToCopy = row.dataset.rawText || row.querySelector('.msg-body')?.innerText || '';
+          copyTextBtn(actionBtn, textToCopy);
+        }
+        return;
+      }
+    });
+  }
+
   let pyApi           = null;
   let isListening     = false;
   let typingRowEl     = null;
@@ -813,18 +841,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const copyBtn = document.createElement('button');
         copyBtn.className = 'copy-btn';
-        copyBtn.innerHTML = '<span>⎘</span><span>Copiar</span>';
-        copyBtn.addEventListener('click', () => {
-          const codeText = codeEl.innerText || codeEl.textContent;
-          navigator.clipboard.writeText(codeText).then(() => {
-            copyBtn.classList.add('copied');
-            copyBtn.innerHTML = '<span>✓</span><span>Copiado</span>';
-            setTimeout(() => {
-              copyBtn.classList.remove('copied');
-              copyBtn.innerHTML = '<span>⎘</span><span>Copiar</span>';
-            }, 2000);
-          });
-        });
+        copyBtn.type = 'button';
+        copyBtn.setAttribute('aria-label', 'Copiar código');
+        copyBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><span>Copiar código</span>`;
 
         header.appendChild(langSpan);
         header.appendChild(copyBtn);
@@ -875,8 +894,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const copyBtn = document.createElement('button');
     copyBtn.className = 'msg-action-btn';
-    copyBtn.textContent = '⎘ Copiar';
-    copyBtn.addEventListener('click', () => copyTextBtn(copyBtn, texto));
+    copyBtn.type = 'button';
+    copyBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><span>Copiar</span>`;
 
     actions.appendChild(copyBtn);
 
@@ -928,11 +947,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const copyBtn = document.createElement('button');
     copyBtn.className = 'msg-action-btn';
-    copyBtn.textContent = '⎘ Copiar';
-    copyBtn.addEventListener('click', () => {
-      const textToCopy = row.dataset.rawText || textoLimpio;
-      copyTextBtn(copyBtn, textToCopy);
-    });
+    copyBtn.type = 'button';
+    copyBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><span>Copiar</span>`;
 
     actions.appendChild(copyBtn);
 
@@ -986,15 +1002,18 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function copyTextBtn(btn, text) {
+    if (!text) return;
     navigator.clipboard.writeText(text).then(() => {
-      const orig = btn.textContent;
-      btn.textContent = '✓ Copiado';
-      btn.style.color = '#00ff9d';
-      btn.style.borderColor = '#00ff9d';
+      const origHtml = btn.dataset.origHtml || btn.innerHTML;
+      if (!btn.dataset.origHtml) btn.dataset.origHtml = origHtml;
+      
+      btn.classList.add('copied');
+      btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg><span>Copiado</span>`;
+      
       setTimeout(() => {
-        btn.textContent = orig;
-        btn.style.color = '';
-        btn.style.borderColor = '';
+        btn.classList.remove('copied');
+        btn.innerHTML = origHtml;
+        delete btn.dataset.origHtml;
       }, 2000);
     }).catch(err => console.error('Copy error:', err));
   }

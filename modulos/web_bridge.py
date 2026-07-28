@@ -25,6 +25,88 @@ from modulos.audio_custom import capturar_voz_micro, hablar_no_bloqueante
 from modulos.perfil_mentor import cargar_perfil_mentor, guardar_perfil_mentor
 
 
+# ─── Variables de caché de clima para evitar importaciones circulares ──
+_cache_clima_texto = ""
+_cache_clima_timestamp = 0.0
+_cache_clima_lock = threading.Lock()
+
+def obtener_texto_clima_para_contexto() -> str:
+    """
+    Función independiente para obtener datos de clima formateados como texto.
+    NO depende de ArgusWebBridge (evita importación circular con ia.py).
+    Incluye caché de 10 minutos para no llamar a la API en cada mensaje.
+    """
+    import time, urllib.request, urllib.parse, json, socket
+    global _cache_clima_texto, _cache_clima_timestamp
+    
+    with _cache_clima_lock:
+        ahora = time.time()
+        if _cache_clima_texto and (ahora - _cache_clima_timestamp) < 600:
+            return _cache_clima_texto
+    
+    import config as _cfg
+    ciudad = getattr(_cfg, 'CIUDAD_CLIMA', 'San Martin, Buenos Aires, Argentina')
+    ciudad_enc = urllib.parse.quote(ciudad)
+    url = f"https://wttr.in/{ciudad_enc}?format=j1"
+    
+    try:
+        socket.setdefaulttimeout(4)
+        req = urllib.request.Request(url, headers={'User-Agent': 'OmniAssistant/1.0'})
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+        
+        cc = data['current_condition'][0]
+        temp = int(cc['temp_C'])
+        sensacion = int(cc['FeelsLikeC'])
+        humedad = int(cc['humidity'])
+        viento = int(cc['windspeedKmph'])
+        viento_dir = cc.get('winddir16Point', 'N/A')
+        precipitacion = cc.get('precipMM', '0')
+        descripcion_en = cc['weatherDesc'][0]['value']
+        
+        astronomia = data.get('astronomy', [{}])[0] if data.get('astronomy') else {}
+        amanecer = astronomia.get('sunrise', 'N/A')
+        atardecer = astronomia.get('sunset', 'N/A')
+        
+        weather_array = data.get('weather', [])
+        texto_manana = ""
+        if len(weather_array) >= 2:
+            manana = weather_array[1]
+            tm_max = manana.get('maxtempC', '?')
+            tm_min = manana.get('mintempC', '?')
+            desc_manana = manana.get('hourly', [{}])[4].get('weatherDesc', [{}])[0].get('value', '') if manana.get('hourly') else ''
+            texto_manana = f" | Mañana: {desc_manana} {tm_min}°C/{tm_max}°C"
+        
+        _desc_es = {'Clear':'Despejado','Sunny':'Soleado','Partly cloudy':'Parcialmente nublado','Cloudy':'Nublado','Overcast':'Cubierto','Mist':'Neblina','Fog':'Niebla','Light rain':'Lluvia leve','Moderate rain':'Lluvia moderada','Heavy rain':'Lluvia intensa','Patchy rain possible':'Posible lluvia','Light snow':'Nieve leve','Moderate snow':'Nieve moderada','Heavy snow':'Nevada intensa','Thunder':'Tormenta','Blizzard':'Ventisca'}
+        descripcion = descripcion_en
+        for en, es in _desc_es.items():
+            if en.lower() in descripcion_en.lower():
+                descripcion = es
+                break
+        
+        partes = [
+            f"Temp: {temp}°C (sensación {sensacion}°C)",
+            f"Humedad: {humedad}%",
+            f"Viento: {viento} km/h ({viento_dir})",
+            f"Estado: {descripcion}",
+        ]
+        if precipitacion and precipitacion != '0':
+            partes.append(f"Precipitación: {precipitacion}mm")
+        if amanecer != 'N/A':
+            partes.append(f"Amanecer: {amanecer} | Atardecer: {atardecer}")
+        
+        resultado = " | ".join(partes) + texto_manana
+        
+        with _cache_clima_lock:
+            _cache_clima_texto = resultado
+            _cache_clima_timestamp = ahora
+        
+        return resultado
+    except Exception as e:
+        logger.debug(f"No se pudo obtener clima: {e}")
+        return _cache_clima_texto  # devolver cache aunque esté vencido
+
+
 def resolver_modelo_actual(modelo_seleccionado: str, modo_actual: str) -> str:
     """
     Resuelve el nombre real del modelo activo cuando el usuario tiene 
@@ -33,12 +115,12 @@ def resolver_modelo_actual(modelo_seleccionado: str, modo_actual: str) -> str:
     """
     if modelo_seleccionado != "Por Defecto":
         return modelo_seleccionado
-    # Modo mentor usa DeepSeek por defecto
+    # Modo mentor usa DeepSeek V4 Flash por defecto (modelo más económico)
     if modo_actual == "mentor":
-        return "DeepSeek Reasoner"
-    # Modo gamer usa Groq Llama 3.1 8B (más rápido para gaming)
+        return "DeepSeek V4 Flash"
+    # Modo gamer usa Gemini 3.1 Flash Lite por defecto
     if modo_actual == "gamer":
-        return "Groq Llama 3.1 8B"
+        return "Gemini 3.1 Flash Lite"
     # General usa Gemini por defecto
     return "Gemini 3.1 Flash Lite"
 
@@ -52,6 +134,14 @@ class ArgusWebBridge:
         # de que la ventana PyWebView estuviera lista
         self._cola_recordatorios_pendientes: list = []
         self._suscribir_recordatorios()
+
+    def esta_hablando(self) -> bool:
+        """Devuelve si el asistente está hablando actualmente (reproduciendo TTS)."""
+        try:
+            from modulos.audio_custom import esta_hablando
+            return esta_hablando()
+        except Exception:
+            return False
 
     def _suscribir_recordatorios(self):
         try:
@@ -329,6 +419,9 @@ class ArgusWebBridge:
                     if _cfg.estado.modo_actual == "mentor":
                         from modulos.perfil_mentor import extraer_y_procesar_sesion_mentor
                         extraer_y_procesar_sesion_mentor(mensajes)
+                    elif _cfg.estado.modo_actual == "gamer":
+                        from modulos.perfil_gamer import extraer_y_procesar_sesion_gamer
+                        extraer_y_procesar_sesion_gamer(mensajes)
                     else:
                         from modulos.perfil_usuario import extraer_y_procesar_sesion
                         extraer_y_procesar_sesion(mensajes)
@@ -435,10 +528,41 @@ class ArgusWebBridge:
         try:
             cc = data['current_condition'][0]
             temp = int(cc['temp_C'])
+            sensacion = int(cc['FeelsLikeC'])
             humedad = int(cc['humidity'])
             viento = int(cc['windspeedKmph'])
+            viento_dir = cc.get('winddir16Point', 'N/A')
+            precipitacion = cc.get('precipMM', '0')
+            visibilidad = cc.get('visibility', 'N/A')
             descripcion_en = cc['weatherDesc'][0]['value']
             codigo = int(cc['weatherCode'])
+
+            # Amanecer / Atardecer del astronomy
+            astronomia = data.get('astronomy', [{}])[0] if data.get('astronomy') else {}
+            amanecer = astronomia.get('sunrise', 'N/A')
+            atardecer = astronomia.get('sunset', 'N/A')
+
+            # Pronóstico de hoy y mañana
+            pronostico_hoy = {}
+            pronostico_manana = {}
+            try:
+                weather_array = data.get('weather', [])
+                if len(weather_array) >= 1:
+                    hoy = weather_array[0]
+                    pronostico_hoy = {
+                        'temp_max': int(hoy.get('maxtempC', temp)),
+                        'temp_min': int(hoy.get('mintempC', temp)),
+                        'desc': hoy.get('hourly', [{}])[4].get('weatherDesc', [{}])[0].get('value', descripcion_en) if hoy.get('hourly') else descripcion_en
+                    }
+                if len(weather_array) >= 2:
+                    manana = weather_array[1]
+                    pronostico_manana = {
+                        'temp_max': int(manana.get('maxtempC', temp)),
+                        'temp_min': int(manana.get('mintempC', temp)),
+                        'desc': manana.get('hourly', [{}])[4].get('weatherDesc', [{}])[0].get('value', descripcion_en) if manana.get('hourly') else descripcion_en
+                    }
+            except (IndexError, ValueError, KeyError):
+                pass
         except (KeyError, IndexError, ValueError) as e:
             logger.warning(f"[Clima] Error parseando datos: {e}")
             return {'exito': False, 'error': f"Datos climáticos inválidos: {e}"}
@@ -510,16 +634,24 @@ class ArgusWebBridge:
         else:
             icono = '🌤'
 
-        logger.info(f"☁️ Clima: {temp}°C, {descripcion}, {condicion}")
+        logger.info(f"☁️ Clima: {temp}°C (sensación {sensacion}°C), {descripcion}, {condicion}")
         return {
             'exito': True,
             'temp': temp,
+            'sensacion': sensacion,
             'humedad': humedad,
             'viento': viento,
+            'viento_dir': viento_dir,
+            'precipitacion': precipitacion,
+            'visibilidad': visibilidad,
             'descripcion': descripcion,
             'condicion': condicion,
             'icono': icono,
             'ciudad': ciudad,
+            'amanecer': amanecer,
+            'atardecer': atardecer,
+            'pronostico_hoy': pronostico_hoy,
+            'pronostico_manana': pronostico_manana,
         }
 
 

@@ -343,12 +343,43 @@ def detener_voz():
         pass
     _vaciar_cola()
 
+# ─── Función helper para leer F8 vía Win32 API (funciona en juegos fullscreen) ──
+def _f8_esta_presionado() -> bool:
+    """
+    Lee el estado de la tecla F8 usando GetAsyncKeyState de Win32 API.
+    Funciona incluso cuando un juego en fullscreen captura la entrada del teclado.
+    Si no está en Windows, usa keyboard.is_pressed como fallback.
+    """
+    import sys as _sys
+    if _sys.platform == "win32":
+        try:
+            import ctypes
+            return bool(ctypes.windll.user32.GetAsyncKeyState(0x77) & 0x8000)
+        except Exception:
+            pass
+    try:
+        return keyboard.is_pressed('f8')
+    except Exception:
+        return False
+
 # =====================================================================
 # CAPTURA DE VOZ (Whisper)
 # =====================================================================
+def _beep_inicio():
+    """Emite un pitido corto (880 Hz, 200 ms) para confirmar que la captura de voz comenzó.
+    Especialmente útil en modo gamer, donde la interfaz suele estar minimizada o fuera del
+    campo visual y el usuario necesita una confirmación auditiva de que el mando L3+R3
+    disparó correctamente la detección de audio."""
+    try:
+        import winsound
+        winsound.Beep(880, 200)
+    except Exception:
+        pass  # Si falla el beep, no interrumpir la grabación
+
 def capturar_voz_micro(condicion_seguir_grabando=None):
     """
     Graba del micrófono mientras la condición de corte siga siendo True.
+    Al iniciar emite un pitido de confirmación (880 Hz, 200 ms).
     """
     global escuchando_actualmente, sd, HAY_SOUNDDEVICE
     if not HAY_SOUNDDEVICE or sd is None:
@@ -362,8 +393,11 @@ def capturar_voz_micro(condicion_seguir_grabando=None):
 
     escuchando_actualmente = True
     try:
+        # Pitido de confirmación auditiva: la captura comenzó
+        _beep_inicio()
+
         if condicion_seguir_grabando is None:
-            condicion_seguir_grabando = lambda: keyboard.is_pressed(TECLA_HABLAR)
+            condicion_seguir_grabando = _f8_esta_presionado
             print(f"\n[GRABANDO] Habla ahora... (Soltá {TECLA_HABLAR.upper()} para terminar)")
         else:
             print(f"\n[GRABANDO] Habla ahora... (Soltá el control para terminar)")

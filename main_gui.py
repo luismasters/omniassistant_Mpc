@@ -1,3 +1,18 @@
+"""
+⚠️ DEPRECADO — Esta interfaz (Tkinter/customtkinter) ya no está en desarrollo activo.
+Toda la funcionalidad ha sido migrada a la interfaz web moderna vía PyWebView.
+
+✅ USAR EN SU LUGAR:   main_web.py
+   Ejecutar con:       python main_web.py
+
+Motivos de la migración:
+- La interfaz web (PyWebView + WebView2 Chromium) tiene mejor rendimiento,
+  soporte nativo de aceleración GPU, sintaxis Markdown/HTML real, temas
+  neón dinámicos, y control completo de ventana vía Win32 API.
+- main_web.py soporta Modo Escritorio (WorkerW), Widget Flotante,
+  y control de ventana por voz (argus: mover/maximizar/minimizar/mostrar).
+"""
+
 import os
 import customtkinter as ctk
 from customtkinter import filedialog
@@ -6,8 +21,55 @@ import keyboard
 import time
 import sys
 import re
+import traceback
 import tkinter as tk
 import tkinter.font as tkfont
+
+# ─── GLOBAL UNHANDLED EXCEPTION HOOK ──────────────────────────────────
+# Captura cualquier excepción no manejada que ocurra en cualquier hilo
+# y la loguea antes de que Python termine el proceso. Sin esto, errores
+# como crashes de CUDA, conflictos de keyboard hooks, o fallos en hilos
+# daemon pueden cerrar la app sin dejar rastro.
+_original_excepthook = sys.excepthook
+def _global_excepthook(exctype, value, tb):
+    try:
+        from modulos.logger import logger
+        logger.critical(f"❌ EXCEPCIÓN NO CAPTURADA: {exctype.__name__}: {value}")
+        logger.critical("".join(traceback.format_tb(tb)))
+    except Exception:
+        pass  # Si el logger mismo falla, al menos intentar stdout
+    print(f"\n{'='*60}", file=sys.stderr)
+    print(f"❌ ERROR CRÍTICO NO CAPTURADO: {exctype.__name__}: {value}", file=sys.stderr)
+    traceback.print_exception(exctype, value, tb, file=sys.stderr)
+    print(f"{'='*60}\n", file=sys.stderr)
+    # Llamar al hook original para preservar el comportamiento estándar
+    if _original_excepthook:
+        _original_excepthook(exctype, value, tb)
+sys.excepthook = _global_excepthook
+
+# También capturar excepciones en hilos (threading.Thread)
+_threading_original_excepthook = None
+def _thread_excepthook(args):
+    try:
+        from modulos.logger import logger
+        logger.critical(f"❌ EXCEPCIÓN EN HILO: {args.exc_type.__name__}: {args.exc_value}")
+        if args.exc_traceback:
+            logger.critical("".join(traceback.format_tb(args.exc_traceback)))
+    except Exception:
+        pass
+    print(f"\n{'='*60}", file=sys.stderr)
+    print(f"❌ ERROR EN HILO: {args.exc_type.__name__}: {args.exc_value}", file=sys.stderr)
+    if args.exc_traceback:
+        traceback.print_exception(args.exc_type, args.exc_value, args.exc_traceback, file=sys.stderr)
+    print(f"{'='*60}\n", file=sys.stderr)
+    # Llamar al hook original si existía
+    if _threading_original_excepthook:
+        _threading_original_excepthook(args)
+try:
+    _threading_original_excepthook = threading.excepthook
+    threading.excepthook = _thread_excepthook
+except AttributeError:
+    pass  # Python < 3.8 no tiene threading.excepthook
 
 # Importaciones del backend
 from config import TECLA_HABLAR
@@ -414,100 +476,108 @@ class EmoBezelFace(ctk.CTkFrame):
         import math
         import random
         
-        self.canvas.delete("all")
-        self.tiempo += 0.04
-        self.tiempo_lagrima = (self.tiempo_lagrima + 0.3) % 20.0
-        
-        # Detección automática del estado "talking" basándose en el motor de audio
-        if self.estado not in ["confirm", "error", "thinking", "listening", "happy", "sad", "angry"]:
-            if audio_modulo.hablando_actualmente:
-                if self.estado != "talking":
-                    self.cambiar_estado("talking")
-            else:
-                if self.estado == "talking":
-                    self.cambiar_estado("idle")
-        
-        # Interpolaciones de escala y mirada
-        self.cur_zoom_x_izq += (self.tgt_zoom_x_izq - self.cur_zoom_x_izq) * 0.20
-        self.cur_zoom_y_izq += (self.tgt_zoom_y_izq - self.cur_zoom_y_izq) * 0.20
-        self.cur_zoom_x_der += (self.tgt_zoom_x_der - self.cur_zoom_x_der) * 0.20
-        self.cur_zoom_y_der += (self.tgt_zoom_y_der - self.cur_zoom_y_der) * 0.20
-        
-        self.cur_look_x += (self.tgt_look_x - self.cur_look_x) * 0.20
-        self.cur_look_y += (self.tgt_look_y - self.cur_look_y) * 0.20
-        
-        zx_i, zy_i = self.cur_zoom_x_izq, self.cur_zoom_y_izq
-        zx_d, zy_d = self.cur_zoom_x_der, self.cur_zoom_y_der
-        
-        # Temblores en error/guiño
-        err_x = 0; err_y = 0
-        if self.estado == "error":
-            err_x = random.randint(-1, 1)
-            err_y = random.randint(-1, 1)
-        elif self.estado == "confirm":
-            err_y = int(1.5 * math.sin(self.tiempo * 20))
-            
-        cy_i = self.izq_cy + err_y
-        cy_d = self.der_cy + err_y
-        
-        # Respiración en Idle y Acciones Inactivas
-        if self.estado == "idle":
-            resp = 1.0 + 0.02 * math.sin(self.tiempo * 2)
-            zx_i *= resp; zy_i *= resp
-            zx_d *= resp; zy_d *= resp
-            
-            if self._idle_action == "yawn":
-                zy_i *= 0.45
-                zy_d *= 0.45
-                zx_i *= 1.15
-                zx_d *= 1.15
-            elif self._idle_action == "sigh":
-                zy_i *= 0.75
-                zy_d *= 0.75
-            
-        # Animación de ojos al hablar
-        elif self.estado == "talking":
-            onda = 0.95 + 0.06 * abs(math.sin(self.tiempo * 15))
-            zy_i *= onda
-            zy_d *= onda
-            
-        # Flotación en Listening
-        elif self.estado == "listening":
-            flot = 2.0 * math.sin(self.tiempo * 3)
-            cy_i += flot
-            cy_d += flot
-
-        cx_izq = self.izq_cx + self.cur_look_x + err_x
-        cx_der = self.der_cx + self.cur_look_x + err_x
-
-        color = self.colores.get(self.estado, "#00f0ff")
-
-        # 1. Dibujar Contorno Grisáceo de EMO (Marco Plateado/Gris Estático)
-        self.dibujar_contorno_gris_emo()
-
-        # 2. Dibujar Ojos / Guiño (Wink) en Confirmación
-        self.dibujar_ojo_intellar(cx_izq, cy_i, self.base_rx * zx_i, self.base_ry * zy_i, color, izquierdo=True)
-        self.dibujar_ojo_intellar(cx_der, cy_d, self.base_rx * zx_d, self.base_ry * zy_d, color, izquierdo=False)
-        
-        # 3. Dibujar Boca
-        boca_x = self.boca_cx + self.cur_look_x * 0.7 + err_x
-        boca_y = self.boca_cy + self.cur_look_y * 0.5 + err_y
-        self.dibujar_boca_eilik(boca_x, boca_y, color)
-        
-        # 4. Si es modo CONFIRM, dibujar texto de acción truncado/limpio
-        if self.estado == "confirm":
-            msg_disp = self.msg_confirmacion
-            if len(msg_disp) > 28:
-                msg_disp = msg_disp[:25] + "..."
-            self.canvas.create_text(
-                self.ancho // 2, 106,
-                text=msg_disp.upper(),
-                font=("Consolas", 7, "bold"),
-                fill=color, justify="center"
-            )
-        
-        if self.estado == "error" and random.random() < 0.12:
+        try:
             self.canvas.delete("all")
+            self.tiempo += 0.04
+            self.tiempo_lagrima = (self.tiempo_lagrima + 0.3) % 20.0
+            
+            # Detección automática del estado "talking" basándose en el motor de audio
+            if self.estado not in ["confirm", "error", "thinking", "listening", "happy", "sad", "angry"]:
+                if audio_modulo.hablando_actualmente:
+                    if self.estado != "talking":
+                        self.cambiar_estado("talking")
+                else:
+                    if self.estado == "talking":
+                        self.cambiar_estado("idle")
+            
+            # Interpolaciones de escala y mirada
+            self.cur_zoom_x_izq += (self.tgt_zoom_x_izq - self.cur_zoom_x_izq) * 0.20
+            self.cur_zoom_y_izq += (self.tgt_zoom_y_izq - self.cur_zoom_y_izq) * 0.20
+            self.cur_zoom_x_der += (self.tgt_zoom_x_der - self.cur_zoom_x_der) * 0.20
+            self.cur_zoom_y_der += (self.tgt_zoom_y_der - self.cur_zoom_y_der) * 0.20
+            
+            self.cur_look_x += (self.tgt_look_x - self.cur_look_x) * 0.20
+            self.cur_look_y += (self.tgt_look_y - self.cur_look_y) * 0.20
+            
+            zx_i, zy_i = self.cur_zoom_x_izq, self.cur_zoom_y_izq
+            zx_d, zy_d = self.cur_zoom_x_der, self.cur_zoom_y_der
+            
+            # Temblores en error/guiño
+            err_x = 0; err_y = 0
+            if self.estado == "error":
+                err_x = random.randint(-1, 1)
+                err_y = random.randint(-1, 1)
+            elif self.estado == "confirm":
+                err_y = int(1.5 * math.sin(self.tiempo * 20))
+                
+            cy_i = self.izq_cy + err_y
+            cy_d = self.der_cy + err_y
+            
+            # Respiración en Idle y Acciones Inactivas
+            if self.estado == "idle":
+                resp = 1.0 + 0.02 * math.sin(self.tiempo * 2)
+                zx_i *= resp; zy_i *= resp
+                zx_d *= resp; zy_d *= resp
+                
+                if self._idle_action == "yawn":
+                    zy_i *= 0.45
+                    zy_d *= 0.45
+                    zx_i *= 1.15
+                    zx_d *= 1.15
+                elif self._idle_action == "sigh":
+                    zy_i *= 0.75
+                    zy_d *= 0.75
+                
+            # Animación de ojos al hablar
+            elif self.estado == "talking":
+                onda = 0.95 + 0.06 * abs(math.sin(self.tiempo * 15))
+                zy_i *= onda
+                zy_d *= onda
+                
+            # Flotación en Listening
+            elif self.estado == "listening":
+                flot = 2.0 * math.sin(self.tiempo * 3)
+                cy_i += flot
+                cy_d += flot
+
+            cx_izq = self.izq_cx + self.cur_look_x + err_x
+            cx_der = self.der_cx + self.cur_look_x + err_x
+
+            color = self.colores.get(self.estado, "#00f0ff")
+
+            # 1. Dibujar Contorno Grisáceo de EMO (Marco Plateado/Gris Estático)
+            self.dibujar_contorno_gris_emo()
+
+            # 2. Dibujar Ojos / Guiño (Wink) en Confirmación
+            self.dibujar_ojo_intellar(cx_izq, cy_i, self.base_rx * zx_i, self.base_ry * zy_i, color, izquierdo=True)
+            self.dibujar_ojo_intellar(cx_der, cy_d, self.base_rx * zx_d, self.base_ry * zy_d, color, izquierdo=False)
+            
+            # 3. Dibujar Boca
+            boca_x = self.boca_cx + self.cur_look_x * 0.7 + err_x
+            boca_y = self.boca_cy + self.cur_look_y * 0.5 + err_y
+            self.dibujar_boca_eilik(boca_x, boca_y, color)
+            
+            # 4. Si es modo CONFIRM, dibujar texto de acción truncado/limpio
+            if self.estado == "confirm":
+                msg_disp = self.msg_confirmacion
+                if len(msg_disp) > 28:
+                    msg_disp = msg_disp[:25] + "..."
+                self.canvas.create_text(
+                    self.ancho // 2, 106,
+                    text=msg_disp.upper(),
+                    font=("Consolas", 7, "bold"),
+                    fill=color, justify="center"
+                )
+            
+            if self.estado == "error" and random.random() < 0.12:
+                self.canvas.delete("all")
+        except Exception as e:
+            try:
+                from modulos.logger import logger
+                logger.exception("Error en loop_render de EmoBezelFace (se recupera en el siguiente frame)")
+            except Exception:
+                pass
+            # NO return: el after() de abajo siempre se ejecuta para mantener el loop
             
         self.after(20, self.loop_render)
 
@@ -1222,21 +1292,31 @@ class OmniApp(ctk.CTk):
                 pass
 
     def _activar_voz_desde_gamepad(self, condicion_sigue_presionado):
-        if audio_modulo.hablando_actualmente:
-            detener_voz()
-        self.after(0, lambda: self._cambiar_estado_rostro("listening"))
-        self._buffer_inicio_ia = ""
-        self._emocion_extraida = False
-        texto_voz = capturar_voz_micro(condicion_seguir_grabando=condicion_sigue_presionado)
-        self.after(0, lambda: self._cambiar_estado_rostro("thinking" if texto_voz else "idle"))
-        if texto_voz:
-            self.after(0, self._agregar_usuario, f"🎮 {texto_voz}")
-            self.burbuja_ia_actual = None
-            threading.Thread(
-                target=enviar_a_gemini,
-                args=(texto_voz, True, self.callback_ia),
-                daemon=True
-            ).start()
+        try:
+            if audio_modulo.hablando_actualmente:
+                detener_voz()
+            self.after(0, lambda: self._cambiar_estado_rostro("listening"))
+            self._buffer_inicio_ia = ""
+            self._emocion_extraida = False
+            try:
+                texto_voz = capturar_voz_micro(condicion_seguir_grabando=condicion_sigue_presionado)
+            except Exception as e:
+                from modulos.logger import logger
+                logger.exception("Error capturando voz desde gamepad")
+                texto_voz = ""
+            self.after(0, lambda: self._cambiar_estado_rostro("thinking" if texto_voz else "idle"))
+            if texto_voz:
+                self.after(0, self._agregar_usuario, f"🎮 {texto_voz}")
+                self.burbuja_ia_actual = None
+                threading.Thread(
+                    target=enviar_a_gemini,
+                    args=(texto_voz, True, self.callback_ia),
+                    daemon=True
+                ).start()
+        except Exception as e:
+            from modulos.logger import logger
+            logger.exception("Error en _activar_voz_desde_gamepad")
+            self.after(0, lambda: self._cambiar_estado_rostro("idle"))
 
     def _ciclo_extraccion_perfil(self):
         """
@@ -2109,34 +2189,69 @@ class OmniApp(ctk.CTk):
                     time.sleep(0.1)
                     continue
 
-                if audio_modulo.hablando_actualmente and keyboard.is_pressed('space'):
-                    detener_voz()
-                    while keyboard.is_pressed('space'):
-                        time.sleep(0.05)
-                    continue
+                # Verificar que el módulo keyboard funcione antes de usarlo
+                try:
+                    if audio_modulo.hablando_actualmente and keyboard.is_pressed('space'):
+                        detener_voz()
+                        while keyboard.is_pressed('space'):
+                            time.sleep(0.05)
+                        continue
+                except Exception as e:
+                    # El módulo keyboard puede fallar si hay conflictos con hooks de sistema
+                    # (antivirus, overlays de drivers, etc.). No detenemos el loop,
+                    # solo logueamos y seguimos.
+                    from modulos.logger import logger as _mic_logger
+                    _mic_logger.warning(f"keyboard.is_pressed('space') falló (se omite): {e}")
 
-                if keyboard.is_pressed(TECLA_HABLAR):
+                try:
+                    tecla_presionada = keyboard.is_pressed(TECLA_HABLAR)
+                except Exception as e:
+                    tecla_presionada = False
+                    from modulos.logger import logger as _mic_logger2
+                    _mic_logger2.warning(f"keyboard.is_pressed('{TECLA_HABLAR}') falló: {e}")
+
+                if tecla_presionada:
                     if audio_modulo.hablando_actualmente:
                         detener_voz()
-                    self.after(0, lambda: self._cambiar_estado_rostro("listening"))
+                    try:
+                        self.after(0, lambda: self._cambiar_estado_rostro("listening"))
+                    except Exception:
+                        pass
                     self._buffer_inicio_ia = ""
                     self._emocion_extraida = False
-                    texto_voz = capturar_voz_micro()
-                    self.after(0, lambda: self._cambiar_estado_rostro("thinking" if texto_voz else "idle"))
+                    try:
+                        texto_voz = capturar_voz_micro()
+                    except Exception as e:
+                        from modulos.logger import logger as _mic_logger3
+                        _mic_logger3.exception("Error capturando voz del micrófono")
+                        texto_voz = ""
+                    try:
+                        self.after(0, lambda: self._cambiar_estado_rostro("thinking" if texto_voz else "idle"))
+                    except Exception:
+                        pass
                     if texto_voz:
-                        self.after(0, self._agregar_usuario, f"🎤 {texto_voz}")
+                        try:
+                            self.after(0, self._agregar_usuario, f"🎤 {texto_voz}")
+                        except Exception:
+                            pass
                         self.burbuja_ia_actual = None
                         threading.Thread(
                             target=enviar_a_gemini,
                             args=(texto_voz, True, self.callback_ia),
                             daemon=True
                         ).start()
-                    while keyboard.is_pressed(TECLA_HABLAR):
-                        time.sleep(0.05)
+                    # Esperar que suelte la tecla
+                    try:
+                        while keyboard.is_pressed(TECLA_HABLAR):
+                            time.sleep(0.05)
+                    except Exception:
+                        pass
 
                 time.sleep(0.05)
-            except Exception:
-                pass
+            except Exception as e:
+                from modulos.logger import logger as _mic_logger4
+                _mic_logger4.exception("Error crítico en motor_microfono (se recupera automáticamente)")
+                time.sleep(0.5)  # Pausa breve para evitar loop de errores rápidos
 
     def enviar_mensaje(self):
         if self._placeholder_active:

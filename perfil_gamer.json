@@ -1,0 +1,39 @@
+{
+  "juego_activo": "Grim Dawn",
+  "juegos": {
+    "Grim Dawn": {
+      "progreso_historico": "nivel 25",
+      "ultima_sesion": "2026-07-26",
+      "contenido_poseido": "juego base, Ashes of Malmouth, Forgotten Gods",
+      "personaje_clase": "Caballero de la Muerte",
+      "nivel_actual": "6",
+      "build_elegida": "Caballero de la Muerte (Necromante + Soldado)",
+      "estilo_de_juego": "tanque, daño Aether/Físico",
+      "clase": "Caballero de la Muerte (Soldado + Nigromante)",
+      "nivel": "30",
+      "habilidad_principal": "Cadencia",
+      "nivel_habilidad_cadencia": "16/16",
+      "equipo_actual": "Sello de la Familia Skinner, Distinción del Luchador, Vendas astrales, Alabarda de hierro",
+      "equipo_alijo": "Casco de explorador",
+      "objetivo_meta": "Set de Krieg (daño de Éter)",
+      "estrategia": "Physical Blitzer hasta nivel 50",
+      "prioridad_stats": "Daño Físico, Velocidad de Ataque y Vida",
+      "atributo_constitucion": "372",
+      "dps_actual": "1418",
+      "habilidad_soldado_cadencia": "16/16",
+      "habilidad_soldado_blitz": "3/16",
+      "habilidad_soldado_menhirs_will": "1/16",
+      "maestria_soldado": "15",
+      "habilidad_nigromante_spectral_binding": "6/12",
+      "habilidad_nigromante_raise_dead": "5/10",
+      "maestria_nigromante": "15",
+      "arma_equipada": "Guadaña deteriorada punzante de la abominación",
+      "objetivo_equipo": "Set de Krieg",
+      "notas": "El usuario busca farmear el Set de Krieg al llegar a nivel 35",
+      "dificultad": "Veterano",
+      "build_tipo": "Físico/Éter",
+      "habilidades_secundarias": "Enlace espectral, Ira espectral",
+      "rama_maestria": "Nigromante"
+    }
+  }
+}

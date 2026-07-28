@@ -1,17 +1,49 @@
 {
   "stack_objetivo": {
-    "frontend": "Pendiente de definir",
-    "backend": "Pendiente de definir",
-    "bases_de_datos": "Pendiente de definir",
-    "otras_herramientas": []
+    "frontend": "React (nociones)",
+    "backend": "Python (FastAPI)",
+    "bases_de_datos": "PostgreSQL + SQLModel",
+    "otras_herramientas": [
+      "ChromaDB",
+      "LangChain",
+      "Docker",
+      "GitHub Actions",
+      "Pytest",
+      "CrewAI"
+    ]
   },
-  "tecnologias_aprendidas": [],
-  "tecnologias_en_estudio": [],
-  "proyectos_de_portafolio": [],
-  "ultimo_avance_registrado": "Ninguno",
-  "claves_de_contexto_faltantes": [
-    "¿Prefieres enfocarte en desarrollo Frontend, Backend o Fullstack?",
-    "¿Qué lenguajes o tecnologías aprendiste en la UTN FRGP y con cuáles te sentiste más cómodo?",
-    "¿Tienes en mente alguna idea de proyecto para construir como parte de tu portafolio?"
-  ]
+  "tecnologias_aprendidas": [
+    "Python",
+    "C++",
+    "C#",
+    "SQL",
+    "Java",
+    ".NET",
+    "ChromaDB",
+    "Whisper",
+    "Edge TTS",
+    "PyWebView",
+    "DeepSeek API",
+    "Gemini API",
+    "Groq API",
+    "Cline (VSC)"
+  ],
+  "tecnologias_en_estudio": [
+    "React",
+    "FastAPI",
+    "PostgreSQL",
+    "SQLModel",
+    "LangChain",
+    "CrewAI",
+    "RAG (Retrieval-Augmented Generation)",
+    "Orquestación de Agentes"
+  ],
+  "proyectos_de_portafolio": [
+    {
+      "nombre": "OmniAssistant",
+      "descripcion": "Asistente de IA multimodal para Windows con integración de modelos (Gemini, DeepSeek, Groq), memoria vectorial (ChromaDB), visión y control de sistema. Utilizado como base de conocimiento para el aprendizaje de arquitectura de agentes."
+    }
+  ],
+  "ultimo_avance_registrado": "Definición de hoja de ruta profesional centrada en un perfil híbrido (Python + React). Inicio de plan de micro-proyectos semanales enfocados en conceptos profundos de IA (RAG, Agentes, Orquestación). Se estableció la arquitectura para un sistema RAG con DeepSeek, priorizando la honestidad del modelo (no alucinar si no hay información) y la citación de fuentes.",
+  "claves_de_contexto_faltantes": []
 }

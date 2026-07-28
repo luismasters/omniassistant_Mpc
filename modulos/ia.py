@@ -312,6 +312,104 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         return
 
     # =================================================================
+    # INTERCEPTOR DE COMANDOS ARGUS (CONTROL DE VENTANA PROPIA)
+    # =================================================================
+    import re as _re_argus
+    _texto_norm = _re_argus.sub(r'[^\w\s]', ' ', texto_usuario_lower)
+    _texto_norm = _texto_norm.replace("á","a").replace("é","e").replace("í","i").replace("ó","o").replace("ú","u")
+    _words = set(_texto_norm.split())
+
+    # Palabras clave que indican una acción externa/app/web (NO mover la ventana de Argus)
+    from modulos.sistema import SITIOS_WEB_COMUNES
+    _sitios_set = set(SITIOS_WEB_COMUNES) if SITIOS_WEB_COMUNES else set()
+    _verbos_externos = {
+        "abrir", "abre", "abrimé", "abrime", "habre", "habré",
+        "navegar", "navega", "navegame", "buscar", "busca", "buscame",
+        "poner", "pone", "poné", "ponme", "reproducir", "reproduce",
+        "escuchar", "escucha", "ver", "jugar", "juega", "ejecutar", "ejecuta",
+        "lanzar", "lanza", "crear", "crea", "editar", "edita", "escanear", "escanea",
+        "recordatorio", "alarma", "timer", "cancion", "video", "musica", "pagina", "sitio",
+        "link", "url", "browser", "navegador", "discord", "chrome", "firefox", "brave",
+        "edge", "code", "spotify", "steam", "obs", "game", "calculadora", "notepad"
+    }
+    _es_accion_externa = bool(_words.intersection(_verbos_externos) or _words.intersection(_sitios_set))
+
+    # Palabras clave de visión/captura (para no interceptar "mirá la pantalla 2")
+    _verbos_vision = {"captura", "capturar", "mira", "mirar", "ves", "fijate", "que", "analiza", "analizar"}
+    _es_vision = bool(_words.intersection(_verbos_vision))
+
+    if not _es_vision and not _es_accion_externa:
+        from modulos.sistema import argus_mover_a_monitor, argus_maximizar_con_topmost, argus_minimizar, argus_traer_al_frente
+        from modulos.audio_custom import detener_voz
+        
+        _ejecutado = False
+        
+        # Detectar número de monitor
+        _nums = _re_argus.findall(r'\b([1-9])\b', _texto_norm)
+        if not _nums:
+            if "dos" in _words or "segunda" in _words or "segundo" in _words:
+                _nums = ["2"]
+            elif "uno" in _words or "primera" in _words or "primero" in _words or "principal" in _words:
+                _nums = ["1"]
+                
+        _num_mon = int(_nums[0]) if _nums else None
+
+        # 1. MOVER A MONITOR (ej: "movete a la pantalla 2", "argus pantalla 2", "pasa a la pantalla 1")
+        _verbos_mover_argus = {"movete", "muevete", "pasate", "cambiate", "trasladate"}
+        _verbos_mover_general = {"mover", "move", "pasar", "pasa", "cambiar", "cambia", "ponete", "ponte", "lleva", "llevame"}
+        
+        _es_comando_mover = False
+        if _num_mon is not None:
+            if _words.intersection(_verbos_mover_argus):
+                _es_comando_mover = True
+            elif "argus" in _words and (_words.intersection(_verbos_mover_general) or _words.intersection({"pantalla", "monitor"})):
+                _es_comando_mover = True
+            elif _texto_norm.strip() in {"pantalla 1", "pantalla 2", "monitor 1", "monitor 2", "pantalla uno", "pantalla dos", "mover 1", "mover 2"}:
+                _es_comando_mover = True
+
+        if _es_comando_mover and _num_mon is not None:
+            detener_voz()
+            argus_mover_a_monitor(None, _num_mon)
+            _ejecutado = True
+            
+        # 2. MAXIMIZAR (ej: "maximizate", "argus maximizar", "pantalla completa", "agranda")
+        elif any(w in _texto_norm for w in ["maximizar", "maximiza", "maximizate", "pantalla completa", "agrandar", "agranda", "agrandate"]):
+            detener_voz()
+            argus_maximizar_con_topmost(None)
+            _ejecutado = True
+        elif "argus" in _words and ("max" in _words or "grande" in _words):
+            detener_voz()
+            argus_maximizar_con_topmost(None)
+            _ejecutado = True
+            
+        # 3. MINIMIZAR (ej: "minimizate", "argus minimizar", "achicar", "esconder", "ocultar")
+        elif any(w in _texto_norm for w in ["minimizar", "minimiza", "minimizate", "achicar", "achica", "achicate", "esconder", "esconde", "ocultar", "oculta"]):
+            detener_voz()
+            argus_minimizar(None)
+            _ejecutado = True
+        elif "argus" in _words and ("mini" in _words or "chico" in _words):
+            detener_voz()
+            argus_minimizar(None)
+            _ejecutado = True
+            
+        # 4. MOSTRAR / AL FRENTE (ej: "muestrate", "ponte al frente", "traer al frente", "aparece")
+        elif any(w in _texto_norm for w in ["muestrate", "muestra", "mostrar", "muestrame", "al frente", "frente", "delante", "aparece", "aparecé", "veni", "vení"]):
+            detener_voz()
+            argus_traer_al_frente(None)
+            _ejecutado = True
+
+        if _ejecutado:
+            logger.info(f"🪟 Comando Argus ejecutado: {texto_usuario}")
+            msg_confirmacion = "Listo, acción ejecutada."
+            if ui_callback:
+                ui_callback("🤖 Argus", msg_confirmacion, "#00E5FF")
+            if modo_voz:
+                hablar_no_bloqueante(msg_confirmacion)
+            config.estado.agregar_mensaje_chat({'role': 'user', 'parts': [texto_usuario]})
+            config.estado.agregar_mensaje_chat({'role': 'model', 'parts': [msg_confirmacion]})
+            return  # Salir sin llamar a Gemini LLM
+
+    # =================================================================
     # INTERCEPTOR DE ADJUNTOS
     # =================================================================
     if "[adjunto:" in texto_usuario.lower():
@@ -497,7 +595,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 modelo_activo = "gemini"
                 gemini_model_str = "gemini-3.6-flash"
             elif modelo_sel == "DeepSeek Reasoner":
-                modelo_activo = "deepseek-reasoner"
+                modelo_activo = "deepseek-v4-flash"
             elif modelo_sel == "Groq Llama 3.3 70B":
                 modelo_activo = "groq:llama-3.3-70b-versatile"
             elif modelo_sel == "Groq Llama 3.1 8B":
@@ -509,7 +607,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             else:
                 # "Por Defecto" -> usa los del modo
                 if MODO_ACTUAL == "mentor":
-                    modelo_activo = "deepseek-reasoner"
+                    modelo_activo = "deepseek-v4-flash"
                 elif MODO_ACTUAL == "gamer":
                     modelo_activo = "gemini"
                     gemini_model_str = "gemini-3.1-flash-lite"
@@ -697,8 +795,13 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                 if ui_callback:
                                     ui_callback("", texto_chunk, "#E8EAED", nueva_linea=False)
                                 if modo_voz and not usaste_mcp:
-                                    buffer_voz += texto_chunk
-                                    buffer_voz = _procesar_buffer_voz(buffer_voz, forzar=False)
+                                    if "argus:" not in respuesta_ia.lower():
+                                        buffer_voz += texto_chunk
+                                        buffer_voz = _procesar_buffer_voz(buffer_voz, forzar=False)
+                                    else:
+                                        from modulos.audio_custom import detener_voz
+                                        detener_voz()
+                                        buffer_voz = ""
                         except Exception as e:
                             logger.exception("Error procesando chunk de Gemini")
                             if ui_callback:
@@ -710,7 +813,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                         ui_callback("⚙️ Sistema", f"❌ Error en el streaming: {str(e)[:80]}", "#FF4500")
                     error_ocurrido = True
                 finally:
-                    if modo_voz and buffer_voz.strip() and not usaste_mcp:
+                    if modo_voz and buffer_voz.strip() and not usaste_mcp and "argus:" not in respuesta_ia.lower():
                         _procesar_buffer_voz(buffer_voz, forzar=True)
 
                 # ─── FALLBACK POR RESPUESTA VACÍA (Safety/PII blocking) ─────

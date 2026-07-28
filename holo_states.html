@@ -1,0 +1,1089 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>J.A.R.V.I.S. — Interactive Holographic HUD</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-dark: #03070a;
+    --panel-bg: rgba(8, 18, 28, 0.75);
+    --panel-border: rgba(56, 189, 248, 0.22);
+    --panel-glow: rgba(56, 189, 248, 0.12);
+    --text-main: #f1f5f9;
+    --text-muted: #64748b;
+    --text-dim: #475569;
+    
+    --state-active: #2dd4bf;
+    --state-escuchando: #38bdf8;
+    --state-pensando: #a78bfa;
+    --state-hablando: #f472b6;
+    --state-ejecutando: #fbbf24;
+    --state-aviso: #fb923c;
+    --state-alerta: #f87171;
+    --state-gaming: #c084fc;
+
+    --current-color: #2dd4bf;
+    --font-sans: 'Outfit', -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    min-height: 100vh;
+    background-color: var(--bg-dark);
+    background-image: 
+      radial-gradient(ellipse at 50% 30%, rgba(14, 30, 44, 0.85) 0%, transparent 70%),
+      radial-gradient(ellipse at 50% 85%, rgba(4, 12, 20, 0.95) 0%, #020406 100%),
+      linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+    background-size: 100% 100%, 100% 100%, 24px 24px, 24px 24px;
+    font-family: var(--font-sans);
+    color: var(--text-main);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.25rem;
+  }
+
+  .hud-app {
+    width: 100%;
+    max-width: 440px;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    position: relative;
+    z-index: 10;
+  }
+
+  /* Header */
+  .hud-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.8rem 1.1rem;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+  }
+
+  .brand-logo {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 2px solid var(--current-color);
+    box-shadow: 0 0 10px var(--current-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+  }
+
+  .brand-logo::after {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--current-color);
+    box-shadow: 0 0 6px var(--current-color);
+  }
+
+  .brand-title {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    color: #f8fafc;
+  }
+
+  .brand-sub {
+    font-size: 9.5px;
+    color: var(--text-muted);
+    letter-spacing: 0.06em;
+  }
+
+  .status-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #10b981;
+    box-shadow: 0 0 8px #10b981;
+    animation: pulseDot 2s infinite ease-in-out;
+  }
+
+  @keyframes pulseDot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.35; transform: scale(0.85); }
+  }
+
+  /* Stage Container */
+  .stage-container {
+    position: relative;
+    width: 100%;
+    height: 310px;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 16px;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 
+      0 12px 36px -8px rgba(0, 0, 0, 0.8),
+      0 0 24px var(--panel-glow);
+    transition: border-color 0.3s ease;
+  }
+
+  /* Corner Brackets */
+  .hud-corner {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    border-color: var(--current-color);
+    opacity: 0.75;
+    transition: border-color 0.3s ease;
+    z-index: 5;
+    pointer-events: none;
+  }
+  .hud-corner.tl { top: 10px; left: 10px; border-top: 2px solid; border-left: 2px solid; }
+  .hud-corner.tr { top: 10px; right: 10px; border-top: 2px solid; border-right: 2px solid; }
+  .hud-corner.bl { bottom: 10px; left: 10px; border-bottom: 2px solid; border-left: 2px solid; }
+  .hud-corner.br { bottom: 10px; right: 10px; border-bottom: 2px solid; border-right: 2px solid; }
+
+  /* Rotating Reticle Overlay */
+  .reticle-ring {
+    position: absolute;
+    width: 240px;
+    height: 240px;
+    border-radius: 50%;
+    border: 1px dashed rgba(255, 255, 255, 0.08);
+    pointer-events: none;
+    z-index: 2;
+    animation: spinRing 45s linear infinite;
+  }
+  .reticle-ring::before {
+    content: "";
+    position: absolute;
+    inset: -6px;
+    border-radius: 50%;
+    border: 1px solid transparent;
+    border-top-color: var(--current-color);
+    border-bottom-color: var(--current-color);
+    opacity: 0.3;
+    transition: border-color 0.3s ease;
+  }
+
+  @keyframes spinRing {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+
+  /* Scanlines Overlay */
+  .scanlines {
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 0.03) 0px,
+      rgba(255, 255, 255, 0.03) 1px,
+      transparent 1px,
+      transparent 4px
+    );
+    pointer-events: none;
+    z-index: 4;
+  }
+
+  .vignette {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at center, transparent 45%, rgba(2, 6, 10, 0.8) 100%);
+    pointer-events: none;
+    z-index: 3;
+  }
+
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Telemetry Footer */
+  .stage-telemetry {
+    position: absolute;
+    bottom: 10px;
+    left: 14px;
+    right: 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-muted);
+    letter-spacing: 0.08em;
+    z-index: 5;
+    pointer-events: none;
+  }
+
+  /* Readout Card */
+  .readout-card {
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    padding: 0.9rem 1.1rem;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  }
+
+  .readout-card::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; bottom: 0;
+    width: 3px;
+    background: var(--current-color);
+    box-shadow: 0 0 10px var(--current-color);
+    transition: background 0.3s ease;
+  }
+
+  .readout-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .readout-label-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .state-code {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-muted);
+    letter-spacing: 0.08em;
+  }
+
+  .state-name {
+    font-family: var(--font-sans);
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: var(--current-color);
+    text-shadow: 0 0 10px var(--current-color);
+    transition: color 0.3s ease;
+  }
+
+  .state-freq {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: var(--text-muted);
+  }
+
+  .readout-desc {
+    font-size: 11.5px;
+    color: #94a3b8;
+    line-height: 1.45;
+  }
+
+  /* Control Grid */
+  .control-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .control-title {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding-left: 2px;
+  }
+
+  .control-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 7px;
+  }
+
+  .state-btn {
+    all: unset;
+    cursor: pointer;
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 9px;
+    padding: 8px 11px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: all 0.2s ease;
+  }
+
+  .state-btn:hover {
+    background: rgba(30, 41, 59, 0.8);
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+
+  .btn-left {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .btn-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--btn-color);
+    box-shadow: 0 0 6px var(--btn-color);
+    flex-shrink: 0;
+  }
+
+  .btn-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    color: #cbd5e1;
+  }
+
+  .btn-idx {
+    font-family: var(--font-mono);
+    font-size: 8.5px;
+    color: var(--text-dim);
+  }
+
+  .state-btn.active {
+    border-color: var(--btn-color);
+    background: rgba(255, 255, 255, 0.06);
+    box-shadow: 0 0 14px rgba(0, 0, 0, 0.4);
+  }
+
+  .state-btn.active .btn-label {
+    color: #ffffff;
+    font-weight: 700;
+  }
+</style>
+</head>
+<body>
+
+<div class="hud-app">
+  <!-- Header -->
+  <header class="hud-header">
+    <div class="brand">
+      <div class="brand-logo"></div>
+      <div>
+        <div class="brand-title">J.A.R.V.I.S.</div>
+        <div class="brand-sub">HOLOGRAPHIC HUD</div>
+      </div>
+    </div>
+    <div class="status-badge">
+      <div class="status-dot"></div>
+      <span>ONLINE</span>
+    </div>
+  </header>
+
+  <!-- Stage -->
+  <main class="stage-container" id="stageContainer">
+    <div class="hud-corner tl"></div>
+    <div class="hud-corner tr"></div>
+    <div class="hud-corner bl"></div>
+    <div class="hud-corner br"></div>
+    <div class="reticle-ring"></div>
+    <div class="scanlines"></div>
+    <div class="vignette"></div>
+
+    <canvas id="holoCanvas"></canvas>
+
+    <div class="stage-telemetry">
+      <div>FPS: <span id="fpsCount">60</span></div>
+      <div>SYNC: <span>99.8%</span></div>
+      <div id="stateHexCode">#2DD4BF</div>
+    </div>
+  </main>
+
+  <!-- Readout -->
+  <section class="readout-card">
+    <div class="readout-header">
+      <div class="readout-label-group">
+        <span class="state-code" id="stateCode">ST-01</span>
+        <span class="state-name" id="stateName">ACTIVO</span>
+      </div>
+      <span class="state-freq" id="stateFreq">120 Hz</span>
+    </div>
+    <p class="readout-desc" id="stateDesc">Sistema en reposo pasivo. Esperando comando de voz o interacción.</p>
+  </section>
+
+  <!-- Controls -->
+  <section class="control-section">
+    <div class="control-title">Selección de Estado Holográfico</div>
+    <div class="control-grid" id="controlGrid"></div>
+  </section>
+</div>
+
+<script>
+const canvas = document.getElementById('holoCanvas');
+const ctx = canvas.getContext('2d');
+const stageContainer = document.getElementById('stageContainer');
+
+let W = 380;
+let H = 310;
+let cx = W / 2;
+let cy = H / 2;
+
+// Matrix Binary Waterfall Rain Background Logic
+const BINARY_COLS = 22;
+const binaryDrops = [];
+
+function initBinaryRain() {
+  binaryDrops.length = 0;
+  const colStep = W / BINARY_COLS;
+  for (let c = 0; c < BINARY_COLS; c++) {
+    binaryDrops.push({
+      x: c * colStep + colStep / 2,
+      y: Math.random() * H,
+      speed: 1.2 + Math.random() * 1.8,
+      length: 6 + Math.floor(Math.random() * 8),
+      chars: Array.from({ length: 14 }, () => (Math.random() > 0.5 ? '1' : '0'))
+    });
+  }
+}
+
+function resizeCanvas() {
+  const rect = stageContainer.getBoundingClientRect();
+  W = Math.floor(rect.width) || 380;
+  H = Math.floor(rect.height) || 310;
+  canvas.width = W;
+  canvas.height = H;
+  cx = W / 2;
+  cy = H / 2;
+  initBinaryRain();
+}
+
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+const STATES = {
+  ACTIVO: {
+    code: 'ST-01',
+    color: '#2dd4bf',
+    freq: '120 Hz',
+    desc: 'Sistema en reposo pasivo. Núcleo cuántico en respiración y vigilancia de entorno.'
+  },
+  ESCUCHANDO: {
+    code: 'ST-02',
+    color: '#38bdf8',
+    freq: '44.1 kHz',
+    desc: 'Captura espectral activa vía Whisper. Procesando entrada de audio de micrófono.'
+  },
+  PENSANDO: {
+    code: 'ST-03',
+    color: '#a78bfa',
+    freq: '2.4 GHz',
+    desc: 'Evaluación neuronal y razonamiento lógico. Sintetizando vectores de respuesta.'
+  },
+  HABLANDO: {
+    code: 'ST-04',
+    color: '#f472b6',
+    freq: '24 kHz (VOCAL ORB)',
+    desc: 'Orbe vocal fluido tipo JARVIS. Núcleo armónico palpitante con ondas acústicas dinámicas.'
+  },
+  EJECUTANDO: {
+    code: 'ST-05',
+    color: '#fbbf24',
+    freq: '3D HYPERCUBE // 4.8 GHz',
+    desc: 'Hipercubo 3D en rotación continua con barra de carga de tarea en tiempo real e impulso cuántico.'
+  },
+  AVISO: {
+    code: 'ST-06',
+    color: '#fb923c',
+    freq: '0.8 Hz',
+    desc: 'Notificación del sistema requerida. Emitiendo señal de confirmación pasiva.'
+  },
+  ALERTA: {
+    code: 'ST-07',
+    color: '#f87171',
+    freq: 'MAX RISK',
+    desc: '¡Atención! Condición crítica o excepción detectada en el flujo de ejecución.'
+  },
+  GAMING: {
+    code: 'ST-08',
+    color: '#c084fc',
+    freq: '165 Hz (OVERCLOCK)',
+    desc: 'Modo Juego Holográfico. Silueta completa de Gamepad con Joysticks analógicos, Cruceta y Botones ABXY.'
+  }
+};
+
+let currentState = 'ACTIVO';
+let phase = 0;
+const N = 160;
+
+const COLS = 16;
+const rowsPerCol = Math.ceil(N / COLS);
+const GRID_COLS = 12;
+
+const particles = [];
+for (let i = 0; i < N; i++) {
+  const angle = Math.random() * Math.PI * 2;
+  const radius = Math.random() * 50;
+  particles.push({
+    x: cx + Math.cos(angle) * radius,
+    y: cy + Math.sin(angle) * radius,
+    tx: cx,
+    ty: cy,
+    seed: Math.random() * 10,
+    size: 1.5 + Math.random() * 2.0,
+    alpha: 0.65 + Math.random() * 0.35,
+    col: i % COLS,
+    rowInCol: Math.floor(i / COLS),
+    gx: i % GRID_COLS,
+    gy: Math.floor(i / GRID_COLS),
+    arm: i % 2
+  });
+}
+
+function hexToRgb(hex) {
+  const v = parseInt(hex.slice(1), 16);
+  return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+}
+
+function setState(name) {
+  currentState = name;
+  const s = STATES[name];
+
+  document.documentElement.style.setProperty('--current-color', s.color);
+  document.getElementById('stateCode').textContent = s.code;
+  document.getElementById('stateName').textContent = name;
+  document.getElementById('stateDesc').textContent = s.desc;
+  document.getElementById('stateFreq').textContent = s.freq;
+  document.getElementById('stateHexCode').textContent = s.color.toUpperCase();
+
+  document.querySelectorAll('.state-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.state === name);
+  });
+}
+
+// Build buttons
+const controlGrid = document.getElementById('controlGrid');
+Object.entries(STATES).forEach(([name, s]) => {
+  const btn = document.createElement('button');
+  btn.className = 'state-btn';
+  btn.dataset.state = name;
+  btn.style.setProperty('--btn-color', s.color);
+
+  btn.innerHTML = `
+    <div class="btn-left">
+      <span class="btn-dot"></span>
+      <span class="btn-label">${name}</span>
+    </div>
+    <span class="btn-idx">${s.code}</span>
+  `;
+
+  btn.onclick = () => setState(name);
+  controlGrid.appendChild(btn);
+});
+
+setState('ACTIVO');
+
+// Parametric contour for Gamepad
+function getGamepadContourPoint(t) {
+  const angle = t * Math.PI * 2;
+  const rx = 76, ry = 46;
+  let x = Math.cos(angle) * rx;
+  let y = Math.sin(angle) * ry;
+
+  if (y < -8 && Math.abs(x) < 32) {
+    y += 14 * (1 - Math.abs(x) / 32);
+  }
+  if (y > 4 && Math.abs(x) < 28) {
+    y -= 16 * (1 - Math.abs(x) / 28);
+  }
+  if (y > 2 && Math.abs(x) > 32) {
+    const gripFactor = Math.sin(((Math.abs(x) - 32) / (rx - 32)) * Math.PI);
+    y += 24 * gripFactor;
+    x += Math.sign(x) * 10 * gripFactor;
+  }
+  return { x: cx + x, y: cy + y - 2 };
+}
+
+// 3D Projection Helper for Rotating Hypercube
+function get3DCubePoint(x3d, y3d, z3d, rotY, rotX) {
+  // Y-axis rotation
+  const x1 = x3d * Math.cos(rotY) + z3d * Math.sin(rotY);
+  const z1 = -x3d * Math.sin(rotY) + z3d * Math.cos(rotY);
+
+  // X-axis rotation
+  const y2 = y3d * Math.cos(rotX) - z1 * Math.sin(rotX);
+  const z2 = y3d * Math.sin(rotX) + z1 * Math.cos(rotX);
+
+  const fov = 170;
+  const scale = fov / (fov + z2);
+
+  return {
+    x: cx + x1 * scale,
+    y: cy + y2 * scale * 0.82 + 5,
+    z: z2
+  };
+}
+
+// 12 Edges of a 3D Cube (Indices 0..7 for 8 vertices)
+const CUBE_VERTICES = [
+  [-30, -30, -30], [30, -30, -30], [30, 30, -30], [-30, 30, -30], // Back face
+  [-30, -30,  30], [30, -30,  30], [30, 30,  30], [-30, 30,  30]  // Front face
+];
+const CUBE_EDGES = [
+  [0,1],[1,2],[2,3],[3,0], // Back
+  [4,5],[5,6],[6,7],[7,4], // Front
+  [0,4],[1,5],[2,6],[3,7]  // Connecting pillars
+];
+
+function assignTargets() {
+  const barBaseY = H - 40;
+
+  particles.forEach((p, i) => {
+    const nx = i / N;
+
+    if (currentState === 'ACTIVO') {
+      const isInner = i % 3 === 0;
+      const ringRadius = isInner 
+        ? 32 + Math.sin(phase * 0.8 + p.seed) * 5
+        : 65 + Math.sin(phase * 0.4 + p.seed * 2) * 8;
+      const rot = isInner ? phase * 0.25 : -phase * 0.15;
+      const angle = nx * Math.PI * 2 + rot;
+      
+      p.tx = cx + Math.cos(angle) * ringRadius;
+      p.ty = cy + Math.sin(angle) * ringRadius * 0.82;
+
+    } else if (currentState === 'ESCUCHANDO') {
+      const colSeed = p.col * 1.25;
+      const env = Math.abs(Math.sin(phase * 3.5 + colSeed) * Math.sin(phase * 1.2 + colSeed * 0.5));
+      const maxBarH = 110;
+      const barH = 18 + env * maxBarH;
+      const spanW = W * 0.75;
+      const colX = (W - spanW) / 2 + (p.col + 0.5) * (spanW / COLS);
+      const filledRows = Math.max(1, Math.round((barH / maxBarH) * rowsPerCol));
+
+      p.tx = colX;
+      p.ty = p.rowInCol < filledRows
+        ? barBaseY - (p.rowInCol / rowsPerCol) * maxBarH
+        : barBaseY;
+
+    } else if (currentState === 'PENSANDO') {
+      const dir = p.arm === 0 ? 1 : -1;
+      const angle = nx * Math.PI * 7 * dir + phase * dir * 1.5;
+      const r = 10 + nx * 60;
+      p.tx = cx + Math.cos(angle) * r;
+      p.ty = cy + Math.sin(angle) * r * 0.75;
+
+    } else if (currentState === 'HABLANDO') {
+      const ringIdx = i % 4;
+      const angle = nx * Math.PI * 2 + phase * (ringIdx % 2 === 0 ? 1.5 : -1.2);
+      const voiceAmp = Math.pow(Math.abs(Math.sin(phase * 3.8 + p.seed * 0.2)), 2.2) * 32;
+      
+      let baseR = 18;
+      if (ringIdx === 1) baseR = 36;
+      else if (ringIdx === 2) baseR = 54;
+      else if (ringIdx === 3) baseR = 72;
+
+      const r = baseR + (ringIdx === 0 ? voiceAmp * 0.4 : voiceAmp * (ringIdx / 3));
+      p.tx = cx + Math.cos(angle) * r;
+      p.ty = cy + Math.sin(angle) * r * 0.78;
+
+    } else if (currentState === 'EJECUTANDO') {
+      // NUEVO NÚCLEO CENTRAL EJECUTANDO: HIPERCUBO 3D GIRATORIO CON RUPTURA CUÁNTICA
+      if (i < 96) {
+        // 1. PARTÍCULAS DISTRIBUIDAS EN LAS 12 ARISTAS DEL CUBO 3D (Wireframe Cube)
+        const edgeIdx = Math.floor(i / 8) % 12;
+        const edgeT = (i % 8) / 8;
+        const edge = CUBE_EDGES[edgeIdx];
+        
+        const v1 = CUBE_VERTICES[edge[0]];
+        const v2 = CUBE_VERTICES[edge[1]];
+
+        const x3d = v1[0] + (v2[0] - v1[0]) * edgeT;
+        const y3d = v1[1] + (v2[1] - v1[1]) * edgeT;
+        const z3d = v1[2] + (v2[2] - v1[2]) * edgeT;
+
+        const pt3d = get3DCubePoint(x3d, y3d, z3d, phase * 1.6, phase * 1.1);
+        p.tx = pt3d.x;
+        p.ty = pt3d.y;
+
+      } else if (i < 130) {
+        // 2. ANILLO DE DIANA CONCÉNTRICO ALREDEDOR DEL CUBO 3D
+        const a = ((i - 96) / 34) * Math.PI * 2 - phase * 2.2;
+        const r = 68 + Math.sin(phase * 3 + p.seed) * 4;
+        p.tx = cx + Math.cos(a) * r;
+        p.ty = cy + Math.sin(a) * r * 0.82 + 5;
+
+      } else {
+        // 3. EMISIÓN RADIAL DE IMPULSOS DE TAREA DE EJECUCIÓN
+        const a = (i / 30) * Math.PI * 2;
+        const pulseDist = ((phase * 2.5 + (i % 5) * 0.2) % 1) * 75;
+        p.tx = cx + Math.cos(a) * pulseDist;
+        p.ty = cy + Math.sin(a) * pulseDist * 0.82 + 5;
+      }
+
+    } else if (currentState === 'AVISO') {
+      const angle = nx * Math.PI * 2;
+      const r = 45 + Math.sin(phase * 0.9 + p.seed) * 5;
+      p.tx = cx + Math.cos(angle) * r;
+      p.ty = cy + Math.sin(angle) * r * 0.82;
+
+    } else if (currentState === 'ALERTA') {
+      const angle = nx * Math.PI * 2 + phase * 3;
+      const r = 70 + Math.sin(phase * 11 + p.seed * 3) * 20;
+      p.tx = cx + Math.cos(angle) * r;
+      p.ty = cy + Math.sin(angle) * r;
+
+    } else if (currentState === 'GAMING') {
+      if (i < 65) {
+        const pt = getGamepadContourPoint(i / 65);
+        p.tx = pt.x;
+        p.ty = pt.y;
+      } else if (i < 85) {
+        const idx = i - 65;
+        const arm = Math.floor(idx / 5);
+        const step = (idx % 5) * 4;
+        const dpadCx = cx - 44, dpadCy = cy - 8;
+        if (arm === 0) { p.tx = dpadCx; p.ty = dpadCy - 4 - step; }
+        else if (arm === 1) { p.tx = dpadCx + 4 + step; p.ty = dpadCy; }
+        else if (arm === 2) { p.tx = dpadCx; p.ty = dpadCy + 4 + step; }
+        else { p.tx = dpadCx - 4 - step; p.ty = dpadCy; }
+      } else if (i < 105) {
+        const idx = i - 85;
+        const btnIdx = Math.floor(idx / 5);
+        const subAngle = (idx % 5) / 5 * Math.PI * 2 + phase * 2;
+        const btnCx = cx + 44, btnCy = cy - 8;
+        let ox = 0, oy = 0;
+        if (btnIdx === 0) { ox = 0; oy = -14; }
+        else if (btnIdx === 1) { ox = 14; oy = 0; }
+        else if (btnIdx === 2) { ox = 0; oy = 14; }
+        else { ox = -14; oy = 0; }
+        p.tx = btnCx + ox + Math.cos(subAngle) * 4;
+        p.ty = btnCy + oy + Math.sin(subAngle) * 4;
+      } else if (i < 125) {
+        const a = ((i - 105) / 20) * Math.PI * 2 + phase * 1.5;
+        p.tx = (cx - 22) + Math.cos(a) * 10;
+        p.ty = (cy + 12) + Math.sin(a) * 10;
+      } else if (i < 145) {
+        const a = ((i - 125) / 20) * Math.PI * 2 - phase * 1.5;
+        p.tx = (cx + 22) + Math.cos(a) * 10;
+        p.ty = (cy + 12) + Math.sin(a) * 10;
+      } else {
+        const a = (i / 15) * Math.PI * 2 + phase * 2;
+        p.tx = cx + Math.cos(a) * 7;
+        p.ty = (cy - 10) + Math.sin(a) * 7;
+      }
+    }
+  });
+}
+
+// Draw Binary Matrix Rain Background Stream
+function drawBinaryWaterfall(red, green, blue) {
+  ctx.font = '9.5px "JetBrains Mono", monospace';
+  ctx.textAlign = 'center';
+
+  binaryDrops.forEach(drop => {
+    drop.y += drop.speed;
+    if (drop.y - drop.length * 11 > H) {
+      drop.y = -10;
+      drop.speed = 1.2 + Math.random() * 1.8;
+      for (let k = 0; k < drop.chars.length; k++) {
+        if (Math.random() < 0.35) drop.chars[k] = Math.random() > 0.5 ? '1' : '0';
+      }
+    }
+
+    for (let j = 0; j < drop.length; j++) {
+      const charY = drop.y - j * 11;
+      if (charY < 0 || charY > H) continue;
+
+      const isHead = (j === 0);
+      const alpha = isHead ? 0.32 : 0.16 * (1 - j / drop.length);
+      ctx.fillStyle = `rgba(${red},${green},${blue},${alpha})`;
+      ctx.fillText(drop.chars[j], drop.x, charY);
+    }
+  });
+}
+
+function drawExtras(rgb) {
+  const [red, green, blue] = rgb;
+
+  if (currentState === 'PENSANDO') {
+    ctx.lineWidth = 0.6;
+    for (let i = 0; i < N - 1; i++) {
+      const p1 = particles[i], p2 = particles[i + 1];
+      if (p1.arm !== p2.arm) continue;
+      const dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+      if (dist < 34) {
+        ctx.strokeStyle = `rgba(${red},${green},${blue},${0.35 * (1 - dist / 34)})`;
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+      }
+    }
+  }
+
+  if (currentState === 'HABLANDO') {
+    for (let k = 1; k <= 4; k++) {
+      const radiusBase = k * 18;
+      const wavePulse = Math.pow(Math.abs(Math.sin(phase * 3.8)), 2) * 6;
+      ctx.lineWidth = 1.1;
+      ctx.strokeStyle = `rgba(${red},${green},${blue},${0.35 - k * 0.06})`;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, radiusBase + wavePulse, (radiusBase + wavePulse) * 0.78, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    ctx.lineWidth = 1.4;
+    ctx.strokeStyle = `rgba(${red},${green},${blue},0.55)`;
+    ctx.beginPath();
+    const halfW = 90;
+    for (let x = -halfW; x <= halfW; x += 3) {
+      const normX = x / halfW;
+      const envelope = Math.cos(normX * Math.PI * 0.5);
+      const waveY = cy + Math.sin(x * 0.14 + phase * 7) * Math.sin(x * 0.04 - phase * 3) * 16 * envelope;
+      if (x === -halfW) ctx.moveTo(cx + x, waveY);
+      else ctx.lineTo(cx + x, waveY);
+    }
+    ctx.stroke();
+
+    ctx.fillStyle = `rgba(${red},${green},${blue},0.15)`;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 22, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (currentState === 'EJECUTANDO') {
+    // 1. BARRA DE CARGA DE PROGRESO DE TAREA SUPERIOR (LA QUE TE GUSTÓ)
+    const progWidth = 140;
+    const progX = cx - progWidth / 2;
+    const progY = cy - 75;
+    ctx.lineWidth = 1.0;
+    ctx.strokeStyle = `rgba(${red},${green},${blue},0.5)`;
+    ctx.strokeRect(progX, progY, progWidth, 6);
+
+    const fillVal = ((phase * 0.4) % 1);
+    ctx.fillStyle = `rgba(${red},${green},${blue},0.85)`;
+    ctx.fillRect(progX + 1, progY + 1, (progWidth - 2) * fillVal, 4);
+
+    ctx.font = '9px "JetBrains Mono", monospace';
+    ctx.fillStyle = `rgba(${red},${green},${blue},0.95)`;
+    ctx.fillText('CPU // EXECUTING_TASK', cx - 55, cy - 85);
+
+    // 2. NUEVO DISEÑO CENTRAL: TRAZADO VECTORIAL DE HIPERCUBO 3D GIRATORIO
+    const pts3d = CUBE_VERTICES.map(v => get3DCubePoint(v[0], v[1], v[2], phase * 1.6, phase * 1.1));
+
+    ctx.lineWidth = 1.3;
+    ctx.strokeStyle = `rgba(${red},${green},${blue},0.6)`;
+    CUBE_EDGES.forEach(edge => {
+      const p1 = pts3d[edge[0]];
+      const p2 = pts3d[edge[1]];
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+    });
+
+    // 3. ANILLO DE DIANA FLOTANTE ALREDEDOR DEL HIPERCUBO
+    ctx.lineWidth = 0.9;
+    ctx.strokeStyle = `rgba(${red},${green},${blue},0.35)`;
+    ctx.beginPath();
+    ctx.arc(cx, cy + 5, 68, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Marcas de retícula en 4 esquinas de la diana
+    const markR = 68;
+    for (let m = 0; m < 4; m++) {
+      const a = (m * Math.PI) / 2 + phase * 0.5;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * (markR - 6), cy + Math.sin(a) * (markR - 6) * 0.82 + 5);
+      ctx.lineTo(cx + Math.cos(a) * (markR + 6), cy + Math.sin(a) * (markR + 6) * 0.82 + 5);
+      ctx.stroke();
+    }
+  }
+
+  if (currentState === 'AVISO') {
+    const t = (phase * 0.4) % 1;
+    ctx.strokeStyle = `rgba(${red},${green},${blue},${0.45 * (1 - t)})`;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 12 + t * 65, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  if (currentState === 'ALERTA') {
+    for (let k = 0; k < 3; k++) {
+      const t = ((phase * 2.0 + k * 0.33) % 1);
+      ctx.strokeStyle = `rgba(${red},${green},${blue},${0.5 * (1 - t)})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 10 + t * 85, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  if (currentState === 'GAMING') {
+    ctx.lineWidth = 1.4;
+    ctx.strokeStyle = `rgba(${red},${green},${blue},0.65)`;
+    ctx.beginPath();
+    const totalSteps = 100;
+    for (let s = 0; s <= totalSteps; s++) {
+      const pt = getGamepadContourPoint(s / totalSteps);
+      if (s === 0) ctx.moveTo(pt.x, pt.y);
+      else ctx.lineTo(pt.x, pt.y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+
+    ctx.fillStyle = `rgba(${red},${green},${blue},0.06)`;
+    ctx.fill();
+
+    const dpadCx = cx - 44, dpadCy = cy - 8;
+    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = `rgba(${red},${green},${blue},0.55)`;
+    ctx.beginPath();
+    ctx.moveTo(dpadCx - 14, dpadCy); ctx.lineTo(dpadCx + 14, dpadCy);
+    ctx.moveTo(dpadCx, dpadCy - 14); ctx.lineTo(dpadCx, dpadCy + 14);
+    ctx.stroke();
+
+    const btnCx = cx + 44, btnCy = cy - 8;
+    const offsets = [[0,-14], [14,0], [0,14], [-14,0]];
+    ctx.lineWidth = 1.0;
+    ctx.strokeStyle = `rgba(${red},${green},${blue},0.7)`;
+    offsets.forEach(([ox, oy]) => {
+      ctx.beginPath();
+      ctx.arc(btnCx + ox, btnCy + oy, 4.5, 0, Math.PI * 2);
+      ctx.stroke();
+    });
+
+    ctx.lineWidth = 1.1;
+    ctx.strokeStyle = `rgba(${red},${green},${blue},0.5)`;
+    const jL = { x: cx - 22, y: cy + 12 };
+    ctx.beginPath(); ctx.arc(jL.x, jL.y, 10, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(jL.x + Math.cos(phase * 3) * 2, jL.y + Math.sin(phase * 3) * 2, 3, 0, Math.PI * 2); ctx.stroke();
+
+    const jR = { x: cx + 22, y: cy + 12 };
+    ctx.beginPath(); ctx.arc(jR.x, jR.y, 10, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(jR.x - Math.cos(phase * 3) * 2, jR.y - Math.sin(phase * 3) * 2, 3, 0, Math.PI * 2); ctx.stroke();
+
+    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = `rgba(${red},${green},${blue},0.8)`;
+    ctx.beginPath();
+    ctx.arc(cx, cy - 10, 7, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.lineWidth = 1.4;
+    ctx.strokeStyle = `rgba(${red},${green},${blue},0.6)`;
+    ctx.beginPath();
+    ctx.arc(cx - 48, cy - 30, 16, Math.PI * 1.1, Math.PI * 1.6);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx + 48, cy - 30, 16, Math.PI * 1.4, Math.PI * 1.9);
+    ctx.stroke();
+  }
+}
+
+// FPS counter
+let lastTime = performance.now();
+let frameCount = 0;
+
+function render() {
+  phase += 0.022;
+  frameCount++;
+
+  const now = performance.now();
+  if (now - lastTime >= 1000) {
+    document.getElementById('fpsCount').textContent = frameCount;
+    frameCount = 0;
+    lastTime = now;
+  }
+
+  // Clear frame with soft trail effect
+  ctx.fillStyle = 'rgba(3, 7, 10, 0.35)';
+  ctx.fillRect(0, 0, W, H);
+
+  assignTargets();
+
+  const s = STATES[currentState];
+  const rgb = hexToRgb(s.color);
+  const [red, green, blue] = rgb;
+
+  // 1. Draw Binary Waterfall Rain in Background
+  drawBinaryWaterfall(red, green, blue);
+
+  const ease = currentState === 'ALERTA' ? 0.22
+             : currentState === 'GAMING' ? 0.18
+             : currentState === 'EJECUTANDO' ? 0.18
+             : currentState === 'HABLANDO' ? 0.18
+             : 0.08;
+
+  // 2. Draw Background HUD Extra FX
+  drawExtras(rgb);
+
+  // 3. Render Particles
+  particles.forEach(p => {
+    p.x += (p.tx - p.x) * ease;
+    p.y += (p.ty - p.y) * ease;
+
+    const jitter = (currentState === 'ALERTA')
+      ? (Math.random() - 0.5) * 2.2
+      : (currentState === 'EJECUTANDO') ? (Math.random() - 0.5) * 1.2
+      : (currentState === 'GAMING') ? (Math.random() - 0.5) * 0.6 : 0;
+
+    ctx.beginPath();
+    ctx.arc(p.x + jitter, p.y + jitter, p.size, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${red},${green},${blue}, ${p.alpha})`;
+
+    ctx.shadowColor = s.color;
+    ctx.shadowBlur = (currentState === 'ALERTA' || currentState === 'GAMING' || currentState === 'HABLANDO' || currentState === 'EJECUTANDO') ? 10 : 5;
+    ctx.fill();
+  });
+
+  ctx.shadowBlur = 0;
+
+  requestAnimationFrame(render);
+}
+
+render();
+</script>
+</body>
+</html>

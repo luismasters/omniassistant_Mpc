@@ -339,7 +339,7 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
             cmd_limpia = re.sub(r'^(\-\s|\d+\.\s)', '', cmd_limpia)
 
             # Asegurar alineación directa al verbo si existe prefijo conversacional
-            verbos_clave = ["abrir:", "navegar:", "cerrar:", "mover:", "explorar:", "audio:", "recordatorio:", "leer_archivo:", "editar_archivo:", "guardar_archivo:", "reemplazar_bloque:", "crear_carpeta:", "buscar:", "guardar_en_boveda:", "escanear_proyecto:", "github:", "capturar:"]
+            verbos_clave = ["abrir:", "navegar:", "cerrar:", "mover:", "explorar:", "audio:", "recordatorio:", "leer_archivo:", "editar_archivo:", "guardar_archivo:", "reemplazar_bloque:", "crear_carpeta:", "buscar:", "guardar_en_boveda:", "escanear_proyecto:", "github:", "capturar:", "argus:"]
             for v_prefix in verbos_clave:
                 pos_v = cmd_limpia.find(v_prefix)
                 if pos_v > 0:
@@ -622,6 +622,31 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                     logger.exception("Error en captura de pantalla desde comando")
                     if ui_callback:
                         ui_callback("⚙️ Sistema", f"❌ Error capturando pantalla: {str(e)[:80]}", "#FF4500")
+                continue
+
+            # ARGUS WINDOW CONTROL (auto-control de la propia ventana)
+            if cmd_limpia.startswith("argus:"):
+                resto = cmd[cmd.lower().find("argus:") + 6:].strip().lower()
+                from modulos.sistema import argus_mover_a_monitor, argus_maximizar_con_topmost, argus_minimizar, argus_traer_al_frente
+                from modulos.audio_custom import detener_voz, hablar_no_bloqueante
+                detener_voz()
+                
+                if resto.startswith("mover") or resto.startswith("move"):
+                    num_str = "".join(filter(str.isdigit, resto))
+                    num_mon = int(num_str) if num_str else 1
+                    argus_mover_a_monitor(None, num_mon)
+                elif resto.startswith("maximizar") or resto.startswith("maximiza") or "max" in resto:
+                    argus_maximizar_con_topmost(None)
+                elif resto.startswith("minimizar") or resto.startswith("minimiza") or "mini" in resto:
+                    argus_minimizar(None)
+                elif resto.startswith("mostrar") or resto.startswith("muestra") or "frente" in resto or "al frente" in resto:
+                    argus_traer_al_frente(None)
+
+                msg_confirmacion = "Listo, acción ejecutada."
+                if ui_callback:
+                    ui_callback("🤖 Argus", msg_confirmacion, "#00E5FF")
+                if modo_voz:
+                    hablar_no_bloqueante(msg_confirmacion)
                 continue
 
             # CREAR CARPETA
