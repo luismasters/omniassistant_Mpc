@@ -763,6 +763,43 @@ body.theme-mentor .ai-row .msg-avatar {
   color: #c9d1d9;
 }
 
+/* ─── DIAGRAMAS MERMAID ──────────────────────────────────────────────── */
+.mermaid-container {
+  margin: 14px 0;
+  padding: 16px;
+  background: #0d1117;
+  border: 1px solid var(--border-code);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  display: flex;
+  justify-content: center;
+  min-height: 80px;
+}
+
+.mermaid-container svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.mermaid-error {
+  color: #ff6b6b;
+  font-family: var(--font-main);
+  font-size: 13px;
+  padding: 12px;
+  text-align: center;
+  background: rgba(255, 0, 51, 0.08);
+  border-radius: var(--radius-sm);
+  border: 1px dashed rgba(255, 0, 51, 0.3);
+}
+
+body.theme-mentor .mermaid-container {
+  border-color: rgba(0, 255, 157, 0.2);
+}
+
+body.theme-gamer .mermaid-container {
+  border-color: rgba(255, 0, 85, 0.2);
+}
+
 /* ─── CODE BLOCKS (Gemini / ChatGPT Style) ───────────────────────────── */
 .code-block-wrapper {
   margin: 14px 0;

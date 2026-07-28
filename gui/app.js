@@ -83,6 +83,9 @@ document.addEventListener('DOMContentLoaded', () => {
   setTimeout(checkBridgeReady, 100);
   setTimeout(checkBridgeReady, 500);
 
+  // Inicializar Mermaid.js para diagramas
+  initMermaid();
+
   // Mensaje de bienvenida inicial
   agregarMensajeSistema('¡Hola, Luis! Soy <strong>Argus</strong> — tu asistente IA. Presiona <strong>F8</strong> o <strong>L3+R3</strong> en tu mando para hablar.');
 
@@ -798,6 +801,70 @@ document.addEventListener('DOMContentLoaded', () => {
     return new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
   }
 
+  // ─── MERMAID (DIAGRAMAS) ─────────────────────────────────────────────
+  let mermaidInitialized = false;
+
+  function initMermaid() {
+    if (mermaidInitialized || typeof mermaid === 'undefined') return;
+    try {
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: 'dark',
+        themeVariables: {
+          primaryColor: '#0d1117',
+          primaryTextColor: '#e8eaf0',
+          primaryBorderColor: '#303648',
+          lineColor: '#00f3ff',
+          secondaryColor: '#161b25',
+          tertiaryColor: '#111318',
+          fontFamily: 'Inter, system-ui, sans-serif',
+          fontSize: '14px',
+          edgeLabelBackground: '#1e1f20',
+          nodeBorder: '#303648',
+          clusterBkg: '#0d1117',
+          clusterBorder: '#303648',
+        },
+        flowchart: { useMaxWidth: true, htmlLabels: true, curve: 'basis' },
+        sequence: { useMaxWidth: true },
+        gantt: { useMaxWidth: true },
+      });
+      mermaidInitialized = true;
+    } catch (e) {
+      console.warn('Error inicializando Mermaid:', e);
+    }
+  }
+
+  function renderMermaidDiagrams(containerEl) {
+    if (typeof mermaid === 'undefined' || !mermaidInitialized) return;
+    // Buscar todos los bloques <pre><code class="language-mermaid"> dentro del contenedor
+    containerEl.querySelectorAll('pre code.language-mermaid').forEach(codeEl => {
+      const preEl = codeEl.parentElement;
+      if (!preEl) return;
+      const diagramText = codeEl.textContent.trim();
+      if (!diagramText) return;
+
+      // Reemplazar el bloque entero con un div contenedor para Mermaid
+      const mermaidDiv = document.createElement('div');
+      mermaidDiv.className = 'mermaid-container';
+      mermaidDiv.textContent = diagramText; // Mermaid lee el textContent como definición
+
+      preEl.parentNode.replaceChild(mermaidDiv, preEl);
+    });
+
+    // Si hay nuevos divs .mermaid-container, renderizarlos
+    const diagramDivs = containerEl.querySelectorAll('.mermaid-container');
+    if (diagramDivs.length > 0) {
+      try {
+        mermaid.run({ nodes: diagramDivs });
+      } catch (e) {
+        console.warn('Error renderizando diagrama Mermaid:', e);
+        diagramDivs.forEach(div => {
+          div.innerHTML = `<div class="mermaid-error">⚠️ No se pudo renderizar el diagrama. Verificá la sintaxis.</div>`;
+        });
+      }
+    }
+  }
+
   // ─── RENDER MARKDOWN CON DOM POST-PROCESSING ──────────────────────────
   function renderMarkdown(mdText) {
     if (!mdText) return '';
@@ -823,7 +890,11 @@ document.addEventListener('DOMContentLoaded', () => {
     container.innerHTML = rawHtml;
 
     // Procesar bloques de código para agregar header con botón de copiado de forma limpia
+    // (excluir bloques mermaid, ya que se renderizan como diagramas)
     container.querySelectorAll('pre code').forEach(codeEl => {
+      // Saltar bloques de Mermaid (se procesan aparte como diagramas)
+      if (Array.from(codeEl.classList).some(c => c.startsWith('language-mermaid'))) return;
+
       const preEl = codeEl.parentElement;
       if (preEl && preEl.tagName.toLowerCase() === 'pre') {
         const langClass = Array.from(codeEl.classList).find(c => c.startsWith('language-')) || '';
@@ -853,6 +924,9 @@ document.addEventListener('DOMContentLoaded', () => {
         wrapper.appendChild(preEl);
       }
     });
+
+    // Renderizar diagramas Mermaid
+    renderMermaidDiagrams(container);
 
     return container.innerHTML;
   }
