@@ -83,8 +83,19 @@ document.addEventListener('DOMContentLoaded', () => {
   setTimeout(checkBridgeReady, 100);
   setTimeout(checkBridgeReady, 500);
 
-  // Inicializar Mermaid.js para diagramas
-  initMermaid();
+  // Cargar Mermaid.js dinámicamente (no bloquea el render de la UI)
+  function cargarMermaidCDN() {
+    if (typeof mermaid !== 'undefined' || document.querySelector('script[src*="mermaid"]')) {
+      initMermaid();
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js';
+    script.onload = initMermaid;
+    script.onerror = () => console.warn('⚠️ Mermaid CDN no disponible — diagramas no se renderizarán');
+    document.body.appendChild(script);
+  }
+  cargarMermaidCDN();
 
   // Mensaje de bienvenida inicial
   agregarMensajeSistema('¡Hola, Luis! Soy <strong>Argus</strong> — tu asistente IA. Presiona <strong>F8</strong> o <strong>L3+R3</strong> en tu mando para hablar.');
@@ -803,9 +814,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ─── MERMAID (DIAGRAMAS) ─────────────────────────────────────────────
   let mermaidInitialized = false;
+  let mermaidRetryTimer = null;
 
   function initMermaid() {
-    if (mermaidInitialized || typeof mermaid === 'undefined') return;
+    if (mermaidInitialized) return;
+    if (typeof mermaid === 'undefined') {
+      // Mermaid CDN aún no cargó — reintentar en 1 segundo
+      if (!mermaidRetryTimer) {
+        mermaidRetryTimer = setTimeout(initMermaid, 1000);
+      }
+      return;
+    }
+    mermaidRetryTimer = null;
     try {
       mermaid.initialize({
         startOnLoad: false,
@@ -829,39 +849,61 @@ document.addEventListener('DOMContentLoaded', () => {
         gantt: { useMaxWidth: true },
       });
       mermaidInitialized = true;
+      // Renderizar diagramas pendientes que ya estén en el DOM
+      renderPendingMermaidDiagrams();
     } catch (e) {
       console.warn('Error inicializando Mermaid:', e);
     }
   }
 
+  // Cola de diagramas pendientes por renderizar (acumulados antes de que Mermaid esté listo)
+  let pendingMermaidNodes = [];
+
   function renderMermaidDiagrams(containerEl) {
-    if (typeof mermaid === 'undefined' || !mermaidInitialized) return;
-    // Buscar todos los bloques <pre><code class="language-mermaid"> dentro del contenedor
+    // Convertir <pre><code class="language-mermaid"> a <div class="mermaid-container">
     containerEl.querySelectorAll('pre code.language-mermaid').forEach(codeEl => {
       const preEl = codeEl.parentElement;
       if (!preEl) return;
       const diagramText = codeEl.textContent.trim();
       if (!diagramText) return;
 
-      // Reemplazar el bloque entero con un div contenedor para Mermaid
       const mermaidDiv = document.createElement('div');
       mermaidDiv.className = 'mermaid-container';
-      mermaidDiv.textContent = diagramText; // Mermaid lee el textContent como definición
-
+      mermaidDiv.textContent = diagramText;
       preEl.parentNode.replaceChild(mermaidDiv, preEl);
     });
 
-    // Si hay nuevos divs .mermaid-container, renderizarlos
     const diagramDivs = containerEl.querySelectorAll('.mermaid-container');
-    if (diagramDivs.length > 0) {
-      try {
-        mermaid.run({ nodes: diagramDivs });
-      } catch (e) {
-        console.warn('Error renderizando diagrama Mermaid:', e);
-        diagramDivs.forEach(div => {
-          div.innerHTML = `<div class="mermaid-error">⚠️ No se pudo renderizar el diagrama. Verificá la sintaxis.</div>`;
-        });
-      }
+    if (diagramDivs.length === 0) return;
+
+    if (!mermaidInitialized || typeof mermaid === 'undefined') {
+      // Mermaid no está listo — encolar para después
+      diagramDivs.forEach(div => pendingMermaidNodes.push(div));
+      return;
+    }
+
+    // Mermaid está listo — renderizar ahora
+    try {
+      mermaid.run({ nodes: diagramDivs });
+    } catch (e) {
+      console.warn('Error renderizando diagrama Mermaid:', e);
+      diagramDivs.forEach(div => {
+        div.innerHTML = `<div class="mermaid-error">⚠️ No se pudo renderizar el diagrama. Verificá la sintaxis.</div>`;
+      });
+    }
+  }
+
+  function renderPendingMermaidDiagrams() {
+    if (!mermaidInitialized || typeof mermaid === 'undefined' || pendingMermaidNodes.length === 0) return;
+    const nodes = pendingMermaidNodes.slice();
+    pendingMermaidNodes = [];
+    try {
+      mermaid.run({ nodes });
+    } catch (e) {
+      console.warn('Error renderizando diagramas Mermaid pendientes:', e);
+      nodes.forEach(div => {
+        div.innerHTML = `<div class="mermaid-error">⚠️ Error al renderizar diagrama.</div>`;
+      });
     }
   }
 
