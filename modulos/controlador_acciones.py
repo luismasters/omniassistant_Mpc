@@ -590,18 +590,27 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                 continue
 
             # CAPTURAR PANTALLA
-            triggers_captura = ["capturar:", "mira la pantalla", "qué ves", "fijate"]
-            # "compara estos objetos" solo en modo gamer
+            # Solo se activa si el comando empieza con "capturar:" EXPLÍCITAMENTE.
+            # Las palabras sueltas como "fijate", "qué ves", "mirá" SOLO activan captura
+            # si la línea es corta (≤5 palabras) — así se evitan falsos positivos cuando
+            # la IA las usa dentro de explicaciones largas.
+            triggers_exactos = ["capturar:"]
+            triggers_largas = ["mira la pantalla", "qué ves", "fijate", "captura", "capturá"]
             if MODO_ACTUAL == "gamer":
-                triggers_captura.append("compara estos objetos")
-            # También "captura" suelto pero evitar falsos con "capturar:"
-            if "captura" in cmd_limpia and "capturar:" not in cmd_limpia:
-                # Asegurar que no sea parte de otra palabra
-                palabras = cmd_limpia.split()
-                if any(p in ("captura", "capturá") for p in palabras):
-                    cmd_limpia = "capturar: " + cmd_limpia
+                triggers_largas.append("compara estos objetos")
+            
+            es_captura_exacta = any(cmd_limpia.startswith(t) for t in triggers_exactos)
+            
+            # Detección de palabras sueltas: solo si la línea es corta (comando de voz directo)
+            es_captura_por_palabra = False
+            palabras_cmd = cmd_limpia.split()
+            if len(palabras_cmd) <= 5:
+                if any(p in ("captura", "capturá") for p in palabras_cmd):
+                    es_captura_por_palabra = True
+                elif any(t in cmd_limpia for t in triggers_largas):
+                    es_captura_por_palabra = True
 
-            if any(t in cmd_limpia for t in triggers_captura):
+            if es_captura_exacta or es_captura_por_palabra:
                 try:
                     from modulos.vision import capturar_pantalla
                     # Extraer número si se especificó "pantalla 2", "monitor 2", etc.

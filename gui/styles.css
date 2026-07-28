@@ -781,6 +781,30 @@ body.theme-mentor .ai-row .msg-avatar {
   height: auto;
 }
 
+/* Forzar texto blanco en todos los textos de los SVG de Mermaid para contraste con fondo oscuro */
+.mermaid-container svg text,
+.mermaid-container svg tspan,
+.mermaid-container svg .label text,
+.mermaid-container svg .nodeLabel,
+.mermaid-container svg .edgeLabel,
+.mermaid-container svg .title-text {
+  fill: #e8eaf0 !important;
+  stroke: none !important;
+}
+
+/* Si el modelo usa fill explícito claro en rectángulos de nodos (ej. fill:#e1f5fe),
+   el texto podría seguir siendo blanco y no verse. Este CSS fuerza opacidad de fondo
+   para que cualquier nodo tenga un fondo semi-oscuro */
+.mermaid-container svg .node rect,
+.mermaid-container svg .node circle,
+.mermaid-container svg .node polygon,
+.mermaid-container svg .label-container {
+  fill-opacity: 0.75 !important;
+}
+.mermaid-container svg .node rect[rx] {
+  fill-opacity: 0.85 !important;
+}
+
 .mermaid-error {
   color: #ff6b6b;
   font-family: var(--font-main);
