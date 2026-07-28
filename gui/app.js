@@ -83,20 +83,21 @@ document.addEventListener('DOMContentLoaded', () => {
   setTimeout(checkBridgeReady, 100);
   setTimeout(checkBridgeReady, 500);
 
-  // Mermaid.js se carga desde el HTML (al final del body). Inicializamos cuando esté disponible.
-  // Si el CDN no cargó (sin internet), la app funciona igual — simplemente no hay diagramas.
-  if (typeof mermaid !== 'undefined') {
-    initMermaid();
-  } else {
-    // Esperar a que el script tag del HTML termine de cargar
-    const mermaidScript = document.querySelector('script[src*="mermaid"]');
-    if (mermaidScript) {
-      mermaidScript.addEventListener('load', initMermaid);
-      mermaidScript.addEventListener('error', () => console.warn('⚠️ Mermaid CDN no disponible'));
+  // Mermaid.js se carga DINÁMICAMENTE 2 segundos después del inicio para NO BLOQUEAR LA UI.
+  // Si el CDN no está disponible, la app funciona igual sin diagramas.
+  setTimeout(() => {
+    if (typeof mermaid !== 'undefined') {
+      initMermaid();
+      return;
     }
-    // Fallback: reintentar en 3 segundos por si el evento load no se disparó
-    setTimeout(() => { if (!mermaidInitialized) initMermaid(); }, 3000);
-  }
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js';
+    script.onload = initMermaid;
+    script.onerror = () => console.warn('⚠️ Mermaid CDN no disponible — diagramas no se renderizarán');
+    document.body.appendChild(script);
+    // Fallback por si el onload no se dispara
+    setTimeout(() => { if (!mermaidInitialized) initMermaid(); }, 5000);
+  }, 2000);
 
   // Mensaje de bienvenida inicial
   agregarMensajeSistema('¡Hola, Luis! Soy <strong>Argus</strong> — tu asistente IA. Presiona <strong>F8</strong> o <strong>L3+R3</strong> en tu mando para hablar.');
