@@ -282,9 +282,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const defaultOpt = modelSelect.querySelector('option[value="Por Defecto"]');
     if (!defaultOpt) return;
     if (modelSelect.value === 'Por Defecto' && modeloReal) {
-      defaultOpt.innerText = `Default (${modeloReal})`;
+      defaultOpt.innerText = modeloReal;
     } else {
-      defaultOpt.innerText = 'Default';
+      defaultOpt.innerText = 'Auto';
     }
   }
 
