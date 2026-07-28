@@ -859,8 +859,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // Cola de diagramas pendientes por renderizar (acumulados antes de que Mermaid esté listo)
   let pendingMermaidNodes = [];
 
-  function renderMermaidDiagrams(containerEl) {
-    // Convertir <pre><code class="language-mermaid"> a <div class="mermaid-container">
+  // Convierte bloques ```mermaid a <div class="mermaid-container"> en HTML (sin renderizar)
+  function convertMermaidBlocksInHTML(containerEl) {
     containerEl.querySelectorAll('pre code.language-mermaid').forEach(codeEl => {
       const preEl = codeEl.parentElement;
       if (!preEl) return;
@@ -872,35 +872,53 @@ document.addEventListener('DOMContentLoaded', () => {
       mermaidDiv.textContent = diagramText;
       preEl.parentNode.replaceChild(mermaidDiv, preEl);
     });
+  }
 
-    const diagramDivs = containerEl.querySelectorAll('.mermaid-container');
-    if (diagramDivs.length === 0) return;
-
+  // Renderiza diagramas Mermaid que YA ESTÁN EN EL DOM y no han sido renderizados
+  function renderMermaidDiagramsInDOM() {
     if (!mermaidInitialized || typeof mermaid === 'undefined') {
-      // Mermaid no está listo — encolar para después
-      diagramDivs.forEach(div => pendingMermaidNodes.push(div));
+      // Mermaid no está listo — encolar todos los .mermaid-container sin renderizar
+      document.querySelectorAll('.mermaid-container:not([data-mermaid-rendered])').forEach(div => {
+        pendingMermaidNodes.push(div);
+      });
       return;
     }
+    const diagramDivs = document.querySelectorAll('.mermaid-container:not([data-mermaid-rendered])');
+    if (diagramDivs.length === 0) return;
 
-    // Mermaid está listo — renderizar ahora
     try {
-      mermaid.run({ nodes: diagramDivs });
+      mermaid.run({ nodes: diagramDivs }).then(() => {
+        diagramDivs.forEach(div => div.setAttribute('data-mermaid-rendered', 'true'));
+      }).catch(e => {
+        console.warn('Error renderizando diagrama Mermaid:', e);
+        diagramDivs.forEach(div => {
+          div.innerHTML = `<div class="mermaid-error">⚠️ No se pudo renderizar el diagrama. Verificá la sintaxis.</div>`;
+        });
+      });
     } catch (e) {
-      console.warn('Error renderizando diagrama Mermaid:', e);
+      console.warn('Error en mermaid.run:', e);
       diagramDivs.forEach(div => {
-        div.innerHTML = `<div class="mermaid-error">⚠️ No se pudo renderizar el diagrama. Verificá la sintaxis.</div>`;
+        div.innerHTML = `<div class="mermaid-error">⚠️ Error al renderizar diagrama.</div>`;
       });
     }
   }
 
+  // Renderiza diagramas que estaban en cola (porque Mermaid no había cargado)
   function renderPendingMermaidDiagrams() {
     if (!mermaidInitialized || typeof mermaid === 'undefined' || pendingMermaidNodes.length === 0) return;
     const nodes = pendingMermaidNodes.slice();
     pendingMermaidNodes = [];
     try {
-      mermaid.run({ nodes });
+      mermaid.run({ nodes }).then(() => {
+        nodes.forEach(div => div.setAttribute('data-mermaid-rendered', 'true'));
+      }).catch(e => {
+        console.warn('Error renderizando diagramas Mermaid pendientes:', e);
+        nodes.forEach(div => {
+          div.innerHTML = `<div class="mermaid-error">⚠️ Error al renderizar diagrama.</div>`;
+        });
+      });
     } catch (e) {
-      console.warn('Error renderizando diagramas Mermaid pendientes:', e);
+      console.warn('Error en mermaid.run (pendientes):', e);
       nodes.forEach(div => {
         div.innerHTML = `<div class="mermaid-error">⚠️ Error al renderizar diagrama.</div>`;
       });
@@ -967,8 +985,8 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
-    // Renderizar diagramas Mermaid
-    renderMermaidDiagrams(container);
+    // Convertir bloques ```mermaid a <div class="mermaid-container"> (sin renderizar aún)
+    convertMermaidBlocksInHTML(container);
 
     return container.innerHTML;
   }
@@ -1022,8 +1040,10 @@ document.addEventListener('DOMContentLoaded', () => {
     row.appendChild(avatar);
     row.appendChild(content);
 
-    chatMessages.appendChild(row);
-    scrollBottom();
+      chatMessages.appendChild(row);
+      scrollBottom();
+      // Renderizar diagramas Mermaid que se hayan insertado en el DOM
+      renderMermaidDiagramsInDOM();
   }
 
   function agregarMensajeArgus(textoMarkdown, remitente, retornarBody = false) {
@@ -1086,6 +1106,9 @@ document.addEventListener('DOMContentLoaded', () => {
         try { hljs.highlightElement(b); } catch (e) {}
       });
     }
+
+    // Renderizar diagramas Mermaid que estén ahora en el DOM (post paint)
+    setTimeout(renderMermaidDiagramsInDOM, 50);
 
     scrollBottom();
 
@@ -1185,6 +1208,8 @@ document.addEventListener('DOMContentLoaded', () => {
           });
         }
       }
+      // Renderizar diagramas Mermaid que se hayan actualizado en el DOM
+      renderMermaidDiagramsInDOM();
       scrollBottom();
       resetEmoFaceTimer(6000);
     } else {
