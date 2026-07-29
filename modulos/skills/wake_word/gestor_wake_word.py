@@ -1,6 +1,6 @@
 """
-Gestor de Wake Word "Computer" usando Porcupine (Picovoice).
-Corre en un hilo background escuchando el micrófono.
+Gestor de Wake Word usando OpenWakeWord (gratuito, open source, sin API key).
+Corre en un hilo background escuchando el micrófono con un modelo ONNX local.
 Thread-safe con toggle on/off.
 """
 
@@ -8,16 +8,15 @@ import os
 import time
 import queue
 import threading
-import struct
 from modulos.logger import logger
 
-# Porcupine
+# OpenWakeWord
 try:
-    import pvporcupine
-    _HAY_PORCUPINE = True
+    from openwakeword import Model as OWWModel
+    _HAY_OPENWAKEWORD = True
 except ImportError:
-    _HAY_PORCUPINE = False
-    logger.warning("⚠️ pvporcupine no instalado. Wake Word no disponible. pip install pvporcupine")
+    _HAY_OPENWAKEWORD = False
+    logger.warning("⚠️ openwakeword no instalado. Wake Word no disponible. pip install openwakeword")
 
 # sounddevice para capturar audio del micrófono
 import sounddevice as sd
@@ -25,23 +24,22 @@ import numpy as np
 
 # Constantes
 FS_AUDIO = 16000
-FRAME_LENGTH = 512  # Porcupine espera 512 samples por frame
+FRAME_LENGTH = 1280  # OpenWakeWord funciona bien con ~1280 samples (80ms a 16kHz)
 SILENCIO_MAX_GRABACION = 8  # segundos máximos de grabación tras detectar wake word
-VAD_SILENCE_TIMEOUT = 2.0   # segundos de silencio para cortar grabación
+UMBRAL_DETECCION = 0.5      # threshold de confianza para considerar detectado
 
 
 class GestorWakeWord:
     """
-    Hilo background que escucha la palabra "Computer" vía Porcupine.
+    Hilo background que escucha la palabra "computer" vía OpenWakeWord.
     Al detectarla, inicia una captura de voz con Whisper.
     """
 
     def __init__(self, callback_grabar=None):
         self._activo = False
         self._hilo = None
-        self._porcupine = None
+        self._modelo = None
         self._lock = threading.Lock()
-        self._audio_queue = queue.Queue()
         self._stop_event = threading.Event()
         self._callback_grabar = callback_grabar  # función a llamar al detectar wake word
 
@@ -52,15 +50,16 @@ class GestorWakeWord:
         with self._lock:
             if self._activo:
                 return {"exito": True, "estado": "already_active"}
-            if not _HAY_PORCUPINE:
-                return {"exito": False, "error": "pvporcupine no está instalado"}
+            if not _HAY_OPENWAKEWORD:
+                return {"exito": False, "error": "openwakeword no está instalado"}
 
             try:
-                # Inicializar Porcupine con la palabra "Computer" (gratuita, sin API key)
-                self._porcupine = pvporcupine.create(keywords=["computer"])
-                logger.info(f"🔊 Wake Word activado: 'Computer' (tasa de muestreo: {self._porcupine.sample_rate})")
+                # Cargar modelo "computer" (se descarga automáticamente la primera vez ~30MB)
+                logger.info("🔊 Cargando modelo OpenWakeWord 'computer'...")
+                self._modelo = OWWModel(wakeword_models=["computer"])
+                logger.info(f"🔊 Wake Word activado: 'computer'")
             except Exception as e:
-                logger.exception(f"Error inicializando Porcupine: {e}")
+                logger.exception(f"Error inicializando OpenWakeWord: {e}")
                 return {"exito": False, "error": str(e)}
 
             self._activo = True
@@ -80,13 +79,8 @@ class GestorWakeWord:
             self._activo = False
             self._stop_event.set()
 
-        # Liberar Porcupine
-        try:
-            if self._porcupine:
-                self._porcupine.delete()
-                self._porcupine = None
-        except Exception as e:
-            logger.warning(f"Error liberando Porcupine: {e}")
+        # Liberar modelo
+        self._modelo = None
 
         logger.info("🔇 Wake Word desactivado.")
         return {"exito": True, "estado": "deactivated"}
@@ -109,27 +103,28 @@ class GestorWakeWord:
 
     def _loop_escucha(self):
         """
-        Lee continuamente del micrófono en bloques de 512 samples a 16kHz.
-        Por cada bloque, llama a porcupine.process() para detectar la palabra clave.
+        Lee continuamente del micrófono en bloques a 16kHz.
+        Por cada bloque, llama al modelo para detectar la palabra clave.
         """
         try:
             with sd.InputStream(
                 samplerate=FS_AUDIO,
                 channels=1,
-                dtype='int16',
+                dtype='float32',
                 blocksize=FRAME_LENGTH,
             ) as stream:
                 while self.esta_activo() and not self._stop_event.is_set():
                     try:
                         bloque, _ = stream.read(FRAME_LENGTH)
-                        # Aplanar el array 2D a 1D
                         pcm = bloque.flatten()
                         
-                        # Porcupine espera una lista de enteros int16
-                        resultado = self._porcupine.process(pcm.tolist())
+                        # OpenWakeWord predice sobre el frame
+                        resultado = self._modelo.predict(pcm)
                         
-                        if resultado >= 0:
-                            logger.info("🔊 Wake word 'Computer' detectado!")
+                        # Revisar si la palabra "computer" fue detectada
+                        confianza = resultado.get("computer", 0.0)
+                        if confianza > UMBRAL_DETECCION:
+                            logger.info(f"🔊 Wake word 'computer' detectado! (confianza: {confianza:.2f})")
                             self._on_wake_word_detectado()
                             
                     except Exception as e:
@@ -151,10 +146,10 @@ class GestorWakeWord:
             # Beep de confirmación
             _beep_inicio()
             
-            # Callback de estado para la UI
+            # Notificar a la UI
             self._notificar_estado("listening")
             
-            # Definir condición de corte: grabar hasta que se cumpla el timeout o silencio
+            # Definir condición de corte: grabar hasta timeout
             inicio = time.time()
             
             def condicion_grabar():
