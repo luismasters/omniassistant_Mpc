@@ -24,4 +24,4 @@ watchdog==6.0.0
 # Dependencias opcionales
 # pycaw comtypes  # Para skill control_audio
 # pytest          # Para ejecutar tests
-openwakeword 
+vosk
