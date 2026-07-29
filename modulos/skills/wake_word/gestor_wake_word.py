@@ -1,8 +1,9 @@
 """
-Gestor de Wake Word usando Vosk con keyphrase (CUALQUIER palabra, sin API key).
+Gestor de Wake Word usando Vosk en modo continuo (sin gramática).
+Detecta "argus" en resultados parciales en tiempo real.
+CUALQUIER palabra, sin API key, gratis.
 Corre en un hilo background escuchando el micrófono.
 Thread-safe con toggle on/off.
-La palabra clave es configurable. Por defecto: "argus"
 """
 
 import os
@@ -25,16 +26,12 @@ import numpy as np
 
 # Constantes
 FS_AUDIO = 16000
-FRAME_LENGTH = 4096  # Vosk funciona bien con frames de ~4000 samples
+FRAME_LENGTH = 4096
 SILENCIO_MAX_GRABACION = 8
-PALABRA_CLAVE = "argus"  # <<< CAMBIÁ ESTO por la palabra que quieras
+PALABRA_CLAVE = "argus"
 
 
 def _descargar_modelo_vosk():
-    """
-    Descarga el modelo Vosk de español pequeño si no existe.
-    ~42 MB, se descarga una sola vez a la carpeta modulos/skills/wake_word/
-    """
     import urllib.request
     import zipfile
     
@@ -70,8 +67,8 @@ def _descargar_modelo_vosk():
 
 class GestorWakeWord:
     """
-    Hilo background que escucha la palabra clave "argus" vía Vosk.
-    Al detectarla, inicia una captura de voz con Whisper.
+    Hilo background que escucha la palabra clave "argus" vía Vosk en modo continuo.
+    Detecta la palabra en resultados parciales (no requiere silencios alrededor).
     """
 
     def __init__(self, callback_grabar=None, palabra_clave=None):
@@ -82,7 +79,7 @@ class GestorWakeWord:
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._callback_grabar = callback_grabar
-        self._palabra_clave = palabra_clave or PALABRA_CLAVE
+        self._palabra_clave = (palabra_clave or PALABRA_CLAVE).lower()
 
     # ─── API PÚBLICA ────────────────────────────────────────────────
 
@@ -101,9 +98,11 @@ class GestorWakeWord:
                 logger.info(f"🔊 Cargando modelo Vosk desde: {ruta_modelo}")
                 self._modelo = vosk.Model(ruta_modelo)
                 
-                gramatica = json.dumps([self._palabra_clave])
-                self._recognizer = vosk.KaldiRecognizer(self._modelo, FS_AUDIO, gramatica)
-                logger.info(f"🔊 Wake Word activado con palabra: '{self._palabra_clave}'")
+                # SIN gramática — modo de reconocimiento continuo
+                # Así detecta cualquier palabra dicha, y buscamos "argus" en partial results
+                self._recognizer = vosk.KaldiRecognizer(self._modelo, FS_AUDIO)
+                self._recognizer.SetWords(False)  # no necesitas palabras individuales
+                logger.info(f"🔊 Wake Word activado — escuchando '{self._palabra_clave}' en modo continuo")
             except Exception as e:
                 logger.exception(f"Error inicializando Vosk: {e}")
                 return {"exito": False, "error": str(e)}
@@ -153,17 +152,20 @@ class GestorWakeWord:
                 while self.esta_activo() and not self._stop_event.is_set():
                     try:
                         bloque, _ = stream.read(FRAME_LENGTH)
-                        # Convertir numpy array int16 a bytes
                         datos_bytes = bloque.tobytes()
                         
-                        if self._recognizer.AcceptWaveform(datos_bytes):
-                            resultado = json.loads(self._recognizer.Result())
-                            texto = resultado.get("text", "").strip().lower()
-                            
-                            if self._palabra_clave in texto:
-                                logger.info(f"🔊 Palabra clave '{self._palabra_clave}' detectada!")
-                                self._on_wake_word_detectado()
-                                return
+                        # Alimentar al recognizer
+                        self._recognizer.AcceptWaveform(datos_bytes)
+                        
+                        # Obtener resultado parcial (lo que va reconociendo en tiempo real)
+                        partial = json.loads(self._recognizer.PartialResult())
+                        texto_parcial = partial.get("partial", "").lower()
+                        
+                        # Buscar la palabra clave en el texto parcial
+                        if self._palabra_clave in texto_parcial:
+                            logger.info(f"🔊 Palabra clave '{self._palabra_clave}' detectada en: '{texto_parcial}'")
+                            self._on_wake_word_detectado()
+                            return
                                 
                     except Exception as e:
                         if self.esta_activo():
