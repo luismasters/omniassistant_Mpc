@@ -1,6 +1,6 @@
 {
   "funcional": {
-    "identidad": "Luis, 40 años, 102kg, 1.69m",
+    "identidad": "Luis",
     "proyecto_actual": "Desarrolla un sistema de agentes llamado OmniAssistant.",
     "hardware_relevante": "Airfryer",
     "preferencias_comunicacion": "",
@@ -14,13 +14,18 @@
     },
     {
       "tema": "salud",
-      "contenido": "Objetivo de reducir comida chatarra y mejorar la alimentación",
-      "actualizado": "2026-07-20"
+      "contenido": "Tratamiento con Rosuvastatina 10mg nocturna iniciado el 30/06/2026 por 6 meses",
+      "actualizado": "2026-07-28"
     },
     {
       "tema": "opinión profesional",
       "contenido": "Considera que la IA ha cambiado considerablemente el estatus del mercado laboral tecnológico.",
       "actualizado": "2026-07-19"
+    },
+    {
+      "tema": "gustos",
+      "contenido": "Interés en mejorar la alimentación y reducir comida chatarra",
+      "actualizado": "2026-07-28"
     }
   ]
 }

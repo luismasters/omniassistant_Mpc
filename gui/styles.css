@@ -1203,6 +1203,16 @@ textarea#promptInput::placeholder { color: rgba(255,255,255,0.35); }
   color: var(--text-primary);
   background: rgba(255,255,255,0.07);
 }
+.input-mic-btn.wake-word-active {
+  color: #00ff9d;
+}
+.input-mic-btn.wake-word-active .pulse-ring {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  border-radius: 50%;
+  border: 2px solid #00ff9d;
+  animation: pulse-ring 1.2s infinite;
+}
 .input-mic-btn.listening {
   color: #ea4335;
 }

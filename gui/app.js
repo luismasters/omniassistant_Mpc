@@ -224,6 +224,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Cargar clima al iniciar y luego cada 10 minutos
     actualizarClima();
     setInterval(actualizarClima, 10 * 60 * 1000);
+    // Polling del estado wake word cada 3 segundos
+    setInterval(pollWakeWordState, 3000);
   }
 
   // ─── RELOJ DIGITAL ───────────────────────────────────────────────────
@@ -559,12 +561,54 @@ document.addEventListener('DOMContentLoaded', () => {
     promptInput.style.height = Math.min(promptInput.scrollHeight, 150) + 'px';
   }
 
-  // ─── MICRÓFONO & LIMPIAR ───────────────────────────────────────────────
+  // ─── MICRÓFONO / WAKE WORD TOGGLE ─────────────────────────────────────
+  // El botón de micrófono ahora activa/desactiva el WAKE WORD (escucha por palabra clave).
+  // F8 y L3+R3 siguen funcionando exactamente igual para grabación directa.
+  // Estado visual: gris = wake word apagado, cyan/verde = wake word escuchando.
+  let wakeWordActivo = false;
+
+  function actualizarEstadoMicWakeWord() {
+    if (!btnVoice) return;
+    if (wakeWordActivo) {
+      btnVoice.classList.add('wake-word-active');
+      btnVoice.classList.remove('listening');
+      btnVoice.title = 'Desactivar Wake Word';
+    } else {
+      btnVoice.classList.remove('wake-word-active', 'listening');
+      btnVoice.title = 'Activar Wake Word';
+    }
+  }
+
+  // Polling del estado del wake word cada 3 segundos
+  async function pollWakeWordState() {
+    if (!pyApi || typeof pyApi.obtener_estado_wake_word !== 'function') return;
+    try {
+      const res = await pyApi.obtener_estado_wake_word();
+      if (res && res.exito && res.wake_word_activo !== wakeWordActivo) {
+        wakeWordActivo = res.wake_word_activo;
+        actualizarEstadoMicWakeWord();
+      }
+    } catch (e) { /* ignorar errores de polling */ }
+  }
+
   if (btnVoice) {
     btnVoice.addEventListener('click', async () => {
-      if (isListening) return;
-      iniciarEscuchaVozUI();
-      if (pyApi) await pyApi.iniciar_escucha_voz();
+      if (isListening) return; // No hacer nada si está grabando
+      if (!pyApi || typeof pyApi.toggle_wake_word !== 'function') return;
+      try {
+        const res = await pyApi.toggle_wake_word();
+        if (res && res.exito) {
+          wakeWordActivo = !!res.wake_word_activo;
+          actualizarEstadoMicWakeWord();
+          agregarMensajeSistema(wakeWordActivo 
+            ? '🔊 Wake Word activado — decí <strong>"Computer"</strong> para hablar.' 
+            : '🔇 Wake Word desactivado.');
+        } else if (res && res.error) {
+          agregarMensajeSistema(`⚠️ ${res.error}`);
+        }
+      } catch (e) {
+        console.error('Error toggling wake word:', e);
+      }
     });
   }
 

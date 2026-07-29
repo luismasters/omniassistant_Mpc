@@ -23,6 +23,7 @@ from modulos.logger import logger
 from modulos.ia import enviar_a_gemini
 from modulos.audio_custom import capturar_voz_micro, hablar_no_bloqueante
 from modulos.perfil_mentor import cargar_perfil_mentor, guardar_perfil_mentor
+from modulos.skills.wake_word.gestor_wake_word import gestor_wake_word
 
 
 # ─── Variables de caché de clima para evitar importaciones circulares ──
@@ -753,4 +754,44 @@ class ArgusWebBridge:
         except Exception as e:
             logger.exception(f"Error re-escanenado mandos: {e}")
             return {"exito": False, "error": str(e)}
+
+    # ─── WAKE WORD ────────────────────────────────────────────────────
+
+    def toggle_wake_word(self) -> dict:
+        """Activa/desactiva el wake word (palabra clave por voz)."""
+        try:
+            from modulos.skills.wake_word.gestor_wake_word import gestor_wake_word
+
+            def _callback_wake_word(texto):
+                """Cuando se detecta wake word y se transcribe audio, lo envía a la IA."""
+                win = self._window or (webview.windows[0] if webview.windows else None)
+                if win:
+                    if texto:
+                        win.evaluate_js(f"if (window.agregarMensajeUsuario) window.agregarMensajeUsuario({json.dumps(texto)});")
+                        from modulos.ia import enviar_a_gemini
+                        enviar_a_gemini(texto, modo_voz=True, ui_callback=self._ui_callback)
+
+            if gestor_wake_word.esta_activo():
+                gestor_wake_word.desactivar()
+                logger.info("🔇 Wake Word desactivado por toggle.")
+                return {"exito": True, "wake_word_activo": False}
+            else:
+                resultado = gestor_wake_word.activar()
+                if resultado.get("exito"):
+                    # Configurar callback para cuando se detecte la palabra
+                    gestor_wake_word._callback_grabar = _callback_wake_word
+                    logger.info("🔊 Wake Word activado por toggle.")
+                return {**resultado, "wake_word_activo": gestor_wake_word.esta_activo()}
+        except Exception as e:
+            logger.exception(f"Error toggling wake word: {e}")
+            return {"exito": False, "error": str(e), "wake_word_activo": False}
+
+    def obtener_estado_wake_word(self) -> dict:
+        """Devuelve si el wake word está activo o no."""
+        try:
+            from modulos.skills.wake_word.gestor_wake_word import gestor_wake_word
+            return {"exito": True, "wake_word_activo": gestor_wake_word.esta_activo()}
+        except Exception as e:
+            logger.exception(f"Error obteniendo estado wake word: {e}")
+            return {"exito": False, "error": str(e), "wake_word_activo": False}
 

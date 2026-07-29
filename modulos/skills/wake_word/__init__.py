@@ -1,0 +1,1 @@
+# Skill Wake Word - Activación por voz con Porcupine
