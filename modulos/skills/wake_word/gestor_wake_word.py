@@ -21,9 +21,7 @@ except ImportError:
 
 # sounddevice
 import sounddevice as sd
-import queue
-import sys
-import subprocess
+import numpy as np
 
 # Constantes
 FS_AUDIO = 16000
@@ -43,13 +41,10 @@ def _descargar_modelo_vosk():
     directorio = os.path.dirname(os.path.abspath(__file__))
     ruta_modelo = os.path.join(directorio, "vosk-model")
     
-    # Si ya existe el modelo, devolver ruta
     if os.path.exists(ruta_modelo) and os.path.isdir(ruta_modelo):
-        # Verificar que tenga archivos dentro
         if any(f.endswith('.conf') or f.endswith('.bin') for _, _, files in os.walk(ruta_modelo) for f in files):
             return ruta_modelo
     
-    # Descargar
     url = "https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip"
     zip_path = os.path.join(directorio, "vosk-model-small-es-0.42.zip")
     
@@ -59,7 +54,6 @@ def _descargar_modelo_vosk():
         logger.info("📦 Extrayendo modelo Vosk...")
         with zipfile.ZipFile(zip_path, 'r') as zf:
             zf.extractall(directorio)
-        # Renombrar carpeta extraída
         extracted = os.path.join(directorio, "vosk-model-small-es-0.42")
         if os.path.exists(extracted):
             if os.path.exists(ruta_modelo):
@@ -89,12 +83,10 @@ class GestorWakeWord:
         self._stop_event = threading.Event()
         self._callback_grabar = callback_grabar
         self._palabra_clave = palabra_clave or PALABRA_CLAVE
-        self._audio_queue = queue.Queue()
 
     # ─── API PÚBLICA ────────────────────────────────────────────────
 
     def activar(self):
-        """Activa la escucha de wake word en un hilo background."""
         with self._lock:
             if self._activo:
                 return {"exito": True, "estado": "already_active"}
@@ -102,7 +94,6 @@ class GestorWakeWord:
                 return {"exito": False, "error": "vosk no está instalado"}
 
             try:
-                # Cargar modelo Vosk (descarga automática si no existe)
                 ruta_modelo = _descargar_modelo_vosk()
                 if not ruta_modelo:
                     return {"exito": False, "error": "No se pudo obtener el modelo Vosk"}
@@ -110,8 +101,6 @@ class GestorWakeWord:
                 logger.info(f"🔊 Cargando modelo Vosk desde: {ruta_modelo}")
                 self._modelo = vosk.Model(ruta_modelo)
                 
-                # Keyphrase mode: solo detecta la palabra exacta
-                # Formato: '["argus"]' para detectar solo "argus"
                 gramatica = json.dumps([self._palabra_clave])
                 self._recognizer = vosk.KaldiRecognizer(self._modelo, FS_AUDIO, gramatica)
                 logger.info(f"🔊 Wake Word activado con palabra: '{self._palabra_clave}'")
@@ -128,13 +117,11 @@ class GestorWakeWord:
         return {"exito": True, "estado": "activated"}
 
     def desactivar(self):
-        """Desactiva la escucha de wake word y libera recursos."""
         with self._lock:
             if not self._activo:
                 return {"exito": True, "estado": "already_inactive"}
             self._activo = False
             self._stop_event.set()
-
         self._modelo = None
         self._recognizer = None
         logger.info("🔇 Wake Word desactivado.")
@@ -156,31 +143,27 @@ class GestorWakeWord:
     # ─── BUCLE PRINCIPAL ────────────────────────────────────────────
 
     def _loop_escucha(self):
-        """
-        Lee del micrófono y pasa los bloques al recognizer de Vosk.
-        Cuando detecta la palabra clave, inicia la grabación.
-        """
         try:
-            with sd.RawInputStream(
+            with sd.InputStream(
                 samplerate=FS_AUDIO,
-                blocksize=FRAME_LENGTH,
-                device=None,
-                dtype='int16',
                 channels=1,
+                dtype='int16',
+                blocksize=FRAME_LENGTH,
             ) as stream:
                 while self.esta_activo() and not self._stop_event.is_set():
                     try:
-                        data, _ = stream.read(FRAME_LENGTH)
+                        bloque, _ = stream.read(FRAME_LENGTH)
+                        # Convertir numpy array int16 a bytes
+                        datos_bytes = bloque.tobytes()
                         
-                        if self._recognizer.AcceptWaveform(data):
+                        if self._recognizer.AcceptWaveform(datos_bytes):
                             resultado = json.loads(self._recognizer.Result())
                             texto = resultado.get("text", "").strip().lower()
                             
                             if self._palabra_clave in texto:
                                 logger.info(f"🔊 Palabra clave '{self._palabra_clave}' detectada!")
-                                stream.stop()
                                 self._on_wake_word_detectado()
-                                return  # El hilo termina después de la detección
+                                return
                                 
                     except Exception as e:
                         if self.esta_activo():
@@ -190,17 +173,12 @@ class GestorWakeWord:
             logger.exception(f"Error en stream de audio para wake word: {e}")
         finally:
             logger.info("🔇 Hilo de Wake Word terminado.")
-            # Si el gestor sigue activo, reiniciar el hilo
             if self.esta_activo():
                 logger.info("🔊 Reiniciando hilo de Wake Word...")
                 self._hilo = threading.Thread(target=self._loop_escucha, daemon=True)
                 self._hilo.start()
 
     def _on_wake_word_detectado(self):
-        """
-        Se llama cuando se detecta la palabra clave.
-        Inicia una captura de voz y la envía al callback.
-        """
         try:
             from modulos.audio_custom import capturar_voz_micro, _beep_inicio
             
