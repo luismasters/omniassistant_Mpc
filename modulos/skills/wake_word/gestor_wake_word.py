@@ -1,9 +1,17 @@
 """
 Gestor de Wake Word usando Vosk en modo continuo (sin gramática).
-Detecta "argus" en resultados parciales en tiempo real.
+Detecta "ok argus" en resultados parciales en tiempo real.
 CUALQUIER palabra, sin API key, gratis.
 Corre en un hilo background escuchando el micrófono.
 Thread-safe con toggle on/off.
+
+PROTECCIÓN ANTI-BUCLE:
+- Mientras el asistente está hablando (hablando_actualmente=True),
+  se descarta el audio del micrófono para evitar que la propia
+  respuesta de voz dispare una nueva detección.
+- Cooldown post-respuesta para evitar falsos positivos justo
+  después de terminar de hablar.
+- Palabra de interrupción "corta" que detiene la voz del asistente.
 """
 
 import os
@@ -11,6 +19,7 @@ import time
 import json
 import threading
 from modulos.logger import logger
+from modulos.audio_custom import detener_voz, esta_hablando
 
 # Vosk
 try:
@@ -28,7 +37,49 @@ import numpy as np
 FS_AUDIO = 16000
 FRAME_LENGTH = 4096
 SILENCIO_MAX_GRABACION = 8
-PALABRA_CLAVE = "argus"
+PALABRA_CLAVE = "ok argus"
+
+# Gramática de Vosk optimizada para reducir uso de CPU y maximizar detección fonética
+GRAMATICA_WAKE_WORD = [
+    "ok argos", "okey argos", "oquei argos", "o k argos", "okey argus",
+    "oquei argus", "o k argos", "o cargos", "o cargo", "o cargus",
+    "ocargos", "ocargo", "ocargus", "okargo", "okargos", "okargus",
+    "ok algo", "ok arcos", "ok angus",
+    "corta", "[unk]"
+]
+
+
+def _es_match_wake_word(texto: str) -> bool:
+    """
+    Comprueba si el texto reconocido coincide con 'ok argus' o sus variaciones
+    fonéticas equivalentes en el vocabulario en español de Vosk.
+    """
+    texto = texto.lower().strip()
+    if not texto:
+        return False
+        
+    if "ok argus" in texto:
+        return True
+        
+    variaciones_directas = [
+        "ok argos", "okey argos", "oquei argos", "o k argos", "okey argus",
+        "oquei argus", "o k argus", "o cargos", "o cargo", "o cargus",
+        "ocargos", "ocargo", "ocargus", "okargo", "okargos", "okargus",
+        "ok algo", "ok arcos", "ok angus"
+    ]
+    for var in variaciones_directas:
+        if var in texto:
+            return True
+            
+    palabras = texto.split()
+    prefijos_ok = {"ok", "okey", "oquei", "o", "k"}
+    sufijos_argus = {"argus", "argos", "argo", "algus", "angus", "arcos", "algo"}
+    
+    for i in range(len(palabras) - 1):
+        if palabras[i] in prefijos_ok and palabras[i+1] in sufijos_argus:
+            return True
+            
+    return False
 
 
 def _descargar_modelo_vosk():
@@ -67,8 +118,8 @@ def _descargar_modelo_vosk():
 
 class GestorWakeWord:
     """
-    Hilo background que escucha la palabra clave "argus" vía Vosk en modo continuo.
-    Detecta la palabra en resultados parciales (no requiere silencios alrededor).
+    Hilo background que escucha la frase "ok argus" vía Vosk en modo continuo.
+    Detecta la frase completa en resultados parciales para minimizar falsos positivos.
     """
 
     def __init__(self, callback_grabar=None, palabra_clave=None):
@@ -98,11 +149,11 @@ class GestorWakeWord:
                 logger.info(f"🔊 Cargando modelo Vosk desde: {ruta_modelo}")
                 self._modelo = vosk.Model(ruta_modelo)
                 
-                # SIN gramática — modo de reconocimiento continuo
-                # Así detecta cualquier palabra dicha, y buscamos "argus" en partial results
-                self._recognizer = vosk.KaldiRecognizer(self._modelo, FS_AUDIO)
-                self._recognizer.SetWords(False)  # no necesitas palabras individuales
-                logger.info(f"🔊 Wake Word activado — escuchando '{self._palabra_clave}' en modo continuo")
+                # Reconocimiento con gramática optimizada para variantes de "ok argus".
+                gramatica = json.dumps(GRAMATICA_WAKE_WORD)
+                self._recognizer = vosk.KaldiRecognizer(self._modelo, FS_AUDIO, gramatica)
+                self._recognizer.SetWords(False)
+                logger.info(f"🔊 Wake Word activado — escuchando frase '{self._palabra_clave}' con gramática optimizada")
             except Exception as e:
                 logger.exception(f"Error inicializando Vosk: {e}")
                 return {"exito": False, "error": str(e)}
@@ -142,6 +193,7 @@ class GestorWakeWord:
     # ─── BUCLE PRINCIPAL ────────────────────────────────────────────
 
     def _loop_escucha(self):
+        cooldown_hasta = 0.0
         try:
             with sd.InputStream(
                 samplerate=FS_AUDIO,
@@ -151,19 +203,56 @@ class GestorWakeWord:
             ) as stream:
                 while self.esta_activo() and not self._stop_event.is_set():
                     try:
+                        # ─── PROTECCIÓN ANTI-BUCLE ──────────────────────────
+                        # 1. SI EL ASISTENTE ESTÁ HABLANDO: descartar audio
+                        if esta_hablando():
+                            time.sleep(0.05)
+                            # Resetear recognizer para evitar falsos acumulados
+                            # (Vosk puede falsear detecciones con silencios)
+                            self._recognizer.Reset()
+                            continue
+
+                        # 2. COOLDOWN POST-RESPUESTA: evitar falsos positivos
+                        #    justo después de que el asistente termina de hablar
+                        ahora = time.time()
+                        if ahora < cooldown_hasta:
+                            time.sleep(0.05)
+                            continue
+                        # ─── FIN PROTECCIÓN ANTI-BUCLE ───────────────────────
+
                         bloque, _ = stream.read(FRAME_LENGTH)
                         datos_bytes = bloque.tobytes()
                         
-                        # Alimentar al recognizer
-                        self._recognizer.AcceptWaveform(datos_bytes)
+                        # Alimentar al recognizer (devuelve True si cerró frase/silencio)
+                        es_final = self._recognizer.AcceptWaveform(datos_bytes)
                         
-                        # Obtener resultado parcial (lo que va reconociendo en tiempo real)
-                        partial = json.loads(self._recognizer.PartialResult())
-                        texto_parcial = partial.get("partial", "").lower()
+                        if es_final:
+                            res = json.loads(self._recognizer.Result())
+                            texto = res.get("text", "").lower()
+                        else:
+                            partial = json.loads(self._recognizer.PartialResult())
+                            texto = partial.get("partial", "").lower()
                         
-                        # Buscar la palabra clave en el texto parcial
-                        if self._palabra_clave in texto_parcial:
-                            logger.info(f"🔊 Palabra clave '{self._palabra_clave}' detectada en: '{texto_parcial}'")
+                        if not texto:
+                            continue
+
+                        # ─── PALABRA DE INTERRUPCIÓN ──────────────────────
+                        # Si el usuario dice "corta" mientras el asistente habla,
+                        # detener la voz inmediatamente
+                        if "corta" in texto.split():
+                            logger.info("✋ Palabra de interrupción 'corta' detectada — deteniendo voz del asistente")
+                            detener_voz()
+                            # Cooldown breve para evitar que el eco del "corta"
+                            # dispare otra detección de palabra clave
+                            cooldown_hasta = time.time() + 0.5
+                            continue
+
+                        # ─── DETECCIÓN DE FRASE CLAVE ─────────────────────
+                        # Coincidencia fonética flexible para "ok argus"
+                        if _es_match_wake_word(texto):
+                            logger.info(f"🔊 Frase clave '{self._palabra_clave}' detectada en: '{texto}'")
+                            # Activar cooldown post-detección para evitar doble disparo
+                            cooldown_hasta = ahora + 1.0
                             self._on_wake_word_detectado()
                             return
                                 

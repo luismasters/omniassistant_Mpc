@@ -9,7 +9,8 @@
       "Docker",
       "GitHub Actions",
       "Pytest",
-      "CrewAI"
+      "CrewAI",
+      "Groq API"
     ]
   },
   "tecnologias_aprendidas": [
@@ -26,7 +27,9 @@
     "DeepSeek API",
     "Gemini API",
     "Groq API",
-    "Cline (VSC)"
+    "Cline (VSC)",
+    "SentenceTransformers",
+    "PyPDF"
   ],
   "tecnologias_en_estudio": [
     "React",
@@ -42,8 +45,12 @@
     {
       "nombre": "OmniAssistant",
       "descripcion": "Asistente de IA multimodal para Windows con integración de modelos (Gemini, DeepSeek, Groq), memoria vectorial (ChromaDB), visión y control de sistema. Utilizado como base de conocimiento para el aprendizaje de arquitectura de agentes."
+    },
+    {
+      "nombre": "Sistema RAG con Umbral Estricto",
+      "descripcion": "Pipeline RAG profesional en Python utilizando Groq (Llama 3.3), ChromaDB y embeddings multilingües. Implementa un sistema de guardarraíles con umbral de similitud (0.5) para evitar alucinaciones, con soporte para TXT, MD y PDF."
     }
   ],
-  "ultimo_avance_registrado": "Definición de hoja de ruta profesional centrada en un perfil híbrido (Python + React). Inicio de plan de micro-proyectos semanales enfocados en conceptos profundos de IA (RAG, Agentes, Orquestación). Se estableció la arquitectura para un sistema RAG con DeepSeek, priorizando la honestidad del modelo (no alucinar si no hay información) y la citación de fuentes.",
+  "ultimo_avance_registrado": "Desarrollo completo de un sistema RAG modular con arquitectura profesional. Se implementó la lógica de ingesta (chunking con overlap), almacenamiento vectorial (ChromaDB con similitud coseno) y orquestación con Groq. Se integró un filtro estricto de umbral (0.5) para prevenir alucinaciones y se añadieron pruebas unitarias con Pytest para validar el comportamiento del sistema ante consultas relevantes e irrelevantes.",
   "claves_de_contexto_faltantes": []
 }

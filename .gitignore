@@ -28,4 +28,7 @@ diagnostico*
 modulos/boveda_memoria/
 scratch/
 *.bin
-*.sqlite3
+*.sqlite3
+
+# Modelos ML descargables (Vosk)
+modulos/skills/wake_word/vosk-model/

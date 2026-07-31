@@ -29,7 +29,7 @@ def es_ruta_segura(ruta: str) -> bool:
         # workspace anclado. Ahora se lee el estado real.
         modo = getattr(config, "estado", None)
         modo_actual = modo.modo_actual if modo is not None else "general"
-        if modo_actual == "general":
+        if modo_actual in ("general", "chat"):
             return True
         # ---------------------------------------------------------------
         

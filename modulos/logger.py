@@ -10,6 +10,13 @@ LOG_FILE = LOG_DIR / "omniassistant.log"
 # Formato estándar para los logs
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
+# Forzar UTF-8 en consola para Windows (evita UnicodeEncodeError con emojis en stdout/stderr)
+if sys.platform == "win32":
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 # Handler para guardar en archivo físico
 file_handler = logging.FileHandler(str(LOG_FILE), encoding='utf-8')
 file_handler.setLevel(logging.DEBUG)

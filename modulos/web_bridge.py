@@ -8,7 +8,7 @@ Proporciona métodos thread-safe llamados desde el Frontend Web (JS vía window.
 - iniciar_escucha_voz()
 - obtener_estado_inicial()
 - cambiar_modelo_seleccionado(modelo)
-- anclar_proyecto()
+- seleccionar_workspace()
 - actualizar_memoria()
 - limpiar_contexto()
 - seleccionar_perfil_mentor(perfil)
@@ -277,11 +277,11 @@ class ArgusWebBridge:
             logger.exception(f"Error procesando mensaje en web bridge: {e}")
             return {"exito": False, "respuesta": f"❌ Error: {str(e)}"}
 
-    def obtener_recordatorios(self) -> dict:
-        """Devuelve la lista de recordatorios pendientes."""
+    def obtener_recordatorios(self, incluir_completados: bool = True) -> dict:
+        """Devuelve la lista de recordatorios (opcionalmente incluyendo completados)."""
         try:
             from modulos.skills.recordatorios.gestor_recordatorios import gestor_recordatorios
-            recs = gestor_recordatorios.listar_recordatorios(incluir_completados=False)
+            recs = gestor_recordatorios.listar_recordatorios(incluir_completados=incluir_completados)
             return {"exito": True, "recordatorios": recs}
         except Exception as e:
             logger.exception(f"Error obteniendo recordatorios: {e}")
@@ -295,6 +295,28 @@ class ArgusWebBridge:
             return {"exito": True, "recordatorio": rec}
         except Exception as e:
             logger.exception(f"Error creando recordatorio manual: {e}")
+            return {"exito": False, "error": str(e)}
+
+    def editar_recordatorio_manual(self, id_rec: str, mensaje: str, tiempo_str: str, opciones: str = "") -> dict:
+        """Edita un recordatorio desde la GUI manual."""
+        try:
+            from modulos.skills.recordatorios.gestor_recordatorios import gestor_recordatorios
+            rec = gestor_recordatorios.editar_recordatorio(id_rec, mensaje, tiempo_str, opciones)
+            if rec:
+                return {"exito": True, "recordatorio": rec}
+            return {"exito": False, "error": "Recordatorio no encontrado"}
+        except Exception as e:
+            logger.exception(f"Error editando recordatorio manual: {e}")
+            return {"exito": False, "error": str(e)}
+
+    def cambiar_estado_recordatorio_manual(self, id_rec: str, nuevo_estado: str) -> dict:
+        """Cambia el estado de un recordatorio ('pendiente', 'completado', 'cancelado')."""
+        try:
+            from modulos.skills.recordatorios.gestor_recordatorios import gestor_recordatorios
+            exito = gestor_recordatorios.cambiar_estado(id_rec, nuevo_estado)
+            return {"exito": exito}
+        except Exception as e:
+            logger.exception(f"Error cambiando estado de recordatorio: {e}")
             return {"exito": False, "error": str(e)}
 
     def cancelar_recordatorio_manual(self, id_rec: str) -> dict:
@@ -390,8 +412,8 @@ class ArgusWebBridge:
             logger.exception(f"Error cambiando modelo: {e}")
             return {"exito": False, "error": str(e)}
 
-    def anclar_proyecto(self) -> dict:
-        """Abre cuadro de diálogo para seleccionar carpeta de proyecto."""
+    def seleccionar_workspace(self) -> dict:
+        """Abre cuadro de diálogo para seleccionar carpeta de workspace."""
         try:
             win = self._window or (webview.windows[0] if webview.windows else None)
             if win:
@@ -399,11 +421,11 @@ class ArgusWebBridge:
                 if res and len(res) > 0:
                     carpeta = res[0]
                     estado.cambiar_workspace(carpeta)
-                    logger.info(f"Workspace anclado: {carpeta}")
+                    logger.info(f"Workspace seleccionado: {carpeta}")
                     return {"exito": True, "workspace": carpeta}
             return {"exito": False, "error": "No se seleccionó carpeta"}
         except Exception as e:
-            logger.exception(f"Error anclando proyecto: {e}")
+            logger.exception(f"Error seleccionando workspace: {e}")
             return {"exito": False, "error": str(e)}
 
     def actualizar_memoria(self) -> dict:

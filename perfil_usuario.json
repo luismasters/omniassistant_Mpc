@@ -1,10 +1,10 @@
 {
   "funcional": {
-    "identidad": "Luis",
+    "identidad": "El usuario se llama Luis.",
     "proyecto_actual": "Desarrolla un sistema de agentes llamado OmniAssistant.",
     "hardware_relevante": "Airfryer",
     "preferencias_comunicacion": "",
-    "rutina_uso": "utiliza comandos de voz para abrir aplicaciones y navegar en sitios web"
+    "rutina_uso": "El usuario utiliza al asistente para gestionar recordatorios de suscripciones y tareas logísticas."
   },
   "vida_personal": [
     {
@@ -26,6 +26,11 @@
       "tema": "gustos",
       "contenido": "Interés en mejorar la alimentación y reducir comida chatarra",
       "actualizado": "2026-07-28"
+    },
+    {
+      "tema": "suscripciones",
+      "contenido": "El usuario está iniciando una prueba gratuita de 14 días en Netflix y requiere recordatorios para cancelar antes del cobro.",
+      "actualizado": "2026-07-30"
     }
   ]
 }

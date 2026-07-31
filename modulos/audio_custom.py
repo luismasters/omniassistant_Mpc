@@ -117,6 +117,16 @@ def _sintetizar_sincrono(texto):
         return None
 
 # =====================================================================
+def _notificar_gui_hablando(hablando: bool):
+    try:
+        import webview
+        if webview.windows and len(webview.windows) > 0:
+            win = webview.windows[0]
+            estado = "talking" if hablando else "idle"
+            win.evaluate_js(f"if (window.notificarEstadoAvatar) window.notificarEstadoAvatar('{estado}');")
+    except Exception:
+        pass
+
 # COLA GLOBAL DE REPRODUCCION (Stream Continuo con Pygame)
 # =====================================================================
 _cola_reproduccion = queue.Queue()
@@ -125,49 +135,57 @@ _hilo_reproductor_activo = False
 def _hilo_reproductor_global():
     global _hilo_reproductor_activo, hablando_actualmente
 
-    while True:
-        try:
-            archivo_mp3 = _cola_reproduccion.get(timeout=0.2)
-        except queue.Empty:
-            with _secuencia_lock:
-                sigue_sintetizando = (_siguiente_a_reproducir < _contador_secuencia)
-            if not sigue_sintetizando and not pygame.mixer.music.get_busy() and _cola_reproduccion.empty():
-                hablando_actualmente = False
-                break
-            continue
-
-        if archivo_mp3 is None:
-            break
-
-        if not hablando_actualmente:
-            _vaciar_cola()
-            break
-
-        try:
-            # Reproducción nativa sin necesidad de FFmpeg
-            pygame.mixer.music.load(archivo_mp3)
-            pygame.mixer.music.play()
-            
-            while pygame.mixer.music.get_busy() and hablando_actualmente:
-                if keyboard.is_pressed('esc') or not hablando_actualmente:
-                    hablando_actualmente = False
-                    pygame.mixer.music.stop()
-                    _vaciar_cola()
-                    break
-                time.sleep(0.02)
-                
-            pygame.mixer.music.stop()
-            pygame.mixer.music.unload()
-            
-            # Limpieza del archivo temporal
+    reproduciendo_voz_gui = False
+    try:
+        while True:
             try:
-                os.remove(archivo_mp3)
-            except:
-                pass
-        except Exception as e:
-            print(f"Error reproduciendo con Pygame: {e}")
+                archivo_mp3 = _cola_reproduccion.get(timeout=0.2)
+            except queue.Empty:
+                with _secuencia_lock:
+                    sigue_sintetizando = (_siguiente_a_reproducir < _contador_secuencia)
+                if not sigue_sintetizando and not pygame.mixer.music.get_busy() and _cola_reproduccion.empty():
+                    hablando_actualmente = False
+                    break
+                continue
 
-    _hilo_reproductor_activo = False
+            if archivo_mp3 is None:
+                break
+
+            if not hablando_actualmente:
+                _vaciar_cola()
+                break
+
+            try:
+                if not reproduciendo_voz_gui:
+                    reproduciendo_voz_gui = True
+                    _notificar_gui_hablando(True)
+
+                pygame.mixer.music.load(archivo_mp3)
+                pygame.mixer.music.play()
+                
+                while pygame.mixer.music.get_busy() and hablando_actualmente:
+                    if keyboard.is_pressed('esc') or not hablando_actualmente:
+                        hablando_actualmente = False
+                        pygame.mixer.music.stop()
+                        _vaciar_cola()
+                        break
+                    time.sleep(0.02)
+                    
+                pygame.mixer.music.stop()
+                pygame.mixer.music.unload()
+                
+                # Limpieza del archivo temporal
+                try:
+                    os.remove(archivo_mp3)
+                except:
+                    pass
+            except Exception as e:
+                print(f"Error reproduciendo con Pygame: {e}")
+
+        _hilo_reproductor_activo = False
+    finally:
+        if reproduciendo_voz_gui:
+            _notificar_gui_hablando(False)
 
 def _vaciar_cola():
     while not _cola_reproduccion.empty():
@@ -277,6 +295,7 @@ def hablar_no_bloqueante(texto):
 
     def _hilo_maestro():
         global hablando_actualmente
+        reproduciendo_voz_gui = False
         try:
             hablando_actualmente = True
             oraciones_raw = [o.strip() for o in re.split(r'(?<=[.!?\n])', texto_limpio) if len(o.strip()) > 1]
@@ -305,6 +324,10 @@ def hablar_no_bloqueante(texto):
                     break
 
                 try:
+                    if not reproduciendo_voz_gui:
+                        reproduciendo_voz_gui = True
+                        _notificar_gui_hablando(True)
+
                     pygame.mixer.music.load(archivo)
                     pygame.mixer.music.play()
                     
@@ -329,12 +352,15 @@ def hablar_no_bloqueante(texto):
             print(f"Error en hablar_no_bloqueante: {e}")
         finally:
             hablando_actualmente = False
+            if reproduciendo_voz_gui:
+                _notificar_gui_hablando(False)
 
     threading.Thread(target=_hilo_maestro, daemon=True).start()
 
 def detener_voz():
     global hablando_actualmente
     hablando_actualmente = False
+    _notificar_gui_hablando(False)
     try:
         if pygame.mixer.get_init():
             pygame.mixer.music.stop()
@@ -403,16 +429,59 @@ def capturar_voz_micro(condicion_seguir_grabando=None):
             print(f"\n[GRABANDO] Habla ahora... (Soltá el control para terminar)")
 
         audio_data = []
+        ultimo_sonido = [time.time()]
+        hablo_algo = [False]
+        palabra_corte_detectada = [False]
 
-        def callback(indata, frames, time, status):
+        # Reconocedor de palabra clave de corte en tiempo real ("fuera") vía Vosk
+        recognizer_corte = None
+        try:
+            from modulos.skills.wake_word.gestor_wake_word import gestor_wake_word
+            if gestor_wake_word._modelo is not None:
+                import vosk, json
+                gramatica_corte = json.dumps(["fuera", "[unk]"])
+                recognizer_corte = vosk.KaldiRecognizer(gestor_wake_word._modelo, FS_AUDIO, gramatica_corte)
+                recognizer_corte.SetWords(False)
+        except Exception:
+            pass
+
+        def callback(indata, frames, time_info, status):
             audio_data.append(indata.copy())
+            bytes_audio = indata.tobytes()
+            try:
+                rms = np.sqrt(np.mean(indata.astype(np.float32)**2))
+                if rms > 350:  # Umbral de voz activa
+                    hablo_algo[0] = True
+                    ultimo_sonido[0] = time.time()
+                
+                if recognizer_corte is not None:
+                    if recognizer_corte.AcceptWaveform(bytes_audio):
+                        res = json.loads(recognizer_corte.Result())
+                        txt = res.get("text", "").lower()
+                    else:
+                        part = json.loads(recognizer_corte.PartialResult())
+                        txt = part.get("partial", "").lower()
+                    
+                    if "fuera" in txt.split():
+                        palabra_corte_detectada[0] = True
+            except Exception:
+                pass
 
         try:
             with sd.InputStream(samplerate=FS_AUDIO, channels=1, callback=callback):
                 time.sleep(0.2)
                 inicio = time.time()
                 while condicion_seguir_grabando():
-                    if time.time() - inicio > MAX_GRABACION_SEGUNDOS:
+                    ahora = time.time()
+                    # 1. Corte instantáneo si pronunció la palabra clave de fin "fuera"
+                    if palabra_corte_detectada[0]:
+                        print("[GRABANDO] ⚡ Palabra clave 'fuera' detectada — procesando grabación al instante...")
+                        break
+                    # 2. Si el usuario comenzó a hablar y luego hace pausa/silencio de 1.3s, finalizar automáticamente
+                    if hablo_algo[0] and (ahora - ultimo_sonido[0] > 1.3):
+                        print("[GRABANDO] 🤫 Silencio detectado post-habla, finalizando grabación...")
+                        break
+                    if ahora - inicio > MAX_GRABACION_SEGUNDOS:
                         print(f"[GRABANDO] ⚠️ Límite de {MAX_GRABACION_SEGUNDOS}s alcanzado, cortando grabación por seguridad.")
                         break
                     time.sleep(0.02)
@@ -438,6 +507,11 @@ def capturar_voz_micro(condicion_seguir_grabando=None):
         texto = "".join([s.text for s in segmentos]).strip()
         if os.path.exists(archivo_temporal):
             os.remove(archivo_temporal)
+
+        # Despojar la palabra clave 'fuera' al final del texto transcrito si estuviera presente
+        if texto:
+            texto = re.sub(r'\s*\b(fuera)\b[\s\.\,\!\?]*$', '', texto, flags=re.IGNORECASE).strip()
+
         return texto
     finally:
         escuchando_actualmente = False

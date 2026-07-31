@@ -528,7 +528,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         logger.info(f"PENSANDO ({MODO_ACTUAL.upper()})...")
 
         MODO_ACTUAL = config.estado.modo_actual
-        if MODO_ACTUAL in ("general", "gamer") and not _es_intencion_comando_directo(texto_usuario):
+        if MODO_ACTUAL in ("general", "chat", "gamer") and not _es_intencion_comando_directo(texto_usuario):
             iniciar_busqueda_anticipada(texto_usuario)
 
         try:
@@ -1026,7 +1026,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         if comando_busqueda == "INTERRUPTED":
             return
 
-        if comando_busqueda and getattr(config.estado, 'modo_actual', 'general') in ("general", "gamer"):
+        if comando_busqueda and getattr(config.estado, 'modo_actual', 'general') in ("general", "chat", "gamer"):
             if ui_callback:
                 ui_callback("⚙️ Sistema", f"🌍 Buscando en internet: {comando_busqueda}", "#80868B")
             datos_encontrados = buscar_en_internet(comando_busqueda, reciente=skill_activa)

@@ -11,11 +11,13 @@ from watchdog.events import FileSystemEventHandler
 
 from chromadb.utils import embedding_functions
 
+from modulos.logger import logger
+
 # 1. Definimos dónde se va a guardar la bóveda físicamente
 ruta_actual = os.path.dirname(os.path.abspath(__file__))
 ruta_db = os.path.join(ruta_actual, "boveda_memoria")
 
-print(f"🧠 [MEMORIA] Inicializando bóveda en: {ruta_db}")
+logger.info(f"🧠 [MEMORIA] Inicializando bóveda en: {ruta_db}")
 
 cliente = chromadb.PersistentClient(path=ruta_db)
 modelo_traductor = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
@@ -25,7 +27,7 @@ coleccion_principal = cliente.get_or_create_collection(
     embedding_function=modelo_traductor
 )
 
-print("✅ [MEMORIA] Base de datos vectorial lista y conectada.")
+logger.info("✅ [MEMORIA] Base de datos vectorial lista y conectada.")
 
 # =====================================================================
 # CACHÉ DE EMBEDDINGS (evita recalcular embeddings repetidos)

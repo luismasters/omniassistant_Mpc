@@ -142,7 +142,7 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
     comando_busqueda_detectado = None
 
     # --- PROTECCIÓN SANDBOX INTELIGENTE (previo a cualquier acción de archivo) ---
-    if MODO_ACTUAL != "general" and not WORKSPACE_ACTUAL and any(cmd in respuesta_ia.lower() for cmd in ["guardar_archivo:", "editar_archivo:", "reemplazar_bloque:", "crear_carpeta:", "eliminar:", "<replace_block>", "<write_file>"]):
+    if MODO_ACTUAL not in ("general", "chat") and not WORKSPACE_ACTUAL and any(cmd in respuesta_ia.lower() for cmd in ["guardar_archivo:", "editar_archivo:", "reemplazar_bloque:", "crear_carpeta:", "eliminar:", "<replace_block>", "<write_file>"]):
         msg_err = "⚠️ Error de seguridad: No se pueden modificar archivos sin un Workspace seleccionado."
         logger.error(msg_err)
         if ui_callback:
@@ -528,7 +528,7 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
 
             # BUSCAR WEB
             if cmd_limpia.startswith("buscar:"):
-                comando_busqueda_detectado = cmd[cmd.lower().find("buscar:") + 7:].replace('<', '').replace('>', '').strip()
+                comando_busqueda_detectado = cmd[cmd.lower().find("buscar:") + 7:].replace('<', '').replace('>', '').strip().strip('"\'`')
                 continue
 
             # GUARDAR EN BÓVEDA (con confirmación)
@@ -724,6 +724,17 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                     if ui_callback:
                         msg_c = f"✅ Recordatorio '{target}' cancelado." if exito else f"❌ No se encontró recordatorio: {target}"
                         ui_callback("⚙️ Sistema", msg_c, "#39ff14" if exito else "#ff4500")
+                elif subcmd.startswith("editar"):
+                    resto = subcmd.replace("editar", "", 1).strip(" |:")
+                    partes = [p.strip() for p in resto.split("|") if p.strip()]
+                    id_target = partes[0] if len(partes) > 0 else ""
+                    nuevo_msg = partes[1] if len(partes) > 1 else None
+                    nuevo_tiempo = partes[2] if len(partes) > 2 else None
+                    nuevas_opc = partes[3] if len(partes) > 3 else None
+                    rec = gestor_recordatorios.editar_recordatorio(id_target, nuevo_msg, nuevo_tiempo, nuevas_opc)
+                    if ui_callback:
+                        msg_e = f"✅ Recordatorio [{id_target}] actualizado: '{rec['mensaje']}' ({rec['expiracion_iso']})" if rec else f"❌ No se encontró recordatorio: {id_target}"
+                        ui_callback("⚙️ Sistema", msg_e, "#39ff14" if rec else "#ff4500")
                 continue
 
             # ESCANEAR PROYECTO CRAWLER

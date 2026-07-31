@@ -22,7 +22,7 @@
     <!-- ── SIDEBAR ──────────────────────────────────────────────── -->
     <aside class="sidebar">
 
-      <!-- EMO FACE (Preservado en segundo plano) -->
+      <!-- EMO FACE & HOLO AVATAR V2 -->
       <div class="emo-header" style="position: relative;">
         <div class="emo-bezel-frame" style="display: none;">
           <canvas id="emoCanvas" width="230" height="150"></canvas>
@@ -33,36 +33,49 @@
           <span id="emoStatusText">REPOSO</span>
         </div>
 
-        <!-- STAGE HOLOGRÁFICO INTERACTIVO (HUD) -->
-        <div class="holo-stage-container" id="holoStageContainer">
-          <div class="hud-corner tl"></div>
-          <div class="hud-corner tr"></div>
-          <div class="hud-corner bl"></div>
-          <div class="hud-corner br"></div>
-          <div class="reticle-ring"></div>
-          <div class="scanlines"></div>
-          <div class="vignette"></div>
+        <!-- STAGE AVATAR HOLOGRÁFICO (HoloAvatar v2) -->
+        <div class="avatar-section" id="avatarStageContainer">
+          <canvas id="particle-canvas" width="320" height="320" class="particle-layer" aria-hidden="true"></canvas>
 
-          <canvas id="holoCanvas"></canvas>
+          <div class="ring-outer" id="ring-outer"></div>
+          <div class="ring-mid" id="ring-mid"></div>
+          <div class="ring-inner" id="ring-inner"></div>
 
-          <div class="stage-telemetry">
-            <div>FPS: <span id="holoFpsCount">60</span></div>
-            <div>SYNC: <span>99.8%</span></div>
-            <div id="holoStateHexCode">#2DD4BF</div>
+          <canvas id="avatar-canvas" width="220" height="220" aria-label="Avatar holográfico de estado de IA"></canvas>
+
+          <div class="status-overlay">
+            <div class="status-label" id="status-label">REPOSO</div>
+            <div class="status-sublabel" id="status-sublabel">Vigilancia Pasiva</div>
+            <div class="status-code" id="status-code">ST_00</div>
           </div>
         </div>
 
-        <!-- TARJETA DE LECTURA DE ESTADO -->
-        <div class="holo-readout-card">
-          <div class="readout-header">
-            <div class="readout-label-group">
-              <span class="state-code" id="holoStateCode">ST-01</span>
-              <span class="state-name" id="holoStateName">ACTIVO</span>
-            </div>
-            <span class="state-freq" id="holoStateFreq">120 Hz</span>
+        <!-- MÉTRICAS NEURALES HUD -->
+        <div class="metrics-mini-panel">
+          <div class="metric-row">
+            <span class="metric-label">CARGA NEURAL</span>
+            <div class="metric-bar"><div class="metric-fill" id="metric-neural" style="width:12%"></div></div>
+            <span class="metric-value mono" id="val-neural">12%</span>
           </div>
-          <p class="readout-desc" id="holoStateDesc">Sistema en reposo pasivo. Esperando comando de voz o interacción.</p>
+          <div class="metric-row">
+            <span class="metric-label">FLUJO DE AUDIO</span>
+            <div class="metric-bar"><div class="metric-fill" id="metric-audio" style="width:0%"></div></div>
+            <span class="metric-value mono" id="val-audio">0%</span>
+          </div>
+          <div style="display:none;">
+            <div class="metric-fill" id="metric-resp" style="width:0%"></div><span id="val-resp">0%</span>
+            <div class="metric-fill" id="metric-exec" style="width:0%"></div><span id="val-exec">0%</span>
+          </div>
         </div>
+
+        <!-- TELEMETRÍA OCULTA -->
+        <div style="display:none;">
+          <span id="clock">--:--:--</span>
+          <span id="uptime">00:00:00</span>
+          <span id="fps-counter">60fps</span>
+          <span id="scroll-text"></span>
+        </div>
+
         <!-- RELOJ DIGITAL -->
         <div class="digital-clock" id="digitalClock">--:--:--</div>
       </div>
@@ -90,14 +103,14 @@
         </div>
       </div>
 
-      <!-- PROYECTO -->
+      <!-- WORKSPACE -->
       <div class="sidebar-section">
-        <div class="section-title">Proyecto</div>
-        <button class="action-btn" id="btnWorkspace" title="Anclar carpeta de proyecto">
+        <div class="section-title">Workspace</div>
+        <button class="action-btn" id="btnWorkspace" title="Seleccionar carpeta de trabajo">
           <div class="mode-btn-icon">📁</div>
           <div class="mode-btn-content">
-            <span class="mode-btn-label" id="lblWorkspace">Anclar Proyecto</span>
-            <span class="mode-btn-sub">Carpeta de trabajo</span>
+            <span class="mode-btn-label" id="lblWorkspace">Workspace</span>
+            <span class="mode-btn-sub">Directorio de trabajo</span>
           </div>
         </button>
       </div>
@@ -183,7 +196,7 @@
             </button>
             <button class="attach-menu-item" id="btnAttachProject">
               <span class="attach-icon">📁</span>
-              <span>Anclar proyecto</span>
+              <span>Workspace</span>
             </button>
           </div>
 
@@ -248,7 +261,8 @@
 
       <div class="modal-tabs">
         <button class="modal-tab active" id="tabRecActivos">📋 Pendientes</button>
-        <button class="modal-tab" id="tabRecNuevo">➕ Nuevo Manual</button>
+        <button class="modal-tab" id="tabRecCompletados">✅ Completados</button>
+        <button class="modal-tab" id="tabRecNuevo">➕ Nuevo</button>
       </div>
 
       <div class="modal-body">
@@ -259,18 +273,30 @@
           </div>
         </div>
 
+        <!-- PESTAÑA: LISTA DE COMPLETADOS -->
+        <div class="tab-content hidden" id="contentRecCompletados">
+          <div class="rec-list" id="recListCompletadosContainer">
+            <div class="rec-empty-state">Sin recordatorios completados.</div>
+          </div>
+        </div>
+
         <!-- PESTAÑA: CREAR NUEVO -->
         <div class="tab-content hidden" id="contentRecNuevo">
           <form id="formNuevoRec" class="rec-form">
             <div class="form-group">
               <label for="recMensaje">Mensaje / Título</label>
-              <input type="text" id="recMensaje" class="hud-input" placeholder="Ej: Tomar la medicina rosuvastatina" required />
+              <input type="text" id="recMensaje" class="hud-input" placeholder="Ej: Comprar boletos para el evento" required />
             </div>
 
             <div class="form-group">
-              <label for="recTiempo">Fecha / Hora / Expansión de tiempo</label>
-              <input type="text" id="recTiempo" class="hud-input" placeholder="Ej: en 15 minutos, a las 21:00, 25 de agosto" required />
-              <small class="form-hint">Acepta tiempo relativo ("en 30 min"), hora ("a las 20:00") o fecha ("6 de diciembre").</small>
+              <label for="recTiempo">Fecha / Hora / Expresión de tiempo</label>
+              <input type="text" id="recTiempo" class="hud-input" placeholder="Ej: en 13 días, mañana a las 15:00, 25 de agosto" required />
+              <small class="form-hint">Acepta lenguaje natural ("en 13 días", "mañana") o selector visual abajo:</small>
+            </div>
+
+            <div class="form-group">
+              <label for="recTiempoPicker">O Selector de Fecha/Hora Exacta</label>
+              <input type="datetime-local" id="recTiempoPicker" class="hud-input" />
             </div>
 
             <div class="form-group">
@@ -294,6 +320,54 @@
     </div>
   </div>
 
+  <!-- ── MODAL EDICIÓN DE RECORDATORIO ────────────────── -->
+  <div class="modal-overlay hidden" id="modalEditarRec">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span class="modal-icon">✏️</span>
+          <h3>Editar Recordatorio</h3>
+        </div>
+        <button class="modal-close-btn" id="btnCloseModalEditarRec">✕</button>
+      </div>
+      <div class="modal-body">
+        <form id="formEditarRec" class="rec-form">
+          <input type="hidden" id="editRecId" />
+
+          <div class="form-group">
+            <label for="editRecMensaje">Mensaje / Título</label>
+            <input type="text" id="editRecMensaje" class="hud-input" required />
+          </div>
+
+          <div class="form-group">
+            <label for="editRecTiempo">Fecha / Hora / Expresión de tiempo</label>
+            <input type="text" id="editRecTiempo" class="hud-input" placeholder="Ej: en 13 días, mañana a las 15:00" required />
+          </div>
+
+          <div class="form-group">
+            <label for="editRecTiempoPicker">O Selector de Fecha/Hora Exacta</label>
+            <input type="datetime-local" id="editRecTiempoPicker" class="hud-input" />
+          </div>
+
+          <div class="form-group">
+            <label for="editRecOpciones">Frecuencia / Opciones</label>
+            <select id="editRecOpciones" class="hud-select">
+              <option value="">Una sola vez (Puntual)</option>
+              <option value="diario">Todos los días (Recurrente)</option>
+              <option value="sin_hora">Sin hora fija (Primera interacción del día)</option>
+              <option value="cumpleaños">Cumpleaños (Aviso día anterior y hoy)</option>
+            </select>
+          </div>
+
+          <div class="form-actions" style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 15px;">
+            <button type="button" class="hud-btn-secondary" id="btnCancelEditRec">Cancelar</button>
+            <button type="submit" class="hud-btn-primary">💾 Guardar Cambios</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
   <!-- ── BURBUJA FLOTANTE DE RECORDATORIO (fuera del sidebar, no tapa EMO) ── -->
   <div class="emo-cloud-bubble hidden" id="emoCloudBubble">
     <div class="cloud-tail"></div>
@@ -312,7 +386,7 @@
   </div>
 
   <script src="emo_face.js"></script>
-  <script src="holo_hud.js"></script>
+  <script src="avatar_holo.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -212,7 +212,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (estado.modelo_seleccionado && modelSelect) modelSelect.value = estado.modelo_seleccionado;
         if (estado.workspace_actual && lblWorkspace) {
           const partes = estado.workspace_actual.split(/[\\\/]/);
-          lblWorkspace.innerText = partes[partes.length - 1] || 'Proyecto Anclado';
+          lblWorkspace.innerText = partes[partes.length - 1] || 'Workspace';
         }
         cargarPerfilesMentor(estado.lista_perfiles || []);
         if (estado.modelo_real) actualizarModeloLabel(estado.modelo_real);
@@ -464,11 +464,11 @@ document.addEventListener('DOMContentLoaded', () => {
   if (btnWorkspace) {
     btnWorkspace.addEventListener('click', async () => {
       if (pyApi) {
-        const res = await pyApi.anclar_proyecto();
+        const res = await pyApi.seleccionar_workspace();
         if (res.exito && res.workspace) {
           const partes = res.workspace.split(/[\\\/]/);
-          if (lblWorkspace) lblWorkspace.innerText = partes[partes.length - 1] || 'Proyecto Anclado';
-          agregarMensajeSistema(`📁 Proyecto anclado: <code>${escapeHtml(res.workspace)}</code>`);
+          if (lblWorkspace) lblWorkspace.innerText = partes[partes.length - 1] || 'Workspace';
+          agregarMensajeSistema(`📁 Workspace: <code>${escapeHtml(res.workspace)}</code>`);
         }
       }
     });
@@ -601,7 +601,7 @@ document.addEventListener('DOMContentLoaded', () => {
           wakeWordActivo = !!res.wake_word_activo;
           actualizarEstadoMicWakeWord();
           agregarMensajeSistema(wakeWordActivo 
-            ? '🔊 Wake Word activado — decí <strong>"Computer"</strong> para hablar.' 
+            ? '🔊 Wake Word activado — decí <strong>"OK Argus"</strong> para hablar.' 
             : '🔇 Wake Word desactivado.');
         } else if (res && res.error) {
           agregarMensajeSistema(`⚠️ ${res.error}`);
@@ -682,11 +682,11 @@ document.addEventListener('DOMContentLoaded', () => {
     btnAttachProject.addEventListener('click', async () => {
       closeAttachMenu();
       if (pyApi) {
-        const res = await pyApi.anclar_proyecto();
+        const res = await pyApi.seleccionar_workspace();
         if (res.exito && res.workspace) {
           const partes = res.workspace.split(/[\\/]/);
-          if (lblWorkspace) lblWorkspace.innerText = partes[partes.length - 1] || 'Proyecto Anclado';
-          agregarMensajeSistema(`📁 Proyecto anclado: <code>${escapeHtml(res.workspace)}</code>`);
+          if (lblWorkspace) lblWorkspace.innerText = partes[partes.length - 1] || 'Workspace';
+          agregarMensajeSistema(`📁 Workspace: <code>${escapeHtml(res.workspace)}</code>`);
         }
       }
     });
@@ -1234,6 +1234,17 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentAiRawText = '';
 
   let emoFaceTimer = null;
+
+  window.notificarEstadoAvatar = function(estado, msg = '') {
+    if (emoFaceTimer) {
+      clearTimeout(emoFaceTimer);
+      emoFaceTimer = null;
+    }
+    if (window.emoFace) {
+      window.emoFace.setEstado(estado, msg);
+    }
+  };
+
   function resetEmoFaceTimer(delayMs = 6000) {
     if (emoFaceTimer) clearTimeout(emoFaceTimer);
     emoFaceTimer = setTimeout(() => {
@@ -1257,21 +1268,18 @@ document.addEventListener('DOMContentLoaded', () => {
         currentAiRow.dataset.rawText = textoLimpio;
         if (emocion && currentAiAvatarDiv) {
           currentAiAvatarDiv.innerHTML = generarMiniEmoAvatarSVG(emocion);
-          if (window.emoFace) window.emoFace.setEstado(emocion);
-        } else if (!emocion && window.emoFace) {
-          window.emoFace.setEstado('talking');
+          if (window.emoFace && window.emoFace.estado !== 'talking') {
+            window.emoFace.setEstado(emocion);
+          }
         }
-
         if (typeof hljs !== 'undefined') {
           currentAiRow.querySelectorAll('pre code:not(.hljs)').forEach(b => {
             try { hljs.highlightElement(b); } catch (e) {}
           });
         }
       }
-      // Renderizar diagramas Mermaid que se hayan actualizado en el DOM
       renderMermaidDiagramsInDOM();
       scrollBottom();
-      resetEmoFaceTimer(6000);
     } else {
       currentAiRawText = textoMarkdown || '';
       const result = agregarMensajeArgus(currentAiRawText, remitente || 'Argus Copilot', true);
@@ -1280,9 +1288,9 @@ document.addEventListener('DOMContentLoaded', () => {
         currentAiRow = result.row;
         currentAiAvatarDiv = result.avatarDiv;
       }
-      // Primera respuesta: pasar de "thinking" (transcripción) a "talking" (respuesta)
-      if (window.emoFace) window.emoFace.setEstado('talking');
-      resetEmoFaceTimer(6000);
+      if (window.emoFace && window.emoFace.estado !== 'talking') {
+        window.emoFace.setEstado('thinking');
+      }
     }
   };
 
@@ -1321,11 +1329,46 @@ document.addEventListener('DOMContentLoaded', () => {
   const modalRecordatorios = document.getElementById('modalRecordatorios');
   const btnCloseModalRec = document.getElementById('btnCloseModalRec');
   const tabRecActivos    = document.getElementById('tabRecActivos');
+  const tabRecCompletados = document.getElementById('tabRecCompletados');
   const tabRecNuevo      = document.getElementById('tabRecNuevo');
+
   const contentRecActivos = document.getElementById('contentRecActivos');
+  const contentRecCompletados = document.getElementById('contentRecCompletados');
   const contentRecNuevo   = document.getElementById('contentRecNuevo');
+
   const recListContainer = document.getElementById('recListContainer');
+  const recListCompletadosContainer = document.getElementById('recListCompletadosContainer');
   const formNuevoRec     = document.getElementById('formNuevoRec');
+  const recTiempoPicker  = document.getElementById('recTiempoPicker');
+  const recTiempoInput   = document.getElementById('recTiempo');
+
+  // Modal Editar Recordatorio Elements
+  const modalEditarRec      = document.getElementById('modalEditarRec');
+  const btnCloseModalEditar = document.getElementById('btnCloseModalEditarRec');
+  const btnCancelEditRec    = document.getElementById('btnCancelEditRec');
+  const formEditarRec       = document.getElementById('formEditarRec');
+  const editRecId           = document.getElementById('editRecId');
+  const editRecMensaje      = document.getElementById('editRecMensaje');
+  const editRecTiempo       = document.getElementById('editRecTiempo');
+  const editRecTiempoPicker = document.getElementById('editRecTiempoPicker');
+  const editRecOpciones     = document.getElementById('editRecOpciones');
+
+  // Sincronizar datetime-local picker con inputs de texto
+  if (recTiempoPicker && recTiempoInput) {
+    recTiempoPicker.addEventListener('change', () => {
+      if (recTiempoPicker.value) {
+        recTiempoInput.value = recTiempoPicker.value.replace('T', ' ');
+      }
+    });
+  }
+
+  if (editRecTiempoPicker && editRecTiempo) {
+    editRecTiempoPicker.addEventListener('change', () => {
+      if (editRecTiempoPicker.value) {
+        editRecTiempo.value = editRecTiempoPicker.value.replace('T', ' ');
+      }
+    });
+  }
 
   // Función invocada por Python cuando expira/dispara un recordatorio
   window.mostrarNubeRecordatorioEmo = function(data) {
@@ -1343,7 +1386,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (window.emoFace) {
-      window.emoFace.setEstado('confirm', esPrevio ? 'MAÑANA' : 'AVISO');
+      window.emoFace.setEstado('warning', msg);
     }
   };
 
@@ -1376,76 +1419,215 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  if (tabRecActivos && tabRecNuevo) {
+  // Edit Modal Handlers
+  const cerrarModalEditar = () => {
+    if (modalEditarRec) modalEditarRec.classList.add('hidden');
+  };
+  if (btnCloseModalEditar) btnCloseModalEditar.addEventListener('click', cerrarModalEditar);
+  if (btnCancelEditRec) btnCancelEditRec.addEventListener('click', cerrarModalEditar);
+  if (modalEditarRec) {
+    modalEditarRec.addEventListener('click', (e) => {
+      if (e.target === modalEditarRec) cerrarModalEditar();
+    });
+  }
+
+  // Manejo de Pestañas
+  function resetTabs() {
+    [tabRecActivos, tabRecCompletados, tabRecNuevo].forEach(t => t && t.classList.remove('active'));
+    [contentRecActivos, contentRecCompletados, contentRecNuevo].forEach(c => c && c.classList.add('hidden'));
+  }
+
+  if (tabRecActivos) {
     tabRecActivos.addEventListener('click', () => {
+      resetTabs();
       tabRecActivos.classList.add('active');
-      tabRecNuevo.classList.remove('active');
-      contentRecActivos.classList.remove('hidden');
-      contentRecNuevo.classList.add('hidden');
+      if (contentRecActivos) contentRecActivos.classList.remove('hidden');
       cargarListaRecordatorios();
     });
+  }
 
+  if (tabRecCompletados) {
+    tabRecCompletados.addEventListener('click', () => {
+      resetTabs();
+      tabRecCompletados.classList.add('active');
+      if (contentRecCompletados) contentRecCompletados.classList.remove('hidden');
+      cargarListaRecordatorios();
+    });
+  }
+
+  if (tabRecNuevo) {
     tabRecNuevo.addEventListener('click', () => {
+      resetTabs();
       tabRecNuevo.classList.add('active');
-      tabRecActivos.classList.remove('active');
-      contentRecNuevo.classList.remove('hidden');
-      contentRecActivos.classList.add('hidden');
+      if (contentRecNuevo) contentRecNuevo.classList.remove('hidden');
     });
   }
 
   async function cargarListaRecordatorios() {
     if (!pyApi || typeof pyApi.obtener_recordatorios !== 'function') return;
     try {
-      if (recListContainer) recListContainer.innerHTML = '<div class="rec-empty-state">Cargando...</div>';
-      const res = await pyApi.obtener_recordatorios();
+      if (recListContainer) recListContainer.innerHTML = '<div class="rec-empty-state">Cargando pendientes…</div>';
+      if (recListCompletadosContainer) recListCompletadosContainer.innerHTML = '<div class="rec-empty-state">Cargando completados…</div>';
+
+      const res = await pyApi.obtener_recordatorios(true);
       if (res && res.exito) {
-        renderizarListaRecordatorios(res.recordatorios || []);
+        const todos = res.recordatorios || [];
+        const pendientes = todos.filter(r => r.estado === 'pendiente');
+        const completados = todos.filter(r => r.estado !== 'pendiente');
+
+        renderizarListaRecordatorios(pendientes, recListContainer, false);
+        renderizarListaRecordatorios(completados, recListCompletadosContainer, true);
       } else {
-        if (recListContainer) recListContainer.innerHTML = `<div class="rec-empty-state">Error: ${res.error || 'No disponible'}</div>`;
+        const errHtml = `<div class="rec-empty-state">Error: ${escapeHtml(res.error || 'No disponible')}</div>`;
+        if (recListContainer) recListContainer.innerHTML = errHtml;
+        if (recListCompletadosContainer) recListCompletadosContainer.innerHTML = errHtml;
       }
     } catch (e) {
       console.error('Error cargando recordatorios:', e);
-      if (recListContainer) recListContainer.innerHTML = `<div class="rec-empty-state">Error al conectar con el motor.</div>`;
+      const errHtml = `<div class="rec-empty-state">Error al conectar con el motor.</div>`;
+      if (recListContainer) recListContainer.innerHTML = errHtml;
+      if (recListCompletadosContainer) recListCompletadosContainer.innerHTML = errHtml;
     }
   }
 
-  function renderizarListaRecordatorios(lista) {
-    if (!recListContainer) return;
+  function renderizarListaRecordatorios(lista, container, esCompletados) {
+    if (!container) return;
     if (lista.length === 0) {
-      recListContainer.innerHTML = '<div class="rec-empty-state">No tienes recordatorios pendientes. 🎉</div>';
+      container.innerHTML = esCompletados
+        ? '<div class="rec-empty-state">No hay recordatorios en el historial.</div>'
+        : '<div class="rec-empty-state">No tienes recordatorios pendientes. 🎉</div>';
       return;
     }
 
-    recListContainer.innerHTML = '';
+    container.innerHTML = '';
     lista.forEach(r => {
       const item = document.createElement('div');
-      item.className = 'rec-item';
+      item.className = `rec-item ${esCompletados ? 'rec-item-done' : ''}`;
 
-      const tagTipo = r.tipo === 'recurrente' ? '🔄 Recurrente' : (r.sin_hora_especifica ? '☀️ Día Completo' : '⏱️ Puntual');
+      let tagTipo = '⏱️ Puntual';
+      if (r.aviso_previo_dias > 0 || (r.opciones && r.opciones.includes('cumple'))) {
+        tagTipo = '🎂 Cumpleaños';
+      } else if (r.tipo === 'recurrente') {
+        tagTipo = '🔄 Diario';
+      } else if (r.sin_hora_especifica) {
+        tagTipo = '☀️ Día Completo';
+      }
+
+      const tagOrigen = r.origen === 'gui_manual' ? '👤 Manual' : '🤖 IA';
+      const fechaExp = r.expiracion_bonita || r.expiracion_iso || '';
+      const fechaCreado = r.creado_en_iso ? r.creado_en_iso.split(' ')[0] : '';
+      const restanteStr = r.tiempo_restante_str || '';
 
       item.innerHTML = `
         <div class="rec-item-info">
-          <div class="rec-item-title">${escapeHtml(r.mensaje)}</div>
+          <div class="rec-item-title-row">
+            <span class="rec-item-title ${esCompletados ? 'strikethrough' : ''}">${escapeHtml(r.mensaje)}</span>
+          </div>
           <div class="rec-item-meta">
-            <span class="rec-badge">${tagTipo}</span>
-            <span>📅 ${escapeHtml(r.expiracion_iso)}</span>
+            <span class="rec-badge rec-badge-tipo">${tagTipo}</span>
+            <span class="rec-badge rec-badge-origen">${tagOrigen}</span>
+            ${!esCompletados ? `<span class="rec-chip-countdown">⏳ ${escapeHtml(restanteStr)}</span>` : ''}
+          </div>
+          <div class="rec-item-details">
+            <span>📅 Vence: <strong>${escapeHtml(fechaExp)}</strong></span>
+            ${fechaCreado ? `<span>• Creado: ${escapeHtml(fechaCreado)}</span>` : ''}
           </div>
         </div>
-        <button class="rec-btn-del" data-id="${r.id}" title="Eliminar recordatorio">🗑️ Borrar</button>
+
+        <div class="rec-item-actions">
+          ${!esCompletados ? `
+            <button class="rec-btn-edit" data-id="${r.id}" title="Editar recordatorio">✏️ Editar</button>
+            <button class="rec-btn-complete" data-id="${r.id}" title="Marcar como completado">✅</button>
+          ` : `
+            <button class="rec-btn-reactivate" data-id="${r.id}" title="Reactivar recordatorio">🔄 Reactivar</button>
+          `}
+          <button class="rec-btn-del" data-id="${r.id}" title="Eliminar recordatorio">🗑️</button>
+        </div>
       `;
 
-      const btnDel = item.querySelector('.rec-btn-del');
-      if (btnDel) {
-        btnDel.addEventListener('click', async () => {
-          const id = btnDel.dataset.id;
-          if (pyApi && typeof pyApi.cancelar_recordatorio_manual === 'function') {
-            await pyApi.cancelar_recordatorio_manual(id);
+      // Handlers de botones de la tarjeta
+      const btnEdit = item.querySelector('.rec-btn-edit');
+      if (btnEdit) {
+        btnEdit.addEventListener('click', () => {
+          abrirModalEditar(r);
+        });
+      }
+
+      const btnComplete = item.querySelector('.rec-btn-complete');
+      if (btnComplete) {
+        btnComplete.addEventListener('click', async () => {
+          if (pyApi && typeof pyApi.cambiar_estado_recordatorio_manual === 'function') {
+            await pyApi.cambiar_estado_recordatorio_manual(r.id, 'completado');
             cargarListaRecordatorios();
           }
         });
       }
 
-      recListContainer.appendChild(item);
+      const btnReactivate = item.querySelector('.rec-btn-reactivate');
+      if (btnReactivate) {
+        btnReactivate.addEventListener('click', async () => {
+          if (pyApi && typeof pyApi.cambiar_estado_recordatorio_manual === 'function') {
+            await pyApi.cambiar_estado_recordatorio_manual(r.id, 'pendiente');
+            cargarListaRecordatorios();
+          }
+        });
+      }
+
+      const btnDel = item.querySelector('.rec-btn-del');
+      if (btnDel) {
+        btnDel.addEventListener('click', async () => {
+          if (pyApi && typeof pyApi.cancelar_recordatorio_manual === 'function') {
+            await pyApi.cancelar_recordatorio_manual(r.id);
+            cargarListaRecordatorios();
+          }
+        });
+      }
+
+      container.appendChild(item);
+    });
+  }
+
+  function abrirModalEditar(rec) {
+    if (!rec || !modalEditarRec) return;
+    if (editRecId) editRecId.value = rec.id || '';
+    if (editRecMensaje) editRecMensaje.value = rec.mensaje || '';
+    if (editRecTiempo) editRecTiempo.value = rec.expiracion_iso || '';
+    if (editRecTiempoPicker) {
+      if (rec.expiracion_iso) {
+        editRecTiempoPicker.value = rec.expiracion_iso.replace(' ', 'T').substring(0, 16);
+      } else {
+        editRecTiempoPicker.value = '';
+      }
+    }
+    if (editRecOpciones) {
+      if (rec.aviso_previo_dias > 0) editRecOpciones.value = 'cumpleaños';
+      else if (rec.tipo === 'recurrente') editRecOpciones.value = 'diario';
+      else if (rec.sin_hora_especifica) editRecOpciones.value = 'sin_hora';
+      else editRecOpciones.value = '';
+    }
+
+    modalEditarRec.classList.remove('hidden');
+  }
+
+  if (formEditarRec) {
+    formEditarRec.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = editRecId ? editRecId.value : '';
+      const mensaje = editRecMensaje ? editRecMensaje.value.trim() : '';
+      const tiempo = editRecTiempo ? editRecTiempo.value.trim() : '';
+      const opciones = editRecOpciones ? editRecOpciones.value : '';
+
+      if (!id || !mensaje || !tiempo) return;
+
+      if (pyApi && typeof pyApi.editar_recordatorio_manual === 'function') {
+        const res = await pyApi.editar_recordatorio_manual(id, mensaje, tiempo, opciones);
+        if (res && res.exito) {
+          cerrarModalEditar();
+          cargarListaRecordatorios();
+        } else {
+          alert('Error editando recordatorio: ' + (res.error || 'desconocido'));
+        }
+      }
     });
   }
 
@@ -1469,6 +1651,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (res && res.exito) {
           msgInput.value = '';
           tiempoInput.value = '';
+          if (recTiempoPicker) recTiempoPicker.value = '';
           if (opcSelect) opcSelect.value = '';
           if (tabRecActivos) tabRecActivos.click();
         } else {
