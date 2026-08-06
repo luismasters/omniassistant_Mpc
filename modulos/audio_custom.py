@@ -24,6 +24,7 @@ os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 
 from config import WHISPER_MODEL_SIZE, WHISPER_DEVICE, WHISPER_COMPUTE_TYPE
 from config import TECLA_HABLAR, FS_AUDIO, MAX_GRABACION_SEGUNDOS
+from config import PALABRA_CORTE_VOZ, SILENCIO_CORTE_GRABACION
 
 hablando_actualmente = False
 escuchando_actualmente = False
@@ -433,13 +434,15 @@ def capturar_voz_micro(condicion_seguir_grabando=None):
         hablo_algo = [False]
         palabra_corte_detectada = [False]
 
-        # Reconocedor de palabra clave de corte en tiempo real ("fuera") vía Vosk
+        # Reconocedor de palabra clave de corte en tiempo real vía Vosk.
+        # La palabra clave se corta SOLO si es la última palabra de la frase,
+        # así el usuario puede dar la instrucción completa antes de que corte.
         recognizer_corte = None
         try:
             from modulos.skills.wake_word.gestor_wake_word import gestor_wake_word
             if gestor_wake_word._modelo is not None:
                 import vosk, json
-                gramatica_corte = json.dumps(["fuera", "[unk]"])
+                gramatica_corte = json.dumps([PALABRA_CORTE_VOZ, "[unk]"])
                 recognizer_corte = vosk.KaldiRecognizer(gestor_wake_word._modelo, FS_AUDIO, gramatica_corte)
                 recognizer_corte.SetWords(False)
         except Exception:
@@ -462,7 +465,10 @@ def capturar_voz_micro(condicion_seguir_grabando=None):
                         part = json.loads(recognizer_corte.PartialResult())
                         txt = part.get("partial", "").lower()
                     
-                    if "fuera" in txt.split():
+                    # La palabra clave debe ser la ÚLTIMA palabra reconocida
+                    # ("abre chrome procede") corta, pero ("si procede...") no.
+                    palabras_txt = txt.split()
+                    if palabras_txt and palabras_txt[-1] == PALABRA_CORTE_VOZ:
                         palabra_corte_detectada[0] = True
             except Exception:
                 pass
@@ -473,12 +479,13 @@ def capturar_voz_micro(condicion_seguir_grabando=None):
                 inicio = time.time()
                 while condicion_seguir_grabando():
                     ahora = time.time()
-                    # 1. Corte instantáneo si pronunció la palabra clave de fin "fuera"
+                    # 1. Corte instantáneo si pronunció la palabra clave de fin
                     if palabra_corte_detectada[0]:
-                        print("[GRABANDO] ⚡ Palabra clave 'fuera' detectada — procesando grabación al instante...")
+                        print(f"[GRABANDO] ⚡ Palabra clave '{PALABRA_CORTE_VOZ}' detectada — procesando grabación al instante...")
                         break
-                    # 2. Si el usuario comenzó a hablar y luego hace pausa/silencio de 1.3s, finalizar automáticamente
-                    if hablo_algo[0] and (ahora - ultimo_sonido[0] > 1.3):
+                    # 2. Si el usuario comenzó a hablar y luego hace pausa/silencio,
+                    #    finalizar automáticamente (umbral ampliado para instrucciones largas)
+                    if hablo_algo[0] and (ahora - ultimo_sonido[0] > SILENCIO_CORTE_GRABACION):
                         print("[GRABANDO] 🤫 Silencio detectado post-habla, finalizando grabación...")
                         break
                     if ahora - inicio > MAX_GRABACION_SEGUNDOS:
@@ -508,9 +515,12 @@ def capturar_voz_micro(condicion_seguir_grabando=None):
         if os.path.exists(archivo_temporal):
             os.remove(archivo_temporal)
 
-        # Despojar la palabra clave 'fuera' al final del texto transcrito si estuviera presente
+        # Despojar la palabra clave de corte al final del texto transcrito si estuviera presente
         if texto:
-            texto = re.sub(r'\s*\b(fuera)\b[\s\.\,\!\?]*$', '', texto, flags=re.IGNORECASE).strip()
+            texto = re.sub(
+                rf'\s*\b({re.escape(PALABRA_CORTE_VOZ)})\b[\s\.\,\!\?]*$',
+                '', texto, flags=re.IGNORECASE
+            ).strip()
 
         return texto
     finally:

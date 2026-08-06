@@ -15,7 +15,7 @@ def _dividir_comandos(linea: str) -> list[str]:
     y remueve el texto conversacional previo en la misma línea.
     """
     verbos = [
-        "abrir:", "navegar:", "mover:", "cerrar:", "explorar:", "audio:", "recordatorio:",
+        "abrir:", "navegar:", "mover:", "cerrar:", "explorar:", "mcp_explorar_ruta:", "mcp_leer_documento:", "audio:", "recordatorio:",
         "leer_archivo:", "editar_archivo:", "guardar_archivo:", "reemplazar_bloque:",
         "crear_carpeta:", "buscar:", "guardar_en_boveda:", "escanear_proyecto:",
         "github:", "github_reset:", "git_comando:", "snapshot:", "capturar:"
@@ -339,7 +339,7 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
             cmd_limpia = re.sub(r'^(\-\s|\d+\.\s)', '', cmd_limpia)
 
             # Asegurar alineación directa al verbo si existe prefijo conversacional
-            verbos_clave = ["abrir:", "navegar:", "cerrar:", "mover:", "explorar:", "audio:", "recordatorio:", "leer_archivo:", "editar_archivo:", "guardar_archivo:", "reemplazar_bloque:", "crear_carpeta:", "buscar:", "guardar_en_boveda:", "escanear_proyecto:", "github:", "capturar:", "argus:"]
+            verbos_clave = ["abrir:", "navegar:", "cerrar:", "mover:", "explorar:", "mcp_explorar_ruta:", "mcp_leer_documento:", "audio:", "recordatorio:", "leer_archivo:", "editar_archivo:", "guardar_archivo:", "reemplazar_bloque:", "crear_carpeta:", "buscar:", "guardar_en_boveda:", "escanear_proyecto:", "github:", "capturar:", "argus:"]
             for v_prefix in verbos_clave:
                 pos_v = cmd_limpia.find(v_prefix)
                 if pos_v > 0:
@@ -352,6 +352,47 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
             if any(t in cmd_limpia for t in ["reemplazar_bloque:", "---buscar---", "---reemplazar---", "---fin---", "<replace_block>", "<reemplazar_bloque>", "<buscar>", "<reemplazar>"]):
                 continue
             if "<read_file>" in cmd_limpia:
+                continue
+
+            # EXPLORAR RUTA / DIRECTORIO
+            if cmd_limpia.startswith(("mcp_explorar_ruta:", "explorar:")):
+                idx = cmd.lower().find(":") + 1
+                raw_path = cmd[idx:].strip()
+                ruta_corta = raw_path.split('|')[0].strip()
+                ruta_valida, resultado = _validar_ruta(ruta_corta, WORKSPACE_ACTUAL, MODO_ACTUAL)
+                if not ruta_valida:
+                    if ui_callback:
+                        ui_callback("⚙️ Sistema", f"❌ Ruta no permitida: {ruta_corta}", "#FF4500")
+                    continue
+                ruta_real = resultado
+                from modulos.sistema import explorar_directorio
+                res_exp = explorar_directorio(ruta_real)
+                config.estado.agregar_mensaje_chat(
+                    {'role': 'user', 'parts': [f"[RESULTADO EXPLORACIÓN DE {ruta_corta}]:\n{res_exp}"]},
+                    contar_para_perfil=False
+                )
+                if ui_callback:
+                    ui_callback("⚙️ Sistema", f"📂 Directorio explorado: {ruta_corta}", "#80868B")
+                continue
+
+            # LECTURA DE DOCUMENTOS / ARCHIVOS VIA MCP/TEXTO
+            if cmd_limpia.startswith("mcp_leer_documento:"):
+                idx = cmd.lower().find("mcp_leer_documento:") + 19
+                raw_path = cmd[idx:].strip()
+                ruta_corta = raw_path.split('|')[0].strip()
+                ruta_valida, resultado = _validar_ruta(ruta_corta, WORKSPACE_ACTUAL, MODO_ACTUAL)
+                if not ruta_valida:
+                    if ui_callback:
+                        ui_callback("⚙️ Sistema", f"❌ Ruta no permitida: {ruta_corta}", "#FF4500")
+                    continue
+                ruta_real = resultado
+                contenido = leer_contenido_archivo(ruta_real)
+                config.estado.agregar_mensaje_chat(
+                    {'role': 'user', 'parts': [f"[CONTENIDO DE '{ruta_corta}']:\n{contenido}"]},
+                    contar_para_perfil=False
+                )
+                if ui_callback:
+                    ui_callback("⚙️ Sistema", f"📄 Documento leído: {ruta_corta}", "#80868B")
                 continue
 
             # LECTURA DE ARCHIVOS

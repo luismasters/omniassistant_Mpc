@@ -332,11 +332,32 @@ class ArgusWebBridge:
     def cambiar_modo_interfaz(self, modo: str) -> dict:
         """
         Cambia el modo de la interfaz (chat, mentor, gamer).
+        Guarda la sesión del modo saliente en segundo plano.
         """
         try:
             modo_lower = modo.lower()
             if modo_lower not in ["chat", "mentor", "gamer"]:
                 return {"exito": False, "error": f"Modo inválido: {modo}"}
+
+            modo_anterior = estado.modo_actual
+            if modo_anterior != modo_lower:
+                mensajes = estado.obtener_contexto_copia()
+                if mensajes:
+                    def _hilo_guardar_saliente():
+                        try:
+                            if modo_anterior == "mentor":
+                                from modulos.perfil_mentor import extraer_y_procesar_sesion_mentor
+                                extraer_y_procesar_sesion_mentor(mensajes, estado.workspace_actual)
+                            elif modo_anterior == "gamer":
+                                from modulos.perfil_gamer import extraer_y_procesar_sesion_gamer
+                                extraer_y_procesar_sesion_gamer(mensajes)
+                            else:
+                                from modulos.perfil_usuario import extraer_y_procesar_sesion
+                                extraer_y_procesar_sesion(mensajes)
+                        except Exception as e_saliente:
+                            logger.exception(f"Error procesando sesión saliente ({modo_anterior}): {e_saliente}")
+
+                    threading.Thread(target=_hilo_guardar_saliente, daemon=True).start()
 
             estado.cambiar_modo(modo_lower)
             logger.info(f"Modo de interfaz cambiado a: {modo_lower.upper()}")
@@ -441,7 +462,7 @@ class ArgusWebBridge:
                 try:
                     if _cfg.estado.modo_actual == "mentor":
                         from modulos.perfil_mentor import extraer_y_procesar_sesion_mentor
-                        extraer_y_procesar_sesion_mentor(mensajes)
+                        extraer_y_procesar_sesion_mentor(mensajes, _cfg.estado.workspace_actual)
                     elif _cfg.estado.modo_actual == "gamer":
                         from modulos.perfil_gamer import extraer_y_procesar_sesion_gamer
                         extraer_y_procesar_sesion_gamer(mensajes)

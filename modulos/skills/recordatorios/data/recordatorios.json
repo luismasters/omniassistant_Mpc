@@ -138,9 +138,9 @@
   {
     "id": "rec_8ebe8ce2",
     "mensaje": "Beber 250ml de agua",
-    "timestamp_expiracion": 1785492000.0,
-    "expiracion_iso": "2026-07-31 07:00:00",
-    "expiracion_bonita": "31/07/2026 07:00",
+    "timestamp_expiracion": 1786010400.0,
+    "expiracion_iso": "2026-08-06 07:00:00",
+    "expiracion_bonita": "06/08/2026 07:00",
     "creado_en": 1784753783.8452778,
     "creado_en_iso": "2026-07-22 17:56:23",
     "estado": "pendiente",
@@ -155,9 +155,9 @@
   {
     "id": "rec_d76ff04d",
     "mensaje": "Beber 250ml de agua",
-    "timestamp_expiracion": 1785502800.0,
-    "expiracion_iso": "2026-07-31 10:00:00",
-    "expiracion_bonita": "31/07/2026 10:00",
+    "timestamp_expiracion": 1786021200.0,
+    "expiracion_iso": "2026-08-06 10:00:00",
+    "expiracion_bonita": "06/08/2026 10:00",
     "creado_en": 1784753783.8480186,
     "creado_en_iso": "2026-07-22 17:56:23",
     "estado": "pendiente",
@@ -172,9 +172,9 @@
   {
     "id": "rec_fc7afdba",
     "mensaje": "Beber 250ml de agua",
-    "timestamp_expiracion": 1785511800.0,
-    "expiracion_iso": "2026-07-31 12:30:00",
-    "expiracion_bonita": "31/07/2026 12:30",
+    "timestamp_expiracion": 1786030200.0,
+    "expiracion_iso": "2026-08-06 12:30:00",
+    "expiracion_bonita": "06/08/2026 12:30",
     "creado_en": 1784753783.851317,
     "creado_en_iso": "2026-07-22 17:56:23",
     "estado": "pendiente",
@@ -189,9 +189,9 @@
   {
     "id": "rec_6733a451",
     "mensaje": "Beber 250ml de agua",
-    "timestamp_expiracion": 1785522600.0,
-    "expiracion_iso": "2026-07-31 15:30:00",
-    "expiracion_bonita": "31/07/2026 15:30",
+    "timestamp_expiracion": 1786041000.0,
+    "expiracion_iso": "2026-08-06 15:30:00",
+    "expiracion_bonita": "06/08/2026 15:30",
     "creado_en": 1784753783.8560185,
     "creado_en_iso": "2026-07-22 17:56:23",
     "estado": "pendiente",
@@ -206,9 +206,9 @@
   {
     "id": "rec_80001670",
     "mensaje": "Beber 250ml de agua",
-    "timestamp_expiracion": 1785531600.0,
-    "expiracion_iso": "2026-07-31 18:00:00",
-    "expiracion_bonita": "31/07/2026 18:00",
+    "timestamp_expiracion": 1786050000.0,
+    "expiracion_iso": "2026-08-06 18:00:00",
+    "expiracion_bonita": "06/08/2026 18:00",
     "creado_en": 1784753783.8585658,
     "creado_en_iso": "2026-07-22 17:56:23",
     "estado": "pendiente",
@@ -223,9 +223,9 @@
   {
     "id": "rec_6ec560f6",
     "mensaje": "Beber 250ml de agua",
-    "timestamp_expiracion": 1785538800.0,
-    "expiracion_iso": "2026-07-31 20:00:00",
-    "expiracion_bonita": "31/07/2026 20:00",
+    "timestamp_expiracion": 1786057200.0,
+    "expiracion_iso": "2026-08-06 20:00:00",
+    "expiracion_bonita": "06/08/2026 20:00",
     "creado_en": 1784753783.8610606,
     "creado_en_iso": "2026-07-22 17:56:23",
     "estado": "pendiente",
@@ -240,9 +240,9 @@
   {
     "id": "rec_13ff644a",
     "mensaje": "Beber 250ml de agua",
-    "timestamp_expiracion": 1785544200.0,
-    "expiracion_iso": "2026-07-31 21:30:00",
-    "expiracion_bonita": "31/07/2026 21:30",
+    "timestamp_expiracion": 1786062600.0,
+    "expiracion_iso": "2026-08-06 21:30:00",
+    "expiracion_bonita": "06/08/2026 21:30",
     "creado_en": 1784753783.8631616,
     "creado_en_iso": "2026-07-22 17:56:23",
     "estado": "pendiente",
@@ -291,9 +291,9 @@
   {
     "id": "rec_bd5e74e4",
     "mensaje": "Tomar la pastilla rosuvastatina",
-    "timestamp_expiracion": 1785542400.0,
-    "expiracion_iso": "2026-07-31 21:00:00",
-    "expiracion_bonita": "31/07/2026 21:00",
+    "timestamp_expiracion": 1786060800.0,
+    "expiracion_iso": "2026-08-06 21:00:00",
+    "expiracion_bonita": "06/08/2026 21:00",
     "creado_en": 1784754946.1752765,
     "creado_en_iso": "2026-07-22 18:15:46",
     "estado": "pendiente",
@@ -320,7 +320,7 @@
     "aviso_previo_dias": 1,
     "notificado_previo": false,
     "origen": "ia",
-    "tiempo_restante_str": "Faltan 128d 11h"
+    "tiempo_restante_str": "Faltan 122d 11h"
   },
   {
     "id": "rec_680e3f45",
@@ -456,7 +456,7 @@
     "aviso_previo_dias": 0,
     "notificado_previo": false,
     "origen": "ia",
-    "tiempo_restante_str": "Faltan 11d 11h"
+    "tiempo_restante_str": "Faltan 5d 11h"
   },
   {
     "id": "rec_731764a9",
@@ -473,6 +473,23 @@
     "aviso_previo_dias": 0,
     "notificado_previo": false,
     "origen": "ia",
-    "tiempo_restante_str": "Faltan 12d 11h"
+    "tiempo_restante_str": "Faltan 6d 11h"
+  },
+  {
+    "id": "rec_d9ccf88e",
+    "mensaje": "Saludo a la gente",
+    "timestamp_expiracion": 1785940811.025079,
+    "expiracion_iso": "2026-08-05 11:40:11",
+    "expiracion_bonita": "05/08/2026 11:40",
+    "creado_en": 1785940791.026051,
+    "creado_en_iso": "2026-08-05 11:39:51",
+    "estado": "completado",
+    "tipo": "puntual",
+    "patron_recurrencia": null,
+    "sin_hora_especifica": false,
+    "aviso_previo_dias": 0,
+    "notificado_previo": false,
+    "origen": "ia",
+    "tiempo_restante_str": "Completado"
   }
 ]

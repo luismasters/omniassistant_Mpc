@@ -1,5 +1,7 @@
 # 🏗️ Auditoría de Arquitectura — Argus OmniAssistant
 
+> ⚠️ **Documento HISTÓRICO.** Esta auditoría corresponde al estado del 25/07/2026. Varios puntos ya fueron resueltos (rotación de logs, tests, requirements). Para la planificación viva y la deuda técnica actualizada, consultá **[ROADMAP.md](ROADMAP.md)**.
+
 **Fecha:** 25 de Julio de 2026  
 **Versión analizada:** v0.5.0 HUD  
 **Propósito:** Análisis estructural, deuda técnica y hoja de ruta de mejoras

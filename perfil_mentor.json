@@ -10,7 +10,9 @@
       "GitHub Actions",
       "Pytest",
       "CrewAI",
-      "Groq API"
+      "Groq API",
+      "Aider",
+      "Claude Code"
     ]
   },
   "tecnologias_aprendidas": [
@@ -29,7 +31,11 @@
     "Groq API",
     "Cline (VSC)",
     "SentenceTransformers",
-    "PyPDF"
+    "PyPDF",
+    "Pytest",
+    "Unittest",
+    "Middleware",
+    "Antigravity CLI"
   ],
   "tecnologias_en_estudio": [
     "React",
@@ -39,7 +45,10 @@
     "LangChain",
     "CrewAI",
     "RAG (Retrieval-Augmented Generation)",
-    "Orquestación de Agentes"
+    "Orquestación de Agentes",
+    "Arquitectura Conversacional",
+    "Aider",
+    "Claude Code"
   ],
   "proyectos_de_portafolio": [
     {
@@ -48,9 +57,53 @@
     },
     {
       "nombre": "Sistema RAG con Umbral Estricto",
-      "descripcion": "Pipeline RAG profesional en Python utilizando Groq (Llama 3.3), ChromaDB y embeddings multilingües. Implementa un sistema de guardarraíles con umbral de similitud (0.5) para evitar alucinaciones, con soporte para TXT, MD y PDF."
+      "descripcion": "Pipeline RAG profesional en Python utilizando Groq (Llama 3.3), ChromaDB y embeddings multilingües. Implementa un sistema de guardarraíles con umbral de similitud (0.5) para evitar alucinaciones, con soporte para TXT, MD y PDF. Incluye suite de pruebas unitarias con Pytest y Unittest."
     }
   ],
-  "ultimo_avance_registrado": "Desarrollo completo de un sistema RAG modular con arquitectura profesional. Se implementó la lógica de ingesta (chunking con overlap), almacenamiento vectorial (ChromaDB con similitud coseno) y orquestación con Groq. Se integró un filtro estricto de umbral (0.5) para prevenir alucinaciones y se añadieron pruebas unitarias con Pytest para validar el comportamiento del sistema ante consultas relevantes e irrelevantes.",
-  "claves_de_contexto_faltantes": []
+  "ultimo_avance_registrado": "Investigación técnica sobre el ecosistema de agentes de codificación (Aider, Claude Code, Antigravity CLI) y aclaración de capacidades de interacción con el sistema local.",
+  "claves_de_contexto_faltantes": [],
+  "historial_sesiones": [
+    {
+      "fecha": "2026-08-01 00:02",
+      "resumen": "Actualización de bitácora de proyecto y transición estratégica hacia el desarrollo de backend profesional con FastAPI.",
+      "temas": [
+        "Bitácora",
+        "Estrategia",
+        "FastAPI",
+        "PostgreSQL"
+      ],
+      "proximos_pasos": [
+        "Iniciar desarrollo de API robusta con FastAPI",
+        "Integrar PostgreSQL con SQLModel"
+      ]
+    },
+    {
+      "fecha": "2026-08-02 12:09",
+      "resumen": "Sesión de consulta técnica sobre middlewares en FastAPI y evaluación de agentes de codificación (Aider vs Claude Code).",
+      "temas": [
+        "Middleware",
+        "FastAPI",
+        "AI Coding Agents",
+        "Productividad"
+      ],
+      "proximos_pasos": [
+        "Implementar middleware de autenticación en el proyecto de API",
+        "Seleccionar herramienta de asistencia de IA para el flujo de trabajo"
+      ]
+    },
+    {
+      "fecha": "2026-08-02 15:53",
+      "resumen": "Investigación sobre herramientas de agentes de codificación y aclaración de límites de interacción con el sistema operativo.",
+      "temas": [
+        "AI Coding Agents",
+        "Antigravity CLI",
+        "Productividad",
+        "Soporte Técnico"
+      ],
+      "proximos_pasos": [
+        "Evaluar integración de Antigravity CLI en el flujo de trabajo",
+        "Definir estructura de directorios para el proyecto de API"
+      ]
+    }
+  ]
 }

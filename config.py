@@ -59,6 +59,18 @@ WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "float16")
 TECLA_HABLAR = 'f8'
 FS_AUDIO = 16000
 
+# Palabra clave de corte para finalizar la captura de voz por wake word.
+# Se usa en audio_custom.py para el recognizer de corte en tiempo real.
+PALABRA_CORTE_VOZ = os.getenv("PALABRA_CORTE_VOZ", "procede")
+
+# Tiempo de silencio (en segundos) tras hablar que finaliza la grabación.
+# Ampliado a 2.5s para permitir pausas naturales al dar instrucciones largas.
+SILENCIO_CORTE_GRABACION = 2.5
+
+# Umbral mínimo de RMS para considerar que hay voz activa en el micrófono.
+# Evita que ruido ambiental dispare detecciones del wake word.
+RMS_UMBRAL_VOZ = 350
+
 # Límite de seguridad para grabación continua de voz (en segundos).
 # Es solo una red de seguridad ante un fallo en la condición de corte
 # (ej. el callback del gamepad o del teclado deja de reportar el estado

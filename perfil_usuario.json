@@ -1,8 +1,8 @@
 {
   "funcional": {
-    "identidad": "El usuario se llama Luis.",
-    "proyecto_actual": "Desarrolla un sistema de agentes llamado OmniAssistant.",
-    "hardware_relevante": "Airfryer",
+    "identidad": "Luis",
+    "proyecto_actual": "MentoriasLuis",
+    "hardware_relevante": "Utiliza un altavoz JBL Go4 Lu y cuenta con una configuración de al menos dos monitores.",
     "preferencias_comunicacion": "",
     "rutina_uso": "El usuario utiliza al asistente para gestionar recordatorios de suscripciones y tareas logísticas."
   },
@@ -24,13 +24,18 @@
     },
     {
       "tema": "gustos",
-      "contenido": "Interés en mejorar la alimentación y reducir comida chatarra",
-      "actualizado": "2026-07-28"
+      "contenido": "El usuario juega Path of Exile 2.",
+      "actualizado": "2026-08-04"
     },
     {
       "tema": "suscripciones",
       "contenido": "El usuario está iniciando una prueba gratuita de 14 días en Netflix y requiere recordatorios para cancelar antes del cobro.",
       "actualizado": "2026-07-30"
+    },
+    {
+      "tema": "objetivos_profesionales",
+      "contenido": "Desea aprender herramientas que le den una ventaja competitiva para conseguir su primer trabajo como programador.",
+      "actualizado": "2026-08-01"
     }
   ]
 }

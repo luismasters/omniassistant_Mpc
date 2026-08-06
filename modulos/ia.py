@@ -1026,7 +1026,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
         if comando_busqueda == "INTERRUPTED":
             return
 
-        if comando_busqueda and getattr(config.estado, 'modo_actual', 'general') in ("general", "chat", "gamer"):
+        if comando_busqueda and getattr(config.estado, 'modo_actual', 'general') in ("general", "chat", "gamer", "mentor"):
             if ui_callback:
                 ui_callback("⚙️ Sistema", f"🌍 Buscando en internet: {comando_busqueda}", "#80868B")
             datos_encontrados = buscar_en_internet(comando_busqueda, reciente=skill_activa)

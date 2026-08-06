@@ -192,21 +192,14 @@ OmniAssistant/
 
 ---
 
-## 🛠️ Prioridades actuales y Roadmap
+## 🛠️ Roadmap
 
-### Tareas completadas
-- [x] Migración completa a `google-genai` (nuevo SDK oficial) ✅
-- [x] Web HUD nativo flotante/escritorio con PyWebView (`main_web.py` + `gui/`) ✅
-- [x] Skill `control_audio` (volumen maestro, por app y mute) ✅
-- [x] Arquitectura de visualización Win32 (Fondo de Escritorio / WorkerW, Flotante, Tradicional) ✅
-- [x] Subproceso Gamepad con fallback XInput nativo para juegos ✅
+La planificación completa y actualizada del proyecto vive en **[ROADMAP.md](ROADMAP.md)** (única fuente de verdad): fases, estado de las skills y deuda técnica.
 
-### Próximos pasos
-- [ ] Skill `monitor_hardware` (temperatura CPU/GPU via LibreHardwareMonitor)
-- [ ] Skill `recordatorios` (alertas temporales con voz)
-- [ ] Confirmaciones GUI con diálogos popups nativos (`CTkDialog` / Modales Web)
-- [ ] Detección de skills por embeddings semánticos (`all-MiniLM-L6-v2`)
-- [ ] Estructuración de la suite de tests en `tests/`
+**Estado actual en breve:**
+- ✅ Skills operativas: `busqueda_web_actualizada`, `control_audio`, `recordatorios` y wake word "argus" (Vosk)
+- ✅ Suite de tests iniciada (43 tests con pytest)
+- 🚧 En curso: ampliar tests, type hints, retirar rutas hardcodeadas, persistencia del chat
 
 ---
 

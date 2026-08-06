@@ -231,6 +231,22 @@ def main():
                 bridge._gestor_gamepad.detener()
             except Exception:
                 pass
+        try:
+            from config import estado
+            mensajes = estado.obtener_contexto_copia()
+            if mensajes:
+                if estado.modo_actual == "mentor":
+                    from modulos.perfil_mentor import extraer_y_procesar_sesion_mentor
+                    extraer_y_procesar_sesion_mentor(mensajes, estado.workspace_actual)
+                elif estado.modo_actual == "gamer":
+                    from modulos.perfil_gamer import extraer_y_procesar_sesion_gamer
+                    extraer_y_procesar_sesion_gamer(mensajes)
+                else:
+                    from modulos.perfil_usuario import extraer_y_procesar_sesion
+                    extraer_y_procesar_sesion(mensajes)
+                logger.info("✅ Sesión procesada y guardada al cerrar la aplicación.")
+        except Exception as e_close:
+            logger.warning(f"Error al guardar sesión al cerrar ventana: {e_close}")
 
 
 if __name__ == "__main__":
