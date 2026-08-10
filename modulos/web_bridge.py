@@ -220,6 +220,25 @@ class ArgusWebBridge:
     def _ui_callback(self, remitente, texto, color=None, nueva_linea=True):
         """Callback invocado por enviar_a_gemini para emitir respuestas hacia el chat web."""
         try:
+            # Señales especiales de verificación web (remitentes de control).
+            remitente_control = str(remitente or "")
+            if remitente_control == "__MARCAR_PROVISIONAL__":
+                win = self._window or (webview.windows[0] if webview.windows else None)
+                if win:
+                    win.evaluate_js("if (window.marcarRespuestaProvisional) window.marcarRespuestaProvisional();")
+                return
+            if remitente_control == "__CANCELAR_PROVISIONAL__":
+                win = self._window or (webview.windows[0] if webview.windows else None)
+                if win:
+                    win.evaluate_js("if (window.cancelarRespuestaProvisional) window.cancelarRespuestaProvisional();")
+                return
+            if remitente_control == "__RESPUESTA_VERIFICADA__":
+                win = self._window or (webview.windows[0] if webview.windows else None)
+                if win:
+                    js_cmd = f"if (window.reemplazarRespuestaProvisional) window.reemplazarRespuestaProvisional({json.dumps(texto)});"
+                    win.evaluate_js(js_cmd)
+                return
+
             if not texto and nueva_linea:
                 return
             win = self._window or (webview.windows[0] if webview.windows else None)

@@ -20,6 +20,19 @@ from config import GEMINI_API_KEY, DEEPSEEK_API_KEY, GROQ_API_KEY
 from modulos.archivos import eliminar_elemento, leer_contenido_archivo
 from modulos.sistema import obtener_ventanas_activas, obtener_estado_pc, escanear_hardware_completo, explorar_directorio
 from modulos.busqueda import buscar_en_internet
+from modulos.mensajes_web import (
+    construir_mensajes_segunda_generacion,
+    construir_bloque_evidencia_anterior,
+    armar_mensaje_modelo_persistido,
+    decidir_contenido_presentacion,
+)
+from modulos.senal_web import (
+    OcultadorStreamWeb,
+    parsear_senal_web,
+    limpiar_respuesta_web,
+    fusionar_comando_busqueda,
+    texto_marcador_tema_web_anterior,
+)
 from modulos.audio_custom import hablar_no_bloqueante, encolar_texto_para_hablar, detener_voz
 from modulos.vision import capturar_pantalla
 from modulos.git_bot import sincronizar_proyecto_git, ejecutar_comando_git_libre
@@ -517,6 +530,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
     resultado_mcp = ""
     error_ocurrido = False
     skill_activa = False
+    ocultador_stream = OcultadorStreamWeb()
 
     if comando_directo:
         respuesta_ia = comando_directo
@@ -625,6 +639,12 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 contexto_sistema += "\n\n[FIN DE SKILL]\n"
                 if ui_callback:
                     ui_callback("⚙️ Sistema", f"🧠 Skill activada: {nombre_skill}", "#A8C7FA")
+
+            # ─── MARCADOR DE HERENCIA TEMÁTICA (solo si hay evidencia previa) ───
+            # Es una instrucción semántica para el LLM, no una heurística de
+            # Python: el modelo decide si el turno continúa el mismo tema.
+            if config.estado.obtener_evidencia_web():
+                contexto_sistema += "\n\n" + texto_marcador_tema_web_anterior()
 
             logger.debug(f"Modelo activo: {modelo_activo}")
             print(f"\n🤖 Argus dice:\n---")
@@ -790,18 +810,20 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                     if hasattr(part, 'text') and part.text:
                                         texto_chunk = (texto_chunk or "") + part.text
                             if texto_chunk:
-                                print(texto_chunk, end='', flush=True)
                                 respuesta_ia += texto_chunk
-                                if ui_callback:
-                                    ui_callback("", texto_chunk, "#E8EAED", nueva_linea=False)
-                                if modo_voz and not usaste_mcp:
-                                    if "argus:" not in respuesta_ia.lower():
-                                        buffer_voz += texto_chunk
-                                        buffer_voz = _procesar_buffer_voz(buffer_voz, forzar=False)
-                                    else:
-                                        from modulos.audio_custom import detener_voz
-                                        detener_voz()
-                                        buffer_voz = ""
+                                texto_visible = ocultador_stream.procesar(texto_chunk)
+                                if texto_visible:
+                                    print(texto_visible, end='', flush=True)
+                                    if ui_callback:
+                                        ui_callback("", texto_visible, "#E8EAED", nueva_linea=False)
+                                    if modo_voz and not usaste_mcp:
+                                        if "argus:" not in respuesta_ia.lower():
+                                            buffer_voz += texto_visible
+                                            buffer_voz = _procesar_buffer_voz(buffer_voz, forzar=False)
+                                        else:
+                                            from modulos.audio_custom import detener_voz
+                                            detener_voz()
+                                            buffer_voz = ""
                         except Exception as e:
                             logger.exception("Error procesando chunk de Gemini")
                             if ui_callback:
@@ -839,13 +861,15 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                             delta = chunk.choices[0].delta
                             if getattr(delta, 'content', None):
                                 texto_chunk = delta.content
-                                print(texto_chunk, end='', flush=True)
                                 respuesta_ia += texto_chunk
-                                if ui_callback:
-                                    ui_callback("", texto_chunk, "#E8EAED", nueva_linea=False)
-                                if modo_voz:
-                                    buffer_voz_fallback += texto_chunk
-                                    buffer_voz_fallback = _procesar_buffer_voz(buffer_voz_fallback, forzar=False)
+                                texto_visible = ocultador_stream.procesar(texto_chunk)
+                                if texto_visible:
+                                    print(texto_visible, end='', flush=True)
+                                    if ui_callback:
+                                        ui_callback("", texto_visible, "#E8EAED", nueva_linea=False)
+                                    if modo_voz:
+                                        buffer_voz_fallback += texto_visible
+                                        buffer_voz_fallback = _procesar_buffer_voz(buffer_voz_fallback, forzar=False)
                     except Exception as e:
                         logger.exception("Error en fallback DeepSeek")
                         if ui_callback:
@@ -894,13 +918,15 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                 try:
                                     if hasattr(chunk_2, 'text') and chunk_2.text:
                                         texto_chunk = chunk_2.text
-                                        print(texto_chunk, end='', flush=True)
                                         respuesta_ia += texto_chunk
-                                        if ui_callback:
-                                            ui_callback("", texto_chunk, "#E8EAED", nueva_linea=False)
-                                        if modo_voz:
-                                            buffer_voz_2 += texto_chunk
-                                            buffer_voz_2 = _procesar_buffer_voz(buffer_voz_2, forzar=False)
+                                        texto_visible = ocultador_stream.procesar(texto_chunk)
+                                        if texto_visible:
+                                            print(texto_visible, end='', flush=True)
+                                            if ui_callback:
+                                                ui_callback("", texto_visible, "#E8EAED", nueva_linea=False)
+                                            if modo_voz:
+                                                buffer_voz_2 += texto_visible
+                                                buffer_voz_2 = _procesar_buffer_voz(buffer_voz_2, forzar=False)
                                 except Exception as e:
                                     logger.exception("Error procesando chunk MCP ronda 2")
                                     if ui_callback:
@@ -972,13 +998,15 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                 print(delta.reasoning_content, end='', flush=True)
                             if getattr(delta, 'content', None):
                                 texto_chunk = delta.content
-                                print(texto_chunk, end='', flush=True)
                                 respuesta_ia += texto_chunk
-                                if ui_callback:
-                                    ui_callback("", texto_chunk, "#E8EAED", nueva_linea=False)
-                                if modo_voz:
-                                    buffer_voz_ds += texto_chunk
-                                    buffer_voz_ds = _procesar_buffer_voz(buffer_voz_ds, forzar=False)
+                                texto_visible = ocultador_stream.procesar(texto_chunk)
+                                if texto_visible:
+                                    print(texto_visible, end='', flush=True)
+                                    if ui_callback:
+                                        ui_callback("", texto_visible, "#E8EAED", nueva_linea=False)
+                                    if modo_voz:
+                                        buffer_voz_ds += texto_visible
+                                        buffer_voz_ds = _procesar_buffer_voz(buffer_voz_ds, forzar=False)
                         except Exception as e:
                             logger.exception(f"Error procesando chunk de {ui_title}")
                             if ui_callback:
@@ -994,6 +1022,11 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                         _procesar_buffer_voz(buffer_voz_ds, forzar=True)
 
             print("\n---")
+            resto_stream = ocultador_stream.finalizar()
+            if resto_stream:
+                print(resto_stream, end='', flush=True)
+                if ui_callback:
+                    ui_callback("", resto_stream, "#E8EAED", nueva_linea=False)
             if ui_callback:
                 ui_callback("", "", "#E8EAED", nueva_linea=True)
 
@@ -1021,70 +1054,146 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
     # =================================================================
     if not error_ocurrido and respuesta_ia:
         from modulos.controlador_acciones import procesar_acciones_ia
-        comando_busqueda = procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz)
+        comando_legacy = procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz)
 
-        if comando_busqueda == "INTERRUPTED":
+        if comando_legacy == "INTERRUPTED":
             return
+
+        # ── Señal estructurada de decisión web (C+D) ─────────────────────────
+        # El LLM decide [WEB: SI/NO] y arma la consulta; Python solo ejecuta.
+        # Durante la transición, `buscar:` legacy sigue siendo válido (fusión).
+        senal_web = parsear_senal_web(respuesta_ia)
+        draft_limpio = senal_web['respuesta_limpia']
+        comando_busqueda, warning_senal = fusionar_comando_busqueda(senal_web, comando_legacy)
+        if warning_senal:
+            logger.warning(f"⚠️ {warning_senal}")
 
         if comando_busqueda and getattr(config.estado, 'modo_actual', 'general') in ("general", "chat", "gamer", "mentor"):
             if ui_callback:
+                # La respuesta aún visible en la UI pasa a ser PROVISIONAL:
+                # será reemplazada por la respuesta verificada (o desmarcada).
+                ui_callback("__MARCAR_PROVISIONAL__", "", "#FFA500")
+            if ui_callback:
                 ui_callback("⚙️ Sistema", f"🌍 Buscando en internet: {comando_busqueda}", "#80868B")
             datos_encontrados = buscar_en_internet(comando_busqueda, reciente=skill_activa)
-            if "No se encontraron" in datos_encontrados or "error de conexión" in datos_encontrados.lower():
+
+            sin_evidencia = (
+                "No se encontraron" in datos_encontrados
+                or "error de conexión" in datos_encontrados.lower()
+            )
+
+            # ── CONSIGNA ESTRICTA DE EVIDENCIA PARA LA SEGUNDA GENERACIÓN ──────
+            # Establece la distinción confirmado/inferido/no-encontrado/contradictorio
+            # y la regla "no encontrar ≠ no existe". Se usa tanto con resultados
+            # como en el caso sin evidencia.
+            reglas_evidencia = (
+                "Recibiste los resultados de una búsqueda web para la consulta del usuario. "
+                "Respondé aplicando estrictamente estas reglas:\n"
+                "- Basá tu respuesta PRIORITARIAMENTE en la evidencia web proporcionada. "
+                "No uses tu conocimiento interno para completar información que falta.\n"
+                "- Diferencialo claramente: dato EXPLÍCITAMENTE confirmado por una fuente vs dato INFERIDO por vos. "
+                "Solo lo explícitamente confirmado se presenta como hecho.\n"
+                "- Tu respuesta PREVIA de este turno (y cualquier afirmación del historial) NO es evidencia. "
+                "La única evidencia externa para verificar son los resultados de búsqueda actuales "
+                "y la evidencia web de consultas anteriores incluida más abajo.\n"
+                "- Si un dato no está respaldado por ninguna fuente (ej. el tercer puesto de un podio), "
+                "respondé literalmente: 'No pude confirmarlo con las fuentes encontradas.' NO lo inventes.\n"
+                "- NUNCA interpretes la ausencia de una mención en los resultados como prueba de que ese dato no existe. "
+                "Si no lo encontraste, decilo; no digas que no existe.\n"
+                "- Si las fuentes se contradicen, señalalo ('fuentes contradictorias') y describí qué sostiene cada una.\n"
+                "- Priorizá las fuentes oficiales o especializadas cuando existan.\n"
+                "- Cité/identifiqué la fuente (dominio) y la fecha de cada afirmación importante.\n"
+            )
+
+            if sin_evidencia:
                 if ui_callback:
-                    ui_callback("⚙️ Sistema", "⚠️ Sin resultados web. Respondiendo con conocimiento interno.", "#FFA500")
+                    ui_callback("⚙️ Sistema", "⚠️ No se encontraron fuentes. La respuesta debe expresar incertidumbre.", "#FFA500")
+                bloque_web = (
+                    f"[RESULTADOS DE BÚSQUEDA]\n{datos_encontrados}\n\n"
+                    "La búsqueda no devolvió evidencia suficiente para este dato actualizado.\n"
+                    "No respondas afirmando el dato como verdadero: "
+                    "decí 'No pude encontrar fuentes suficientes para confirmar ese dato.' "
+                    "NO afirmes que el dato no existe ni que la información está ausente de la web.\n"
+                )
             else:
-                try:
-                    config_web = types.GenerateContentConfig(
-                        system_instruction=contexto_sistema,
-                        temperature=0.1,
-                        max_output_tokens=8192,
-                        safety_settings=[
-                            types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HARASSMENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
-                            types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold=types.HarmBlockThreshold.BLOCK_NONE),
-                            types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
-                            types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
-                            types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY, threshold=types.HarmBlockThreshold.BLOCK_NONE),
-                        ]
-                    )
-                    mensajes_secundarios = _convertir_contexto_a_contents(CONTEXTO_CHAT) + [
-                        types.Content(role='user', parts=[types.Part.from_text(text=texto_usuario)]),
-                        types.Content(role='model', parts=[types.Part.from_text(text=respuesta_ia)]),
-                        types.Content(role='user', parts=[types.Part.from_text(text=f"Resultados web:\n{datos_encontrados}\n\nRespondé usando esto.")])
+                bloque_web = f"[RESULTADOS DE BÚSQUEDA]\n{datos_encontrados}\n"
+
+            # Evidencia de turnos anteriores: se antepone a los resultados
+            # actuales para que un follow-up pueda re-verificar contra fuentes
+            # reales. Viaja siempre etiquetada como EVIDENCIA (nunca como
+            # respuesta del asistente).
+            bloque_evidencia_anterior = construir_bloque_evidencia_anterior(
+                config.estado.obtener_evidencia_web()
+            )
+
+            try:
+                config_web = types.GenerateContentConfig(
+                    system_instruction=contexto_sistema,
+                    temperature=0.1,
+                    max_output_tokens=8192,
+                    safety_settings=[
+                        types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HARASSMENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                        types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                        types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                        types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                        types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY, threshold=types.HarmBlockThreshold.BLOCK_NONE),
                     ]
-                    segunda_respuesta = cliente_genai.models.generate_content_stream(
-                        model="gemini-3.1-flash-lite",
-                        contents=mensajes_secundarios,
-                        config=config_web
+                )
+                mensajes_secundarios = construir_mensajes_segunda_generacion(
+                    _convertir_contexto_a_contents(CONTEXTO_CHAT),
+                    texto_usuario,
+                    f"{reglas_evidencia}\n{bloque_evidencia_anterior}\n{bloque_web}",
+                )
+                segunda_respuesta = cliente_genai.models.generate_content_stream(
+                    model="gemini-3.1-flash-lite",
+                    contents=mensajes_secundarios,
+                    config=config_web
+                )
+                respuesta_final = ""
+                buffer_voz_web_raw = ""
+                for chunk in segunda_respuesta:
+                    if hasattr(chunk, 'text') and chunk.text:
+                        respuesta_final += chunk.text
+                        # NO se streamea visualmente la 2da generación: la burbuja
+                        # provisional se reemplaza al final con la respuesta verificada.
+                        if modo_voz:
+                            buffer_voz_web_raw += chunk.text
+                # La 2ª generación usa el MISMO contexto de sistema que incluye el
+                # protocolo de señal; por eso puede re-emitir `[WEB: ...]`/
+                # `[CONSULTA: ...]`. Se sanea siempre (UI, TTS y persistencia).
+                respuesta_final_limpia = limpiar_respuesta_web(respuesta_final)
+                if modo_voz and buffer_voz_web_raw.strip():
+                    _procesar_buffer_voz(limpiar_respuesta_web(buffer_voz_web_raw), forzar=True)
+                # Reemplazar el borrador provisional por la respuesta verificada,
+                # o desmarcarlo si la segunda generación quedó vacía.
+                if ui_callback:
+                    tipo_presentacion, texto_presentacion = decidir_contenido_presentacion(
+                        draft_limpio, respuesta_final_limpia
                     )
-                    respuesta_final = ""
-                    buffer_voz_web = ""
-                    for chunk in segunda_respuesta:
-                        if hasattr(chunk, 'text') and chunk.text:
-                            respuesta_final += chunk.text
-                            if ui_callback:
-                                ui_callback("", chunk.text, "#E8EAED", nueva_linea=False)
-                            if modo_voz:
-                                buffer_voz_web += chunk.text
-                                buffer_voz_web = _procesar_buffer_voz(buffer_voz_web, forzar=False)
-                    if modo_voz and buffer_voz_web.strip():
-                        _procesar_buffer_voz(buffer_voz_web, forzar=True)
-                    if ui_callback:
-                        ui_callback("", "", "#E8EAED", nueva_linea=True)
-                    config.estado.agregar_mensaje_chat({'role': 'user', 'parts': [texto_usuario]})
-                    config.estado.agregar_mensaje_chat({'role': 'model', 'parts': [respuesta_final]})
-                    return
-                except Exception as e:
-                    logger.exception("Error en búsqueda web secundaria")
-                    if ui_callback:
-                        ui_callback("⚙️ Sistema", f"❌ Error al procesar resultados web: {str(e)[:100]}", "#FF4500")
+                    if tipo_presentacion == "verificada":
+                        ui_callback("__RESPUESTA_VERIFICADA__", texto_presentacion, "#E8EAED")
+                    else:
+                        ui_callback("__CANCELAR_PROVISIONAL__", "")
+                # Persistir la evidencia de ESTE turno para los próximos follow-ups.
+                # Solo se persiste evidencia real (no el bloque de "sin evidencia").
+                if not sin_evidencia:
+                    config.estado.agregar_evidencia_web(bloque_web)
+                config.estado.agregar_mensaje_chat({'role': 'user', 'parts': [texto_usuario]})
+                config.estado.agregar_mensaje_chat(armar_mensaje_modelo_persistido(draft_limpio, respuesta_final_limpia))
+                return
+            except Exception as e:
+                logger.exception("Error en búsqueda web secundaria")
+                if ui_callback:
+                    ui_callback("⚙️ Sistema", f"❌ Error al procesar resultados web: {str(e)[:100]}", "#FF4500")
+                    # Sin respuesta verificada: desmarcar la provisional (queda el borrador).
+                    ui_callback("__CANCELAR_PROVISIONAL__", "")
 
     if modo_voz and comando_directo:
         hablar_no_bloqueante(respuesta_ia)
 
     if respuesta_ia and not error_ocurrido:
         config.estado.agregar_mensaje_chat({'role': 'user', 'parts': [texto_usuario]})
-        config.estado.agregar_mensaje_chat({'role': 'model', 'parts': [respuesta_ia]})
+        config.estado.agregar_mensaje_chat(armar_mensaje_modelo_persistido(limpiar_respuesta_web(respuesta_ia)))
 
 
 # =====================================================================

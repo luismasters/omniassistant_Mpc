@@ -1,9 +1,42 @@
 import re
+from urllib.parse import urlparse
+
+FALLO_SIN_RESULTADOS = "No se encontraron resultados relevantes en la web."
+FALLO_ERROR_CONEXION = "No se encontraron resultados debido a un error de conexión."
+
+
+def _extraer_dominio(url: str) -> str:
+    """Devuelve el dominio de una URL (ej. 'www.example.com') o vacío si no se puede parsear."""
+    if not url:
+        return ""
+    try:
+        netloc = urlparse(url).netloc
+        return netloc if netloc else url
+    except Exception:
+        return url
+
+
+def _formatear_resultado(r: dict, indice: int) -> str:
+    """
+    Formatea un resultado de DuckDuckGo incluyendo: número, fecha, título,
+    dominio, URL y snippet. NO descarta URL ni dominio.
+    """
+    titulo = (r.get('title') or 'Sin título').strip()
+    resumen = (r.get('body', r.get('snippet', 'Sin resumen')) or 'Sin resumen').strip()
+    url = (r.get('href') or '').strip()
+    fecha = r.get('date', r.get('published', r.get('date_utc', ''))) or ''
+
+    dominio = _extraer_dominio(url)
+
+    cabecera = f"[{indice}] 📅 {fecha} | {titulo}" if fecha else f"[{indice}] 📄 {titulo}"
+    linea_fuente = f"🌐 Fuente: {dominio}" + (f" — {url}" if url else " (sin URL)")
+    return f"{cabecera}\n{linea_fuente}\n{resumen}\n"
 
 
 def buscar_en_internet(consulta: str, reciente: bool = False) -> str:
     """
-    Busca en DuckDuckGo y devuelve un string con resultados y fechas si están disponibles.
+    Busca en DuckDuckGo y devuelve un string con resultados: número, fecha,
+    título, dominio, URL y resumen.
 
     Args:
         consulta:  Término de búsqueda. NO incluir filtros tipo 'after:YYYY-MM-DD'
@@ -26,14 +59,6 @@ def buscar_en_internet(consulta: str, reciente: bool = False) -> str:
         from ddgs import DDGS
     except ImportError:
         return "Error: Falta instalar la librería ddgs. Ejecutá: pip install ddgs"
-
-    def _formatear_resultado(r: dict) -> str:
-        titulo = r.get('title', 'Sin título')
-        resumen = r.get('body', r.get('snippet', 'Sin resumen'))
-        fecha = r.get('date', r.get('published', r.get('date_utc', '')))
-        if fecha:
-            return f"📅 {fecha} | {titulo}\n{resumen}\n"
-        return f"📄 {titulo}\n{resumen}\n"
 
     def _ejecutar_busqueda(ddgs, query: str, timelimit=None, max_results: int = 6) -> list:
         """Intenta la búsqueda y devuelve lista de resultados o lista vacía."""
@@ -66,11 +91,13 @@ def buscar_en_internet(consulta: str, reciente: bool = False) -> str:
                     results = _ejecutar_busqueda(ddgs, consulta_simple, timelimit=timelimit)
 
             if results:
-                resultados_formateados = [_formatear_resultado(r) for r in results]
-                return "".join(resultados_formateados)
+                resultados_formateados = [
+                    _formatear_resultado(r, i + 1) for i, r in enumerate(results)
+                ]
+                return "\n".join(resultados_formateados)
 
-            return "No se encontraron resultados relevantes en la web."
+            return FALLO_SIN_RESULTADOS
 
     except Exception as e:
         print(f"⚠️ Error interno en DuckDuckGo Search: {e}")
-        return "No se encontraron resultados debido a un error de conexión."
+        return FALLO_ERROR_CONEXION

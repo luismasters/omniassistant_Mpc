@@ -1297,6 +1297,58 @@ document.addEventListener('DOMContentLoaded', () => {
   window.agregarMensajeUsuario = function(texto) { agregarMensajeUsuario(texto); };
   window.agregarMensajeSistema = function(html) { agregarMensajeSistema(html); };
 
+  // ─── RESPUESTA CON VERIFICACIÓN WEB (provisional → verificada) ─────────
+  // La primera generación streamea un borrador. Cuando el flujo detecta
+  // búsqueda web, la burbuja que contiene ese borrador se marca como
+  // provisional y su contenido es REEMPLAZADO al final por la respuesta
+  // verificada (nunca se concatena, nunca queda un doble 'model' visual).
+  window.marcarRespuestaProvisional = function () {
+    if (!currentAiRow) return;
+    if (!currentAiRow.querySelector('.chip-provisional')) {
+      const chip = document.createElement('span');
+      chip.className = 'chip chip-provisional';
+      chip.textContent = 'Verificando…';
+      const metaEl = currentAiRow.querySelector('.msg-meta');
+      if (metaEl) metaEl.appendChild(chip);
+    }
+    currentAiRow.classList.add('ai-provisional');
+  };
+
+  window.cancelarRespuestaProvisional = function () {
+    if (!currentAiRow) return;
+    currentAiRow.querySelectorAll('.chip-provisional').forEach(c => c.remove());
+    currentAiRow.classList.remove('ai-provisional');
+    delete currentAiRow.dataset.reemplazada;
+  };
+
+  window.reemplazarRespuestaProvisional = function (textoMarkdown) {
+    if (!currentAiRow) return;
+    const bodyDiv = currentAiBodyDiv || currentAiRow.querySelector('.msg-body');
+    if (!bodyDiv) return;
+    const { emocion, textoLimpio } = extraerEmocionYTexto(textoMarkdown || '');
+    currentAiRawText = textoLimpio;
+    bodyDiv.innerHTML = renderMarkdown(textoLimpio);
+    currentAiRow.dataset.rawText = textoLimpio;
+    currentAiRow.dataset.reemplazada = '1';
+    currentAiRow.querySelectorAll('.chip-provisional').forEach(c => c.remove());
+    currentAiRow.classList.remove('ai-provisional');
+    currentAiRow.classList.add('ai-verificado');
+    if (!currentAiRow.querySelector('.chip-verificado')) {
+      const chipOk = document.createElement('span');
+      chipOk.className = 'chip chip-verificado';
+      chipOk.textContent = '✓ Verificado con fuentes';
+      const metaEl = currentAiRow.querySelector('.msg-meta');
+      if (metaEl) metaEl.appendChild(chipOk);
+    }
+    if (typeof hljs !== 'undefined') {
+      currentAiRow.querySelectorAll('pre code:not(.hljs)').forEach(b => {
+        try { hljs.highlightElement(b); } catch (e) {}
+      });
+    }
+    renderMermaidDiagramsInDOM();
+    scrollBottom();
+  };
+
   window.iniciarEscuchaVozUI = function() {
     isListening = true;
     if (btnVoice) btnVoice.classList.add('listening');

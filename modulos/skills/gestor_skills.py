@@ -99,7 +99,28 @@ class GestorSkills:
         es_temporal = any(p in consulta_lower for p in palabras_clave_web)
         es_temporal = es_temporal or any(re.search(p, consulta_lower) for p in patrones_temporales)
 
-        if es_temporal and 'busqueda_web_actualizada' in self.skills:
+        # ── FOLLOW-UPS FACTUALES (resultados, podios, marcadores) ─────────────
+        # Continuaciones de un tema factual reciente ("¿y cómo quedó el podio?",
+        # "¿quién ganó?", "¿cuál fue el resultado?") que no traen palabras
+        # temporales pero piden información reciente. Patrones acotados para
+        # no activar búsquedas web en cualquier conversación.
+        patrones_followup_web = [
+            r'\bqui[eé]?n\s+(?:gan[oó]|qued[oó]|obtuvo)\b',
+            r'\bcu[áa]l\s+fue\s+el\s+(?:resultado|marcador|podio|clasificaci[oó]n)\b',
+            r'\bqu[ée]?\s+(?:marcador|resultado|podio)\b',
+            r'\bc[oó]mo\s+qued[oó]\b',
+            r'\by\s+(?:el|la|los|las)\s+(?:podio[s]?|bronce[s]?|medalla[s]?)\b',
+        ]
+        es_followup = any(re.search(p, consulta_lower) for p in patrones_followup_web)
+
+        # Follow-up corto sobre medallas/podio (ej. "¿y el bronce?", "y la medalla")
+        # Solo cuando la consulta es breve, para evitar disparar por menciones sueltas.
+        palabras_consulta = [p for p in re.split(r'\s+', consulta_lower.strip()) if p]
+        if (len(palabras_consulta) <= 5
+                and re.search(r'\b(?:bronce[s]?|medalla[s]?|podio[s]?|oro[s]?)\b', consulta_lower)):
+            es_followup = True
+
+        if (es_temporal or es_followup) and 'busqueda_web_actualizada' in self.skills:
             nombre = 'busqueda_web_actualizada'
             instrucciones = self.skills[nombre].get('instrucciones', '')
             logger.debug(f"🔍 Skill relevante detectada: {nombre}")

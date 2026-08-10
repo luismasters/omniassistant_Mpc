@@ -3,6 +3,9 @@ import sys
 import threading
 from dotenv import load_dotenv
 
+# Helper puro para persistir evidencia web entre turnos (rotación acotada).
+from modulos.mensajes_web import agregar_evidencia
+
 # 1. Parche para la memoria (ChromaDB)
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 
@@ -94,6 +97,7 @@ class EstadoGlobal:
         self.workspace_actual = None
         self.snapshot_actual = ""
         self.contexto_chat = []
+        self.evidencia_web = []
         self.archivos_en_memoria = set()
         self.documento_volatil = ""
         self.pendiente_de_borrado = ""
@@ -162,11 +166,31 @@ class EstadoGlobal:
             self.contexto_chat.clear()
             self.archivos_en_memoria.clear()
             self.documento_volatil = ""
+            self.evidencia_web = []
 
     def obtener_contexto_copia(self):
         """Devuelve una copia del contexto del chat para lectura thread-safe."""
         with self._lock:
             return list(self.contexto_chat)
+
+    def agregar_evidencia_web(self, texto_evidencia):
+        """
+        Persiste la evidencia web de un turno (resultados de la búsqueda) de
+        forma thread-safe. La evidencia vive SEPARADA del contexto
+        conversacional y se recorta a los últimos `MAX_EVIDENCIA_GUARDADA`.
+        """
+        with self._lock:
+            self.evidencia_web = agregar_evidencia(self.evidencia_web, texto_evidencia)
+
+    def obtener_evidencia_web(self):
+        """Devuelve una copia de la evidencia web persistida (turnos previos)."""
+        with self._lock:
+            return list(self.evidencia_web)
+
+    def limpiar_evidencia_web(self):
+        """Descarta toda la evidencia web persistida (thread-safe)."""
+        with self._lock:
+            self.evidencia_web = []
 
     def obtener_archivos_copia(self):
         """Devuelve una copia del set de archivos en memoria para lectura thread-safe."""
@@ -199,6 +223,8 @@ class EstadoGlobal:
             
             # Resetear contador de perfil al cambiar de modo
             self.mensajes_desde_ultima_extraccion = 0
+            # La evidencia web queda asociada a la conversación del modo anterior
+            self.evidencia_web = []
 
     def cambiar_modo_visualizacion(self, nuevo_modo_vis):
         """Cambia el modo de visualización (tradicional, flotante, escritorio) de forma thread-safe."""
@@ -229,6 +255,7 @@ class EstadoGlobal:
         """Limpia el contexto del chat (thread-safe)."""
         with self._lock:
             self.contexto_chat.clear()
+            self.evidencia_web = []
 
     def limpiar_archivos_memoria(self):
         """Limpia la caché de archivos (thread-safe)."""

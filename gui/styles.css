@@ -1957,3 +1957,27 @@ body[data-state="gaming"]    { --ring-color: rgba(236, 72, 153, 0.6); }
 
 
 
+
+/* Chips de verificacion web */
+.chip {
+  display: inline-block;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 8px;
+  border-radius: 999px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.chip-provisional {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+.chip-verificado {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.14);
+  border: 1px solid rgba(74, 222, 128, 0.4);
+}
+.ai-provisional .msg-body { opacity: 0.72; }
+.ai-verificado .msg-body { opacity: 1; }
+
