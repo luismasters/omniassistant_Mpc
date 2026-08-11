@@ -95,7 +95,7 @@ Objetivo: pasar de "demo impresionante" a "herramienta que no pierde el trabajo 
 
 - [ ] **Persistencia del contexto de chat** (no perder conversación si la app crashea)
 - [ ] **Graceful shutdown** (guardar estado, cerrar ChromaDB, detener timers al salir)
-- [ ] **Validación amigable de API keys** (hoy `config.py` crashea con `ValueError` si falta `GEMINI_API_KEY`)
+- [x] **Validación amigable de API keys** (antes `config.py` crasheaba con `ValueError`; ahora degrada con `GEMINI_API_KEY=""` y la IA responde con aviso)
 - [ ] **Sacar rutas hardcodeadas** (`E:\Mis_Juegos_Yiri`, `c:\users\luis\` en `sistema.py`) → mapeo por máquina en `config.py`
 - [ ] **Versionado semántico** (`__version__` + `CHANGELOG.md`)
 - [ ] **Una sola entrada oficial** (aclarar `main_web.py` vs `main_gui.py` deprecado)
@@ -184,7 +184,6 @@ Traducción rápida de frases o fragmentos de código.
 | 1 | Cobertura de tests incompleta | `tests/` | Riesgo de regresión |
 | 2 | Rutas hardcodeadas de una máquina | `sistema.py` | No portable |
 | 3 | Sin type hints en módulos clave | `sistema.py`, `audio_custom.py`, `controlador_acciones.py` | Mantenimiento difícil |
-| 4 | `config.py` crashea sin API key | `config.py` | Arranque frágil |
 | 5 | Contexto de chat en memoria (se pierde) | `config.py` | Pérdida de trabajo del usuario |
 | 6 | Versiones flotantes | `requirements.txt` | Puede romper |
 | 7 | JS/CSS monolíticos | `gui/app.js`, `gui/styles.css` | Difícil de mantener |

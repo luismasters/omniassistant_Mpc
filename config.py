@@ -41,7 +41,7 @@ MAX_MENSAJES_CONTEXTO = 25
 # =========================================================
 # API KEYS
 # =========================================================
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -49,8 +49,12 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 # Ciudad para el widget de clima (configurable desde .env)
 CIUDAD_CLIMA = os.getenv("CIUDAD_CLIMA", "San Martin, Buenos Aires, Argentina")
 
-if not GEMINI_API_KEY:
-    raise ValueError("⚠️ No se encontró la API Key")
+# Sin GEMINI_API_KEY la app NO crashea al importar: queda "" y cada llamada
+# de IA responde con un mensaje amigable pidiendo configurarla (ver
+# modulos.ia.enviar_a_gemini). Se imprime una advertencia única al arrancar.
+TIENE_API_GEMINI = bool(GEMINI_API_KEY)
+if not TIENE_API_GEMINI:
+    print("⚠️ [CONFIG] GEMINI_API_KEY no configurada en .env. Las llamadas de IA responderán con un aviso.")
 
 # =========================================================
 # CONFIGURACIÓN DE AUDIO
@@ -71,8 +75,8 @@ PALABRA_CORTE_VOZ = os.getenv("PALABRA_CORTE_VOZ", "procede")
 SILENCIO_CORTE_GRABACION = 2.5
 
 # Umbral mínimo de RMS para considerar que hay voz activa en el micrófono.
-# Evita que ruido ambiental dispare detecciones del wake word.
-RMS_UMBRAL_VOZ = 350
+# Sensibilidad optimizada (150) para captar adecuadamente la voz normal en micrófonos estándar.
+RMS_UMBRAL_VOZ = int(os.getenv("RMS_UMBRAL_VOZ", "150"))
 
 # Límite de seguridad para grabación continua de voz (en segundos).
 # Es solo una red de seguridad ante un fallo en la condición de corte

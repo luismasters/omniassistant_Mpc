@@ -63,8 +63,10 @@ gestor_skills = gestor
 # =====================================================================
 # INICIALIZACIÓN DE CLIENTES IA (NUEVO SDK google-genai)
 # =====================================================================
-cliente_genai = genai.Client(api_key=GEMINI_API_KEY)
-cliente_deepseek = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
+# Si faltan las keys, los clientes quedan en None y cada llamada responde
+# con un mensaje amigable (ver enviar_a_gemini) en vez de crashear al importar.
+cliente_genai = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+cliente_deepseek = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com") if DEEPSEEK_API_KEY else None
 cliente_groq = OpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1") if GROQ_API_KEY else None
 
 # =====================================================================
@@ -293,6 +295,14 @@ def _extraer_funciones_de_respuesta(response):
 def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
     """Enrutador Universal y traductor de acciones con soporte para Skills."""
     import config
+    if not config.GEMINI_API_KEY:
+        mensaje = ("⚠️ Argus todavía no tiene configurada su API Key de Gemini. "
+                   "Agregá GEMINI_API_KEY a tu archivo .env y reiniciá la app.")
+        if ui_callback:
+            ui_callback("⚙️ Sistema", mensaje, "#FFA000")
+        if modo_voz:
+            hablar_no_bloqueante("Todavía no tengo mi clave de Gemini configurada. Agregala al archivo punto env y reiniciame.")
+        return
     CONTEXTO_CHAT = config.estado.contexto_chat
     DOCUMENTO_VOLATIL = config.estado.documento_volatil
     PENDIENTE_DE_BORRADO = config.estado.pendiente_de_borrado
