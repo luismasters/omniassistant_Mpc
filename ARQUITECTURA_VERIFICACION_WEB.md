@@ -126,8 +126,8 @@ Módulos clave:
 
 | Check | Resultado |
 |---|---|
-| `pytest -q` (venv 3.13) | **108 passed** |
-| `compileall config.py modulos tests` | **OK** |
+| `pytest -q` (venv 3.13) | **257 passed** (38 de mensajes_web/senal_web/evidencia/persistencia/presentación) |
+| `py_compile config.py modulos/*.py` | **OK** |
 | `node --check gui/app.js` | **OK** |
 
 Prueba funcional real (API Gemini + DuckDuckGo, harness temporal fuera del repo):
