@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import threading
 import datetime
 from modulos.logger import logger
@@ -61,6 +62,190 @@ def _guardar_perfil_mentor_sin_lock(perfil: dict) -> None:
             json.dump(perfil, f, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.exception(f"Error escribiendo perfil_mentor.json: {e}")
+
+
+# ─── EDICIÓN / OLVIDO POR ID LÓGICO (FASE 2) ─────────────────────────────────
+
+def _slug_estable(texto: str) -> str:
+    """Espejo de `resumen_memoria._slug` (mantiene coherencia de ids).
+
+    Verificar SIEMPRE: los ids lógicos de los elementos del panel se generan
+    con resumen_memoria._slug; esta copia debe quedar idéntica para poder
+    localizar el dato original por su id.
+    """
+    if not texto:
+        return "item"
+    limpio = re.sub(r"[^a-zA-Z0-9]+", "_", texto.strip().lower()).strip("_")
+    return limpio or "item"
+
+
+def _dividir_lista_segun(texto: str, separador: str = " · ") -> list:
+    """Divide un texto plano de edición en elementos de lista determinista."""
+    if not texto.strip():
+        return []
+    return [parte.strip() for parte in texto.split(separador) if parte.strip()]
+
+
+def _indices_proyectos_por_slug(perfil: dict, slug: str) -> list:
+    """Índices de proyectos de portafolio cuyo 'nombre' tiene el slug dado."""
+    proyectos = perfil.get("proyectos_de_portafolio", [])
+    if not isinstance(proyectos, list):
+        return []
+    return [
+        i for i, p in enumerate(proyectos)
+        if isinstance(p, dict) and _slug_estable(str(p.get("nombre", ""))) == slug
+    ]
+
+
+def _olvidar_en_perfil(perfil: dict, id_elemento: str) -> bool:
+    """
+    Aplica el olvido sobre un perfil EN MEMORIA (no persiste).
+
+    Es la ÚNICA implementación del mapeo id → mutación del perfil mentor.
+    `olvidar_elemento` y el filtro post-IA de extracción de sesión usan esta
+    misma función para que ambos mecanismos jamás puedan divergir.
+
+    - 'mentor:stack_<clave>' → restablece el valor por defecto del esquema.
+    - 'mentor:stack_otras' → limpia la lista de otras herramientas.
+    - 'mentor:tecnologias_aprendidas' / 'mentor:tecnologias_en_estudio'
+      → limpia la lista.
+    - 'mentor:ultimo_avance' → restablece "Ninguno".
+    - 'mentor:proximos_pasos' → vacía los próximos pasos de la última sesión.
+    - 'mentor:proyecto:<slug>' → elimina el proyecto (solo si hay UNA
+      coincidencia de slug; si hay varias o ninguna, no toca nada).
+
+    Devuelve True si aplicó el cambio; False si el id no pertenece a este
+    perfil o el dato no existe / es ambiguo.
+    """
+    id_ = str(id_elemento or "")
+    if not id_.startswith("mentor:"):
+        return False
+    resto = id_[len("mentor:"):]
+
+    if resto.startswith("proyecto:"):
+        slug = resto[len("proyecto:"):]
+        indices = _indices_proyectos_por_slug(perfil, slug)
+        if len(indices) != 1:
+            return False
+        del perfil["proyectos_de_portafolio"][indices[0]]
+        return True
+
+    if resto == "stack_otras":
+        perfil.setdefault("stack_objetivo", {})["otras_herramientas"] = []
+        return True
+
+    if resto == "stack_frontend" or resto == "stack_backend" or resto == "stack_bases_de_datos":
+        clave = resto[len("stack_"):]
+        perfil.setdefault("stack_objetivo", {})[clave] = ESQUEMA_MENTOR_DEFECTO["stack_objetivo"][clave]
+        return True
+
+    if resto == "tecnologias_aprendidas" or resto == "tecnologias_en_estudio":
+        perfil[resto] = []
+        return True
+
+    if resto == "ultimo_avance":
+        perfil["ultimo_avance_registrado"] = "Ninguno"
+        return True
+
+    if resto == "proximos_pasos":
+        historial = perfil.get("historial_sesiones", [])
+        if isinstance(historial, list) and historial and isinstance(historial[-1], dict):
+            historial[-1]["proximos_pasos"] = []
+            return True
+        return False
+
+    return False
+
+
+def olvidar_elemento(id_elemento: str) -> bool:
+    """
+    Borra un dato del perfil del mentor según su id lógico.
+
+    - 'mentor:stack_<clave>' → restablece el valor por defecto del esquema.
+    - 'mentor:stack_otras' → limpia la lista de otras herramientas.
+    - 'mentor:tecnologias_aprendidas' / 'mentor:tecnologias_en_estudio'
+      → limpia la lista.
+    - 'mentor:ultimo_avance' → restablece "Ninguno".
+    - 'mentor:proximos_pasos' → vacía los próximos pasos de la última sesión.
+    - 'mentor:proyecto:<slug>' → elimina el proyecto (solo si hay UNA
+      coincidencia de slug; si hay varias o ninguna, no toca nada).
+
+    Devuelve True si se aplicó el cambio (y se persistió); False si el id
+    no pertenece a este perfil o el dato no existe / es ambiguo.
+    """
+    perfil = cargar_perfil_mentor()
+    if not _olvidar_en_perfil(perfil, id_elemento):
+        return False
+    guardar_perfil_mentor(perfil)
+    return True
+
+
+def editar_elemento(id_elemento: str, texto: str) -> bool:
+    """
+    Actualiza el contenido de un dato del perfil del mentor.
+
+    - 'mentor:stack_<clave>' → reemplaza el valor escalar.
+    - 'mentor:stack_otras' / tecnologías / próximos_pasos → reemplaza la
+      lista reinterpretando el texto editado (split por " · ").
+    - 'mentor:ultimo_avance' → reemplaza el texto.
+    - 'mentor:proyecto:<slug>' → reemplaza la descripción del proyecto
+      (el nombre se conserva).
+
+    Devuelve True si se aplicó (y se persistió); False si el id no
+    pertenece a este perfil o el dato no existe / es ambiguo.
+    """
+    texto = (texto or "").strip()
+    id_ = str(id_elemento or "")
+    if not id_.startswith("mentor:"):
+        return False
+    resto = id_[len("mentor:"):]
+
+    if resto.startswith("proyecto:"):
+        slug = resto[len("proyecto:"):]
+        perfil = cargar_perfil_mentor()
+        indices = _indices_proyectos_por_slug(perfil, slug)
+        if len(indices) != 1:
+            return False
+        perfil["proyectos_de_portafolio"][indices[0]]["descripcion"] = texto
+        guardar_perfil_mentor(perfil)
+        return True
+
+    if resto == "stack_otras":
+        perfil = cargar_perfil_mentor()
+        perfil.setdefault("stack_objetivo", {})["otras_herramientas"] = _dividir_lista_segun(texto)
+        guardar_perfil_mentor(perfil)
+        return True
+
+    if resto == "stack_frontend" or resto == "stack_backend" or resto == "stack_bases_de_datos":
+        clave = resto[len("stack_"):]
+        perfil = cargar_perfil_mentor()
+        perfil.setdefault("stack_objetivo", {})[clave] = texto
+        guardar_perfil_mentor(perfil)
+        return True
+
+    if resto == "tecnologias_aprendidas" or resto == "tecnologias_en_estudio":
+        perfil = cargar_perfil_mentor()
+        perfil[resto] = _dividir_lista_segun(texto)
+        guardar_perfil_mentor(perfil)
+        return True
+
+    if resto == "ultimo_avance":
+        perfil = cargar_perfil_mentor()
+        perfil["ultimo_avance_registrado"] = texto
+        guardar_perfil_mentor(perfil)
+        return True
+
+    if resto == "proximos_pasos":
+        perfil = cargar_perfil_mentor()
+        historial = perfil.get("historial_sesiones", [])
+        if isinstance(historial, list) and historial and isinstance(historial[-1], dict):
+            historial[-1]["proximos_pasos"] = _dividir_lista_segun(texto)
+            guardar_perfil_mentor(perfil)
+            return True
+        return False
+
+    return False
+
 
 def obtener_bitacora_workspace(workspace_path: str = "") -> str:
     """
@@ -238,6 +423,14 @@ def extraer_y_procesar_sesion_mentor(ultimos_mensajes: list, workspace_path: str
             # Limitar historial a 5 entradas máx
             if "historial_sesiones" in nuevo_perfil and isinstance(nuevo_perfil["historial_sesiones"], list):
                 nuevo_perfil["historial_sesiones"] = nuevo_perfil["historial_sesiones"][-5:]
+
+            # GARANTÍA DETERMINISTA (filtro post-IA): el LLM reconstruye el
+            # perfil COMPLETO, así que puede reintroducir datos olvidados.
+            # Se re-aplica el mismo olvido que usaría olvidar_elemento() antes
+            # de persistir. El prompt jamás es la única barrera.
+            from modulos.olvidos import obtener_ids_olvidados
+            for id_bloqueado in obtener_ids_olvidados("mentor:"):
+                _olvidar_en_perfil(nuevo_perfil, id_bloqueado)
 
             guardar_perfil_mentor(nuevo_perfil)
             logger.info("✅ perfil_mentor.json actualizado con éxito tras la sesión.")

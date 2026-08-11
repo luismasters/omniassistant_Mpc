@@ -115,6 +115,18 @@
         </button>
       </div>
 
+      <!-- MEMORIA -->
+      <div class="sidebar-section">
+        <div class="section-title">Memoria</div>
+        <button class="action-btn" id="btnMemoria" title="Ver lo que Argus sabe de vos">
+          <div class="mode-btn-icon">🧠</div>
+          <div class="mode-btn-content">
+            <span class="mode-btn-label">Lo que Argus sabe</span>
+            <span class="mode-btn-sub">Perfil y memoria</span>
+          </div>
+        </button>
+      </div>
+
       <!-- GAMING & GAMEPAD -->
       <div class="sidebar-section">
         <div class="section-title">Gaming</div>
@@ -364,6 +376,78 @@
             <button type="submit" class="hud-btn-primary">💾 Guardar Cambios</button>
           </div>
         </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MODAL "LO QUE ARGUS SABE DE VOS" ─────────────────── -->
+  <div class="modal-overlay hidden" id="modalMemoria">
+    <div class="modal-card modal-card-memoria">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span class="modal-icon">🧠</span>
+          <div>
+            <h3>Lo que Argus sabe de vos</h3>
+            <span class="modal-subtitle">Información que uso para conocerte y responder mejor.</span>
+          </div>
+        </div>
+        <button class="modal-close-btn" id="btnCloseModalMemoria">✕</button>
+      </div>
+
+      <div class="modal-body memoria-body">
+        <div class="memoria-empty" id="memoriaEmpty" style="display:none;">
+          Todavía no tengo mucha información sobre vos. Hablá conmigo y la iré anotando.
+        </div>
+        <div id="memoriaSections" class="memoria-sections"></div>
+        <div class="memoria-footer">
+          Estos datos viven en tu PC y se actualizan con cada conversación.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MODAL CONFIRMAR OLVIDAR DATO (FASE 2) ───────────── -->
+  <div class="modal-overlay hidden" id="modalConfirmarOlvido">
+    <div class="modal-card modal-card-memoria">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span class="modal-icon">🗑️</span>
+          <div>
+            <h3>¿Querés que Argus olvide este dato?</h3>
+            <span class="modal-subtitle">La información se eliminará de forma permanente del perfil local.</span>
+          </div>
+        </div>
+        <button class="modal-close-btn" id="btnCloseConfirmarOlvido">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="memoria-confirm-detalle" id="confirmarOlvidoDetalle"></div>
+        <div class="memoria-confirm-actions">
+          <button class="hud-btn-secondary" id="btnCancelarOlvido">Cancelar</button>
+          <button class="hud-btn-danger" id="btnConfirmarOlvido">🗑️ Olvidar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MODAL EDITAR DATO (FASE 2) ───────────────────────── -->
+  <div class="modal-overlay hidden" id="modalEditarMemoria">
+    <div class="modal-card modal-card-memoria">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span class="modal-icon">✏️</span>
+          <div>
+            <h3>Editar este dato</h3>
+            <span class="modal-subtitle" id="editarMemoriaEtiqueta">Dato</span>
+          </div>
+        </div>
+        <button class="modal-close-btn" id="btnCloseEditarMemoria">✕</button>
+      </div>
+      <div class="modal-body">
+        <textarea id="editarMemoriaTexto" class="memoria-editar-textarea" rows="4"></textarea>
+        <div class="memoria-confirm-actions">
+          <button class="hud-btn-secondary" id="btnCancelarEditarMemoria">Cancelar</button>
+          <button class="hud-btn-primary" id="btnGuardarEditarMemoria">💾 Guardar</button>
+        </div>
       </div>
     </div>
   </div>

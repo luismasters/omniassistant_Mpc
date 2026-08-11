@@ -10,6 +10,9 @@ Proporciona métodos thread-safe llamados desde el Frontend Web (JS vía window.
 - cambiar_modelo_seleccionado(modelo)
 - seleccionar_workspace()
 - actualizar_memoria()
+- obtener_panel_memoria()
+- olvidar_memoria(id)
+- editar_memoria(id, texto)
 - limpiar_contexto()
 - seleccionar_perfil_mentor(perfil)
 - obtener_perfiles_mentor()
@@ -267,6 +270,47 @@ class ArgusWebBridge:
         except Exception as e:
             logger.exception(f"Error en obtener_estado_inicial: {e}")
             return {"error": str(e)}
+
+    def obtener_panel_memoria(self) -> dict:
+        """
+        Devuelve la memoria estructurada que Argus conoce del usuario,
+        preparada para presentación (secciones con id estables).
+        No expone estructuras internas de los perfiles ni ChromaDB.
+        """
+        try:
+            from modulos.resumen_memoria import preparar_secciones
+            datos = preparar_secciones()
+            datos["exito"] = True
+            return datos
+        except Exception as e:
+            logger.exception(f"Error obteniendo panel de memoria: {e}")
+            return {"exito": False, "error": str(e), "secciones": []}
+
+    def olvidar_memoria(self, id: str) -> dict:
+        """
+        Olvida un solo dato de la memoria de Argus, identificado por su id
+        lógico (p.ej. "vida:salud"). Delega en resumen_memoria.resolver_olvidar,
+        que despacha al módulo propietario del perfil (determinista, sin IA).
+        """
+        try:
+            from modulos.resumen_memoria import resolver_olvidar
+            return resolver_olvidar(id)
+        except Exception as e:
+            logger.exception(f"Error olvidando dato de memoria '{id}': {e}")
+            return {"exito": False, "mensaje": "Ocurrió un error al olvidar el dato."}
+
+    def editar_memoria(self, id: str, texto: str) -> dict:
+        """
+        Corrige el contenido de un dato de la memoria de Argus según su id
+        lógico. Delega en resumen_memoria.resolver_editar, que despacha al
+        módulo propietario del perfil (determinista, sin IA).
+        """
+        try:
+            from modulos.resumen_memoria import resolver_editar
+            return resolver_editar(id, texto)
+        except Exception as e:
+            logger.exception(f"Error editando dato de memoria '{id}': {e}")
+            return {"exito": False, "mensaje": "Ocurrió un error al editar el dato."}
 
     def enviar_mensaje(self, prompt: str) -> dict:
         """

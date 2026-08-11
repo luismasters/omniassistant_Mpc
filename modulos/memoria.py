@@ -2,6 +2,8 @@ import os
 import chromadb
 import uuid
 import datetime
+import hashlib
+import re
 import json
 import threading
 import time
@@ -65,13 +67,66 @@ def limpiar_cache():
     print("🧹 [MEMORIA] Caché de embeddings limpiada.")
 
 # =====================================================================
+# CONTRATO DE ORIGEN (Fase impl: boveda:*)
+# =====================================================================
+# Los recuerdos libres guardados en ChromaDB reciben un `origen_id`
+# determinista con formato `boveda:<slug(etiqueta)>:<10hex sha256>`.
+# El mismo (etiqueta_tema, contenido_normalizado) produce SIEMPRE el mismo
+# id, lo que permite invalidar familias de recuerdos (p.ej. "olvidar esto").
+# El `uuid4()` sigue siendo el id físico del documento; `origen_id` es una
+# metadata de trazabilidad, no reemplaza el id de ChromaDB.
+
+def _normalizar_contenido_para_hash(texto) -> str:
+    """Normaliza el contenido: strip + cualquier secuencia de whitespace → 1 espacio."""
+    return " ".join(str(texto or "").split())
+
+
+def _slug_etiqueta(etiqueta_tema) -> str:
+    """Convierte la etiqueta a un slug seguro y determinista."""
+    texto = str(etiqueta_tema or "").strip()
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", texto.lower()).strip("_")
+    return slug or "sin_etiqueta"
+
+
+def _generar_origen_id_boveda(etiqueta_tema, contenido) -> str:
+    """
+    Genera el `origen_id` canónico de un recuerdo libre:
+    boveda:<slug(etiqueta)>:<10 primeros hex de SHA-256(contenido normalizado)>.
+    """
+    slug = _slug_etiqueta(etiqueta_tema)
+    hash_contenido = hashlib.sha256(
+        _normalizar_contenido_para_hash(contenido).encode("utf-8")
+    ).hexdigest()[:10]
+    return f"boveda:{slug}:{hash_contenido}"
+
+# =====================================================================
 # HERRAMIENTAS DE GUARDADO Y BÚSQUEDA (OPTIMIZADAS)
 # =====================================================================
-def guardar_recuerdo(texto_a_guardar, etiqueta_tema, metadatos_extra=None):
-    """Guarda un recuerdo en la bóveda. Thread-safe."""
+def guardar_recuerdo(texto_a_guardar, etiqueta_tema, metadatos_extra=None, origen_id=None, origen_fuente=None):
+    """
+    Guarda un recuerdo en la bóveda. Thread-safe.
+
+    Parámetros de trazabilidad (opcional):
+    - origen_id: id lógico del dato del panel del que proviene (p.ej.
+      "vida:salud"). SOLO setearlo cuando existe una relación inequívoca;
+      si no, dejar None (no se puede invalidar por un olvido de panel).
+    - origen_fuente: clasificación general del origen (p.ej.
+      "perfil_proyecto"), útil para diferenciar fuentes en el futuro.
+
+    Contrato boveda:* (Fase impl): si NO se pasa origen_id, se genera uno
+    determinista con el formato `boveda:<slug(etiqueta)>:<10hex sha256>`
+    para que la memoria libre sea identificable e invalidable por
+    invalidar_por_origen(). Si el llamador SÍ lo pasa, se respeta tal cual.
+    """
     id_recuerdo = str(uuid.uuid4())
     fecha_hoy = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     metadatos = {"etiqueta": etiqueta_tema, "fecha_guardado": fecha_hoy}
+    if origen_id:
+        metadatos["origen_id"] = origen_id
+    else:
+        metadatos["origen_id"] = _generar_origen_id_boveda(etiqueta_tema, texto_a_guardar)
+    if origen_fuente:
+        metadatos["origen_fuente"] = origen_fuente
     if metadatos_extra:
         metadatos.update(metadatos_extra)
 
@@ -87,6 +142,29 @@ def guardar_recuerdo(texto_a_guardar, etiqueta_tema, metadatos_extra=None):
         return True
     except Exception as e:
         print(f"❌ [MEMORIA] Error al guardar recuerdo: {e}")
+        return False
+
+
+def invalidar_por_origen(origen_id):
+    """
+    Elimina de la bóveda todos los recuerdos que tengan ese 'origen_id' en
+    sus metadatos. Thread-safe.
+
+    Esta función queda PREPARADA para invalidar selectivamente recuerdos
+    vinculados a un dato del panel (p.ej. al olvidar 'vida:salud'). Por
+    contrato NO se invoca desde los flujos de olvido mientras los hechos
+    de ChromaDB no lleven un origen_id inequívoco (hoy ninguno lo tiene,
+    ver modulos/perfil_usuario.rutear_hecho y mcp_guardar_en_boveda).
+    """
+    if not origen_id:
+        return False
+    try:
+        coleccion_principal.delete(where={"origen_id": origen_id})
+        limpiar_cache()
+        print(f"🗑️ [MEMORIA] Recuerdos con origen '{origen_id}' eliminados.")
+        return True
+    except Exception as e:
+        print(f"❌ [MEMORIA] Error invalidando recuerdos por origen '{origen_id}': {e}")
         return False
 
 

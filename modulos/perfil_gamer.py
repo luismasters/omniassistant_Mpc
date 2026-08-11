@@ -121,6 +121,168 @@ def _sanitizar_perfil(perfil: dict) -> dict:
     return {"juego_activo": juego_activo, "juegos": juegos_limpios}
 
 
+# ─── EDICIÓN / OLVIDO POR ID LÓGICO (FASE 2) ─────────────────────────────────
+
+# Espejo de resumen_memoria._CAMPOS_GAMER (mantener idéntico): etiquetas
+# visibles de la plantilla de un juego → claves candidatas internas.
+CAMPOS_CURADOS = [
+    ("Personaje", ["personaje", "personaje_clase", "clase"]),
+    ("Nivel", ["nivel", "nivel_actual"]),
+    ("Build", ["build", "build_elegida", "build_tipo"]),
+    ("Dificultad", ["dificultad"]),
+    ("Objetivo", ["objetivo", "objetivo_meta", "objetivo_equipo"]),
+    ("Estrategia", ["estrategia"]),
+    ("Progreso", ["progreso", "progreso_historico"]),
+]
+
+
+def _slug_estable(texto: str) -> str:
+    """Espejo de `resumen_memoria._slug` (mantiene coherencia de ids)."""
+    if not texto:
+        return "item"
+    limpio = re.sub(r"[^a-zA-Z0-9]+", "_", texto.strip().lower()).strip("_")
+    return limpio or "item"
+
+
+def _clave_canonica(etiqueta: str):
+    """Devuelve la clave interna canónica de una etiqueta de la plantilla."""
+    for etiqueta_curada, claves in CAMPOS_CURADOS:
+        if etiqueta_curada == etiqueta:
+            return claves[0]
+    return None
+
+
+def _reparsear_ficha(texto: str):
+    """
+    Reinterpreta el texto editado de un elemento gamer en sus campos
+    curados. Formato: "Etiqueta: valor · Etiqueta: valor · ...".
+
+    Devuelve un dict {clave_canonica: valor} o None si el texto no
+    respeta la plantilla (caso en el que NUNCA se borran campos: la
+    edición de Fase 2 es determinista y sin IA).
+    """
+    campos = {}
+    for parte in texto.split(" · "):
+        parte = parte.strip()
+        if not parte:
+            continue
+        if ":" not in parte:
+            return None
+        etiqueta, _, valor = parte.partition(":")
+        clave = _clave_canonica(etiqueta.strip().strip())
+        if clave is None or not valor.strip():
+            return None
+        campos[clave] = valor.strip()
+    return campos or None
+
+
+def _clave_juego_por_slug(perfil: dict, slug: str):
+    """Devuelve la clave exacta de 'juegos' cuyo nombre genera el slug
+    (o None si hay 0 o más de 1 coincidencia — ambiguo, no se toca nada)."""
+    juegos = perfil.get("juegos", {})
+    coincidencias = [
+        nombre for nombre in juegos.keys()
+        if _slug_estable(str(nombre)) == slug
+    ]
+    if len(coincidencias) == 1:
+        return coincidencias[0]
+    return None
+
+
+def _olvidar_en_perfil(perfil: dict, id_elemento: str) -> bool:
+    """
+    Aplica el olvido sobre un perfil EN MEMORIA (no persiste).
+
+    Es la ÚNICA implementación del mapeo id → mutación del perfil gamer.
+    `olvidar_elemento` y cualquier filtro futuro de extracción la reutilizan
+    para que ambos mecanismos jamás puedan divergir.
+
+    - 'gamer:juego_activo' → restablece el juego activo a "".
+    - 'gamer:<slug_juego>' → elimina la ficha completa del juego; si ese
+      juego era el activo, también restablece 'juego_activo' (sin huérfanos).
+
+    Devuelve True si aplicó el cambio; False si el id no pertenece a este
+    perfil o el dato no existe / es ambiguo.
+    """
+    id_ = str(id_elemento or "")
+    if not id_.startswith("gamer:"):
+        return False
+    resto = id_[len("gamer:"):]
+
+    if resto == "juego_activo":
+        if not perfil.get("juego_activo"):
+            return False
+        perfil["juego_activo"] = ""
+        return True
+
+    clave = _clave_juego_por_slug(perfil, resto)
+    if clave is None:
+        return False
+    del perfil["juegos"][clave]
+    if perfil.get("juego_activo") == clave:
+        perfil["juego_activo"] = ""
+    return True
+
+
+def olvidar_elemento(id_elemento: str) -> bool:
+    """
+    Borra un dato del perfil gamer según su id lógico.
+
+    - 'gamer:juego_activo' → restablece el juego activo a "".
+    - 'gamer:<slug_juego>' → elimina la ficha completa del juego; si ese
+      juego era el activo, también restablece 'juego_activo' (sin huérfanos).
+
+    Devuelve True si se aplicó el cambio (y se persistió); False si el id
+    no pertenece a este perfil o el dato no existe / es ambiguo.
+    """
+    perfil = cargar_perfil_gamer()
+    if not _olvidar_en_perfil(perfil, id_elemento):
+        return False
+    guardar_perfil_gamer(perfil)
+    return True
+
+
+def editar_elemento(id_elemento: str, texto: str) -> bool:
+    """
+    Actualiza el contenido de un dato del perfil gamer.
+
+    - 'gamer:juego_activo' → reemplaza el nombre del juego activo.
+    - 'gamer:<slug_juego>' → re-renderiza la ficha del juego (ver abajo).
+
+    ESTRATEGIA DE EDICIÓN GAMER SIN IA: el texto editado se interpreta con
+    la MISMA plantilla que produce el panel ("Etiqueta: valor · ..."). Solo
+    se actualizan los campos que el usuario incluye; los que no se nombran
+    quedan intactos. Si el texto NO respeta la plantilla, la edición se
+    rechaza (devuelve False) — nunca se corrompen campos ni se inventa data.
+
+    Devuelve True si se aplicó (y se persistió); False en caso contrario.
+    """
+    texto = (texto or "").strip()
+    id_ = str(id_elemento or "")
+    if not id_.startswith("gamer:"):
+        return False
+    resto = id_[len("gamer:"):]
+
+    perfil = cargar_perfil_gamer()
+
+    if resto == "juego_activo":
+        if not texto:
+            return False
+        perfil["juego_activo"] = texto
+        guardar_perfil_gamer(perfil)
+        return True
+
+    clave = _clave_juego_por_slug(perfil, resto)
+    if clave is None:
+        return False
+    campos = _reparsear_ficha(texto)
+    if campos is None:
+        return False
+    perfil["juegos"][clave] = {**perfil["juegos"][clave], **campos}
+    guardar_perfil_gamer(perfil)
+    return True
+
+
 # ─── EXTRACCIÓN CON LLM ──────────────────────────────────────────────────────
 
 def extraer_hechos_gamer(ultimos_mensajes: list) -> list:
@@ -226,6 +388,21 @@ def rutear_hecho_gamer(hecho: dict, perfil: dict) -> dict:
 
     if not campo or not valor:
         return perfil
+
+    # ─── Filtro de olvidos (tombstones) ──────────────────────────────────
+    # Garantía determinista contra la reaparición: si el usuario olvidó este
+    # dato desde el panel, la extracción NO puede reintroducirlo. El id
+    # candidato usa el MISMO slug que genera el panel (id canónico).
+    from modulos.olvidos import esta_olvidado
+    if campo == "juego_activo":
+        if esta_olvidado("gamer:juego_activo"):
+            logger.info("Hecho gamer descartado (dato olvidado): gamer:juego_activo")
+            return perfil
+    elif juego:
+        candidato_id = f"gamer:{_slug_estable(juego)}"
+        if esta_olvidado(candidato_id):
+            logger.info(f"Hecho gamer descartado (dato olvidado): {candidato_id}")
+            return perfil
 
     # Caso especial: juego_activo
     if campo == "juego_activo":

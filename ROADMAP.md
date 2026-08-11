@@ -4,7 +4,7 @@
 > Documentos relacionados: `PROJECT_STATE.md` (estado actual, autogenerado por el crawler) y `AUDITORIA_ARQUITECTURA.md` (auditoría histórica del 25/07/2026).
 
 **Versión actual:** v0.5.0 HUD (en camino a v0.6.0)
-**Última actualización:** 2026-08-06
+**Última actualización:** 2026-08-10
 
 ---
 
@@ -12,7 +12,7 @@
 
 Argus es un asistente de escritorio de IA para Windows con 3 personalidades (General / Mentor / Gamer), interfaz web (PyWebView + WebView2), voz (Vosk wake word → Whisper STT → Edge TTS), visión, gamepad multi-mando, memoria persistente (ChromaDB), control del sistema y de audio, y un sistema de Skills extensible.
 
-**Línea de base técnica:** ~12k líneas de Python, frontend web en `gui/`, suite de tests iniciada (43 tests).
+**Línea de base técnica:** ~12k líneas de Python, frontend web en `gui/`, suite de tests actual (263 tests).
 
 ---
 
@@ -38,6 +38,32 @@ Argus es un asistente de escritorio de IA para Windows con 3 personalidades (Gen
 ### Memoria e IA
 - [x] Memoria persistente con ChromaDB + caché de embeddings + watchdog de cambios
 - [x] Perfiles persistentes de usuario y mentor
+
+### Gestión de memoria — Fase 2 (edición y olvido desde el panel)
+Objetivo: el usuario corrige/borra lo que Argus recuerda, sin esperar la siguiente consolidación IA.
+
+- [x] **Edición de elementos:** cada dato del panel tiene botón "editar" que abre un modal con textarea; al guardar, `editar_memoria` persiste el cambio al JSON del perfil y recarga el panel.
+- [x] **Olvido/borrado con confirmación:** cada dato tiene botón "olvidar" con modal de confirmación; confirma o cancela desde el propio panel.
+- [x] **Dispatcher central en `resumen_memoria.py`:** `resolver_olvidar(id)` y `resolver_editar(id, texto)` validan el prefijo (`funcional:` / `vida:` / `mentor:` / `gamer:`), devuelven `exito` + `mensaje` y delegan la mutación al módulo propietario del prefijo.
+- [x] **Mutaciones delegadas a los módulos propietarios de cada perfil:**
+  - `perfil_usuario.py` — `olvidar_elemento()` / `editar_elemento()` sobre `funcional` y `vida_personal` (ids estables tipo slug, tildes normalizadas).
+  - `perfil_mentor.py` — `olvidar_elemento()` / `editar_elemento()` sobre stack, tecnologías, proyectos, próximos pasos y último avance (olvido reasigna valores por defecto, no deja claves huérfanas).
+  - `perfil_gamer.py` — `olvidar_elemento()` / `editar_elemento()` sobre fichas de juego por slug; el olvido de la ficha activa limpia `juego_activo` (sin huérfanos) y rechaza ids ambiguos; la edición de ficha usa plantilla determinista sin IA (`Etiqueta: valor · ...`) y rechaza texto libre.
+- [x] **Tests:** 37 tests nuevos en `tests/test_gestion_memoria.py` (offline, sin IA ni ChromaDB; perfiles en carpetas temporales vía monkeypatch). **Suite total: 190 tests pasando.**
+- [x] **ChromaDB queda FUERA de esta fase:** las mutaciones persisten solo en los JSON de perfil; no se re-indexaron ni invalidaron hechos de ChromaDB, ni se purgaron datos en el corpus de memoria a largo plazo.
+
+> **⚠️ Limitaciones / riesgos documentados (Fase 2 de gestión de memoria):**
+> - **Reaparición de datos por consolidación IA:** borrar/editar un dato en el panel no bloquea a ninguna consolidación futura. Si el LLM vuelve a extraer el mismo hecho en una sesión posterior, puede re-grabarlo y "resucitar" lo olvidado. Falta una lista negra de olvidos (tombstones) que filtre el guardado automático.
+> - **Bóveda desincronizada:** `gestor_boveda.py` guarda su propio almacén separado de los perfiles. Un dato olvidado/borrado del panel NO se propaga a la bóveda, así que ahí queda viva una copia desactualizada del dato.
+
+### Gestión de memoria — Fase 3 (bóveda: `origen_id`, ciclo de olvido y anti-reaparición)
+Objetivo: cerrar las dos deudas documentadas de la Fase 2 — la reaparición de datos por consolidación IA y la bóveda desincronizada.
+
+- [x] **`origen_id` determinista en la bóveda:** `guardar_recuerdo()` genera un `origen_id` canónico `boveda:memoria_ia:<hash>` (o respeta uno explícito); la familia lógica agrupa los documentos con el mismo origen.
+- [x] **Backfill histórico (`modulos/backfill_boveda.py`):** migra los documentos existentes de la bóveda a `origen_id` (18/18 migrados, 16 `origen_id` únicos, 0 ambiguos). Backup previo en `backups/boveda_memoria_20260810_151540`; `--dry-run` no escribe.
+- [x] **Ciclo "Olvidar esto" sobre la bóveda:** `resolver_olvidar("boveda:<origen>")` → `invalidar_por_origen()` borra TODA la familia del documento en ChromaDB y registra el tombstone en `modulos/olvidos.py`. Repetir el olvido del mismo origen es idempotente y no afecta a familias distintas.
+- [x] **Protección contra reaparición:** `guardar_recuerdo()` consulta `esta_olvidado(origen_id)` (lazy) y rechaza re-guardar una familia tombstoned; `quitar_olvido()` actúa como "desolvidar" y rehabilita la familia.
+- [x] **Tests:** `tests/test_olvido_ciclo_integracion.py` (7 tests, ChromaDB real en tmp, embeddings deterministas, `RUTA_OLVIDOS` en tmp) + `tests/test_backfill_boveda.py` (11 tests) + `tests/test_integracion_boveda.py` (6 tests). **Suite total: 263 tests pasando.**
 
 ### Calidad (reciente)
 - [x] Rotación de logs (10 MB, 5 backups, tolerante a bloqueos en Windows) — `modulos/logger.py`

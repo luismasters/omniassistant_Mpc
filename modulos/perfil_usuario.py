@@ -129,6 +129,122 @@ def _escribir_perfil_sin_lock(perfil: dict) -> None:
         logger.exception(f"Error escribiendo perfil_usuario.json: {e}")
 
 
+# ─── EDICIÓN / OLVIDO POR ID LÓGICO (FASE 2) ─────────────────────────────────
+
+def _slug_estable(texto: str) -> str:
+    """Espejo de `resumen_memoria._slug` (mantiene coherencia de ids).
+
+    Verificar SIEMPRE: los ids lógicos de los elementos del panel se generan
+    con resumen_memoria._slug; esta copia debe quedar idéntica para poder
+    localizar el dato original por su id.
+    """
+    if not texto:
+        return "item"
+    limpio = re.sub(r"[^a-zA-Z0-9]+", "_", texto.strip().lower()).strip("_")
+    return limpio or "item"
+
+
+def _persistir_estructura(perfil: dict) -> None:
+    """Persiste el perfil respetando lock y sanitización.
+
+    NO usa guardar_perfil() a propósito: esa función puede disparar la
+    consolidación con IA (consolidar_perfil) si el JSON supera
+    UMBRAL_CONSOLIDACION, y la edición/olvido de Fase 2 debe ser 100%
+    determinista (sin IA).
+    """
+    perfil = _sanitizar_perfil_completo(perfil)
+    with _lock_perfil:
+        _escribir_perfil_sin_lock(perfil)
+
+
+def _indices_vida_por_slug(perfil: dict, slug: str) -> list:
+    """Índices de las entradas de vida_personal cuyo tema tiene el slug dado."""
+    return [
+        i for i, entrada in enumerate(perfil.get("vida_personal", []))
+        if isinstance(entrada, dict) and _slug_estable(str(entrada.get("tema", ""))) == slug
+    ]
+
+
+def _olvidar_en_perfil(perfil: dict, id_elemento: str) -> bool:
+    """
+    Aplica el olvido sobre un perfil EN MEMORIA (no persiste).
+
+    Es la ÚNICA implementación del mapeo id → mutación. `olvidar_elemento`
+    y el filtro post-IA de consolidación usan esta misma función para que
+    ambos mecanismos jamás puedan divergir.
+
+    - 'funcional:<clave>' → restablece la clave del esquema a "".
+    - 'vida:<slug_tema>' → elimina la entrada correspondiente (solo si hay
+      UNA entrada con ese slug; si hay varias o ninguna, no toca nada).
+
+    Devuelve True si aplicó el cambio; False si el id no pertenece a este
+    perfil o el dato no existe / es ambiguo.
+    """
+    prefijo, _, resto = str(id_elemento or "").partition(":")
+    if prefijo == "funcional":
+        if resto not in ESQUEMA_FUNCIONAL_CLAVES:
+            return False
+        perfil["funcional"][resto] = ""
+        return True
+    if prefijo == "vida":
+        indices = _indices_vida_por_slug(perfil, resto)
+        if len(indices) != 1:
+            return False
+        del perfil["vida_personal"][indices[0]]
+        return True
+    return False
+
+
+def olvidar_elemento(id_elemento: str) -> bool:
+    """
+    Borra un dato del perfil de usuario según su id lógico.
+
+    - 'funcional:<clave>' → restablece la clave del esquema a "".
+    - 'vida:<slug_tema>' → elimina la entrada correspondiente (solo si hay
+      UNA entrada con ese slug; si hay varias o ninguna, no toca nada).
+
+    Devuelve True si se aplicó el cambio (y se persistió); False si el id
+    no pertenece a este perfil o el dato no existe / es ambiguo.
+    """
+    perfil = cargar_perfil()
+    if not _olvidar_en_perfil(perfil, id_elemento):
+        return False
+    _persistir_estructura(perfil)
+    return True
+
+
+def editar_elemento(id_elemento: str, texto: str) -> bool:
+    """
+    Actualiza el contenido de un dato del perfil de usuario.
+
+    - 'funcional:<clave>' → reemplaza el valor de esa clave.
+    - 'vida:<slug_tema>' → reemplaza 'contenido' de la entrada y refresca
+      'actualizado' a hoy (solo si hay UNA entrada con ese slug).
+
+    Devuelve True si se aplicó (y se persistió); False si el id no
+    pertenece a este perfil o el dato no existe / es ambiguo.
+    """
+    texto = (texto or "").strip()
+    prefijo, _, resto = str(id_elemento or "").partition(":")
+    if prefijo == "funcional":
+        if resto not in ESQUEMA_FUNCIONAL_CLAVES:
+            return False
+        perfil = cargar_perfil()
+        perfil["funcional"][resto] = texto
+        _persistir_estructura(perfil)
+        return True
+    if prefijo == "vida":
+        perfil = cargar_perfil()
+        indices = _indices_vida_por_slug(perfil, resto)
+        if len(indices) != 1:
+            return False
+        perfil["vida_personal"][indices[0]]["contenido"] = texto
+        perfil["vida_personal"][indices[0]]["actualizado"] = datetime.date.today().strftime("%Y-%m-%d")
+        _persistir_estructura(perfil)
+        return True
+    return False
+
+
 # ─── SANITIZACIÓN ────────────────────────────────────────────────────────────
 
 def _sanitizar_perfil_completo(perfil: dict) -> dict:
@@ -398,6 +514,22 @@ def rutear_hecho(hecho: dict, perfil: dict) -> dict:
     tipo = hecho.get("tipo", "")
     clave_o_tema = str(hecho.get("clave_o_tema", "")).strip()
 
+    # ─── Filtro de olvidos (tombstones) ──────────────────────────────────
+    # Garantía determinista contra la reaparición: si el usuario olvidó este
+    # dato desde el panel, la extracción NO puede reintroducirlo. La
+    # comparación usa el MISMO slug que genera el panel (id canónico).
+    from modulos.olvidos import esta_olvidado
+    if tipo == "perfil_funcional":
+        candidato_id = f"funcional:{clave_o_tema}"
+        if esta_olvidado(candidato_id):
+            logger.info(f"Hecho funcional descartado (dato olvidado): {candidato_id}")
+            return perfil
+    elif tipo == "perfil_vida":
+        candidato_id = f"vida:{_slug_estable(clave_o_tema)}"
+        if esta_olvidado(candidato_id):
+            logger.info(f"Hecho de vida descartado (dato olvidado): {candidato_id}")
+            return perfil
+
     # ─── Ruteo por tipo ───────────────────────────────────────────────────
     if tipo == "perfil_funcional":
         # Validar que clave_o_tema sea una de las 5 claves del esquema
@@ -422,11 +554,15 @@ def rutear_hecho(hecho: dict, perfil: dict) -> dict:
 
     elif tipo == "proyecto":
         # Llamar directo a guardar_recuerdo() de memoria.py
+        # Los hechos de tipo "proyecto" NO tienen id de panel equivalente, así
+        # que NO llevan origen_id (no se pueden invalidar por un olvido único).
+        # Se etiqueta el origen como clasificación para capacidad futura.
         try:
             from modulos.memoria import guardar_recuerdo
             guardar_recuerdo(
                 texto_a_guardar=valor,
-                etiqueta_tema="Extracción automática de perfil"
+                etiqueta_tema="Extracción automática de perfil",
+                metadatos_extra={"origen_fuente": "perfil_proyecto"}
             )
             logger.debug(f"Hecho de proyecto guardado en bóveda: {valor[:60]}")
         except Exception as e:
@@ -511,9 +647,20 @@ def consolidar_perfil(perfil: dict) -> dict:
     """
     from modulos.ia import cliente_genai
     from google.genai import types
+    from modulos.olvidos import obtener_ids_olvidados
 
     perfil_json = json.dumps(perfil, ensure_ascii=False, indent=2)
     hoy = datetime.date.today().strftime("%Y-%m-%d")
+
+    # Segunda barrera: los datos olvidados (tombstones) se anuncian al modelo.
+    # NO es la garantía real; la garantía es el filtro determinista de abajo.
+    ids_bloqueados_vida = sorted(obtener_ids_olvidados("vida:"))
+    claves_bloqueadas_funcional = sorted(
+        i[len("funcional:"):] for i in obtener_ids_olvidados("funcional:")
+    )
+    temas_bloqueados = ", ".join(
+        i[len("vida:"):] for i in ids_bloqueados_vida
+    ) or "ninguno"
 
     prompt = (
         "Eres un consolidado de perfil de usuario. Tu tarea es tomar un perfil "
@@ -532,7 +679,13 @@ def consolidar_perfil(perfil: dict) -> dict:
         "3. Si hay información contradictoria, quedate con la más reciente.\n"
         "4. Si hay temas repetidos en vida_personal, fusionalos en una sola entrada.\n"
         "5. Conservá solo lo esencial para que el asistente conozca al usuario.\n"
-        "6. Devolvé SOLO el JSON, sin explicaciones ni markdown.\n\n"
+        "6. Devolvé SOLO el JSON, sin explicaciones ni markdown.\n"
+        f"7. NO reintroduzcas bajo ningún concepto los siguientes temas "
+        f"bloqueados (el usuario pidió OLVIDARLOS): {temas_bloqueados}. "
+        f"Si alguno de estos temas aparece en vida_personal, ELIMINALO.\n"
+        f"8. NO reintroduzcas bajo ningún concepto estas claves del apartado "
+        f"funcional (el usuario pidió OLVIDARLAS; deben quedar VACÍAS): "
+        f"{', '.join(claves_bloqueadas_funcional) or 'ninguna'}.\n\n"
         f"Perfil a consolidar:\n{perfil_json}\n\n"
         "JSON consolidado:"
     )
@@ -559,6 +712,13 @@ def consolidar_perfil(perfil: dict) -> dict:
 
         # Sanitizar
         perfil_consolidado = _sanitizar_funcional(perfil_consolidado)
+
+        # GARANTÍA DETERMINISTA (filtro post-IA): re-aplicar el mismo olvido
+        # que usaría olvidar_elemento, para que un tema vedado jamás sobreviva
+        # a la consolidación aunque el modelo lo haya reintroducido.
+        for id_bloqueado in obtener_ids_olvidados():
+            _olvidar_en_perfil(perfil_consolidado, id_bloqueado)
+
         return perfil_consolidado
 
     except Exception as e:

@@ -25,6 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const gamepadSelect       = document.getElementById('gamepadSelect');
   const btnWorkspace        = document.getElementById('btnWorkspace');
   const lblWorkspace        = document.getElementById('lblWorkspace');
+  const btnMemoria          = document.getElementById('btnMemoria');
   const btnUpdateMemoria    = document.getElementById('btnUpdateMemoria');
   const btnClearContext     = document.getElementById('btnClearContext');
 
@@ -471,6 +472,14 @@ document.addEventListener('DOMContentLoaded', () => {
           agregarMensajeSistema(`📁 Workspace: <code>${escapeHtml(res.workspace)}</code>`);
         }
       }
+    });
+  }
+
+  if (btnMemoria) {
+    btnMemoria.addEventListener('click', () => {
+      const modalMemoria = document.getElementById('modalMemoria');
+      if (modalMemoria) modalMemoria.classList.remove('hidden');
+      cargarPanelMemoria();
     });
   }
 
@@ -1481,6 +1490,212 @@ document.addEventListener('DOMContentLoaded', () => {
     modalEditarRec.addEventListener('click', (e) => {
       if (e.target === modalEditarRec) cerrarModalEditar();
     });
+  }
+
+  // Modal Memoria Handlers
+  const modalMemoria = document.getElementById('modalMemoria');
+  const btnCloseModalMemoria = document.getElementById('btnCloseModalMemoria');
+  const memoriaSectionsEl   = document.getElementById('memoriaSections');
+  const memoriaEmptyEl      = document.getElementById('memoriaEmpty');
+
+  // ── Modales Fase 2: confirmar olvido y editar dato ──
+  const modalConfirmarOlvido = document.getElementById('modalConfirmarOlvido');
+  const confirmarOlvidoDetalle = document.getElementById('confirmarOlvidoDetalle');
+  const modalEditarMemoria = document.getElementById('modalEditarMemoria');
+  const editarMemoriaEtiqueta = document.getElementById('editarMemoriaEtiqueta');
+  const editarMemoriaTexto = document.getElementById('editarMemoriaTexto');
+
+  let memoriaAccionPendiente = null; // {accion: 'olvidar'|'editar', id, etiqueta, texto?}
+
+  function cerrarModalConfirmarOlvido() {
+    if (modalConfirmarOlvido) modalConfirmarOlvido.classList.add('hidden');
+    memoriaAccionPendiente = null;
+  }
+
+  function cerrarModalEditarMemoria() {
+    if (modalEditarMemoria) modalEditarMemoria.classList.add('hidden');
+    memoriaAccionPendiente = null;
+  }
+
+  function abrirModalConfirmarOlvido(detalle) {
+    if (!modalConfirmarOlvido || !confirmarOlvidoDetalle) return;
+    confirmarOlvidoDetalle.innerHTML = `<strong>${escapeHtml(detalle.etiqueta || '')}</strong><br>${escapeHtml(detalle.texto || '')}`;
+    modalConfirmarOlvido.classList.remove('hidden');
+  }
+
+  function abrirModalEditarMemoria(detalle) {
+    if (!modalEditarMemoria || !editarMemoriaTexto || !editarMemoriaEtiqueta) return;
+    editarMemoriaEtiqueta.textContent = detalle.etiqueta || 'Dato';
+    editarMemoriaTexto.value = detalle.texto || '';
+    modalEditarMemoria.classList.remove('hidden');
+    editarMemoriaTexto.focus();
+  }
+
+  if (modalConfirmarOlvido) {
+    modalConfirmarOlvido.addEventListener('click', (e) => {
+      if (e.target === modalConfirmarOlvido) cerrarModalConfirmarOlvido();
+    });
+  }
+  const btnCloseConfirmarOlvido = document.getElementById('btnCloseConfirmarOlvido');
+  if (btnCloseConfirmarOlvido) {
+    btnCloseConfirmarOlvido.addEventListener('click', cerrarModalConfirmarOlvido);
+  }
+  const btnCancelarOlvido = document.getElementById('btnCancelarOlvido');
+  if (btnCancelarOlvido) {
+    btnCancelarOlvido.addEventListener('click', cerrarModalConfirmarOlvido);
+  }
+  const btnConfirmarOlvido = document.getElementById('btnConfirmarOlvido');
+  if (btnConfirmarOlvido) {
+    btnConfirmarOlvido.addEventListener('click', async () => {
+      const accion = memoriaAccionPendiente;
+      cerrarModalConfirmarOlvido();
+      if (!accion || accion.accion !== 'olvidar') return;
+      if (!pyApi || typeof pyApi.olvidar_memoria !== 'function') {
+        agregarMensajeSistema('🧠 La gestión de memoria no está disponible.');
+        return;
+      }
+      try {
+        const res = await pyApi.olvidar_memoria(accion.id);
+        if (res && res.exito) {
+          agregarMensajeSistema(`🧠 ${escapeHtml(res.mensaje || 'Dato olvidado.')}`);
+        } else {
+          agregarMensajeSistema(`⚠️ ${escapeHtml((res && res.mensaje) || 'No se pudo olvidar el dato.')}`);
+        }
+      } catch (err) {
+        console.error('Error olvidando dato:', err);
+        agregarMensajeSistema('⚠️ Ocurrió un error al olvidar el dato.');
+      }
+      cargarPanelMemoria();
+    });
+  }
+
+  if (modalEditarMemoria) {
+    modalEditarMemoria.addEventListener('click', (e) => {
+      if (e.target === modalEditarMemoria) cerrarModalEditarMemoria();
+    });
+  }
+  const btnCloseEditarMemoria = document.getElementById('btnCloseEditarMemoria');
+  if (btnCloseEditarMemoria) {
+    btnCloseEditarMemoria.addEventListener('click', cerrarModalEditarMemoria);
+  }
+  const btnCancelarEditarMemoria = document.getElementById('btnCancelarEditarMemoria');
+  if (btnCancelarEditarMemoria) {
+    btnCancelarEditarMemoria.addEventListener('click', cerrarModalEditarMemoria);
+  }
+  const btnGuardarEditarMemoria = document.getElementById('btnGuardarEditarMemoria');
+  if (btnGuardarEditarMemoria) {
+    btnGuardarEditarMemoria.addEventListener('click', async () => {
+      const accion = memoriaAccionPendiente;
+      const texto = editarMemoriaTexto ? editarMemoriaTexto.value : '';
+      cerrarModalEditarMemoria();
+      if (!accion || accion.accion !== 'editar') return;
+      if (!pyApi || typeof pyApi.editar_memoria !== 'function') {
+        agregarMensajeSistema('🧠 La gestión de memoria no está disponible.');
+        return;
+      }
+      try {
+        const res = await pyApi.editar_memoria(accion.id, texto);
+        if (res && res.exito) {
+          agregarMensajeSistema(`🧠 ${escapeHtml(res.mensaje || 'Dato actualizado.')}`);
+        } else {
+          agregarMensajeSistema(`⚠️ ${escapeHtml((res && res.mensaje) || 'No se pudo editar el dato.')}`);
+        }
+      } catch (err) {
+        console.error('Error editando dato:', err);
+        agregarMensajeSistema('⚠️ Ocurrió un error al editar el dato.');
+      }
+      cargarPanelMemoria();
+    });
+  }
+
+  // Delegación de clics en los botones de acción de cada elemento.
+  if (memoriaSectionsEl) {
+    memoriaSectionsEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-memoria-accion]');
+      if (!btn) return;
+      const id = btn.getAttribute('data-memoria-id');
+      if (!id) return;
+      const etiqueta = btn.getAttribute('data-memoria-etiqueta') || '';
+      const texto = btn.getAttribute('data-memoria-texto') || '';
+      const accion = btn.getAttribute('data-memoria-accion');
+      if (accion === 'olvidar') {
+        memoriaAccionPendiente = { accion: 'olvidar', id, etiqueta, texto };
+        abrirModalConfirmarOlvido({ etiqueta, texto });
+      } else if (accion === 'editar') {
+        memoriaAccionPendiente = { accion: 'editar', id, etiqueta, texto };
+        abrirModalEditarMemoria({ etiqueta, texto });
+      }
+    });
+  }
+
+  if (btnCloseModalMemoria) {
+    btnCloseModalMemoria.addEventListener('click', () => {
+      if (modalMemoria) modalMemoria.classList.add('hidden');
+    });
+  }
+
+  if (modalMemoria) {
+    modalMemoria.addEventListener('click', (e) => {
+      if (e.target === modalMemoria) modalMemoria.classList.add('hidden');
+    });
+  }
+
+  function formatearFechaISO(iso) {
+    if (!iso) return '';
+    const partes = iso.split('T')[0].split('-');
+    if (partes.length !== 3) return '';
+    return `${partes[2]}/${partes[1]}/${partes[0]}`;
+  }
+
+  async function cargarPanelMemoria() {
+    if (!memoriaSectionsEl) return;
+    memoriaSectionsEl.innerHTML = '<div class="memoria-empty">Cargando…</div>';
+    if (memoriaEmptyEl) memoriaEmptyEl.style.display = 'none';
+
+    if (!pyApi || typeof pyApi.obtener_panel_memoria !== 'function') {
+      if (memoriaSectionsEl) memoriaSectionsEl.innerHTML = '<div class="memoria-empty">Memoria no disponible.</div>';
+      return;
+    }
+
+    try {
+      const res = await pyApi.obtener_panel_memoria();
+      if (!res || !res.exito || !res.secciones) {
+        if (memoriaSectionsEl) memoriaSectionsEl.innerHTML = '<div class="memoria-empty">Error: memoria no disponible.</div>';
+        return;
+      }
+      const secciones = res.secciones.filter(s => s && Array.isArray(s.elementos) && s.elementos.length > 0);
+      if (secciones.length === 0) {
+        if (memoriaSectionsEl) memoriaSectionsEl.innerHTML = '';
+        if (memoriaEmptyEl) memoriaEmptyEl.style.display = '';
+        return;
+      }
+      if (memoriaEmptyEl) memoriaEmptyEl.style.display = 'none';
+
+      let html = '';
+      for (const sec of secciones) {
+        html += `<div class="memoria-section-title">${escapeHtml(sec.titulo || '')}</div>`;
+        for (const item of sec.elementos) {
+          const fecha = formatearFechaISO(item.fecha);
+          const destacadoCls = item.destacado ? ' memoria-item-destacado' : '';
+          html += `<div class="memoria-item${destacadoCls}" data-memoria-id="${escapeHtml(item.id || '')}">`;
+          html += `<div class="memoria-item-head">`;
+          html += `<span class="memoria-item-label">${escapeHtml(item.etiqueta || '')}</span>`;
+          if (item.reciente) html += `<span class="memoria-item-reciente">Nuevo</span>`;
+          if (fecha) html += `<span class="memoria-item-date">${escapeHtml(fecha)}</span>`;
+          html += `</div>`;
+          html += `<div class="memoria-item-text">${escapeHtml(item.texto || '')}</div>`;
+          html += `<div class="memoria-item-actions">`;
+          html += `<button type="button" class="memoria-item-action-btn" data-memoria-accion="editar" data-memoria-id="${escapeHtml(item.id || '')}" data-memoria-etiqueta="${escapeHtml(item.etiqueta || '')}" data-memoria-texto="${escapeHtml(item.texto || '')}">✏️ Editar</button>`;
+          html += `<button type="button" class="memoria-item-action-btn memoria-item-action-btn--olvidar" data-memoria-accion="olvidar" data-memoria-id="${escapeHtml(item.id || '')}" data-memoria-etiqueta="${escapeHtml(item.etiqueta || '')}" data-memoria-texto="${escapeHtml(item.texto || '')}">🗑️ Olvidar</button>`;
+          html += `</div>`;
+          html += `</div>`;
+        }
+      }
+      if (memoriaSectionsEl) memoriaSectionsEl.innerHTML = html;
+    } catch (e) {
+      console.error('Error cargando panel de memoria:', e);
+      if (memoriaSectionsEl) memoriaSectionsEl.innerHTML = '<div class="memoria-empty">Error al conectar con el motor.</div>';
+    }
   }
 
   // Manejo de Pestañas

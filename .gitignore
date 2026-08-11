@@ -35,4 +35,5 @@ modulos/skills/wake_word/vosk-model/
 
 # Datos de runtime (se regeneran solos; no deben commitearse)
 perfil_usuario.json
+olvidos.json
 modulos/skills/recordatorios/data/recordatorios.json
