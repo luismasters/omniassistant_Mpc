@@ -293,3 +293,38 @@ def test_re_guardado_mismo_contenido_tras_olvido_reaparece(entorno_olvido, tmp_p
     # El tombstone sigue activo: la reaparición no lo respeta.
     assert olvidos.esta_olvidado(origen_id) is True
     assert origen_id in _leer_olvidos(ruta_olvidos)
+
+
+# ─── 10. Sección "Memoria" del panel (bóveda en preparar_secciones) ───────────
+
+def test_panel_memoria_lista_y_olvida_recuerdo_boveda(entorno_olvido):
+    """
+    End-to-end del panel: guardar_recuerdo() → preparar_secciones() muestra
+    la sección 'memoria' con el recuerdo (no_editable=True y id = origen_id)
+    → resolver_olvidar() lo elimina → la sección deja de mostrarlo.
+    """
+    from modulos import resumen_memoria as rm
+
+    modulo, *_ = entorno_olvido
+    etiqueta = "Memoria_IA"
+    contenido = "Recuerdo visible en el panel de memoria"
+
+    assert modulo.guardar_recuerdo(texto_a_guardar=contenido, etiqueta_tema=etiqueta) is True
+    origen_id = _origen_id_de(modulo, etiqueta, contenido)
+
+    secciones = {s["id"]: s["elementos"] for s in rm.preparar_secciones()["secciones"]}
+    assert "memoria" in secciones
+    ids_boveda = [e["id"] for e in secciones["memoria"]]
+    assert origen_id in ids_boveda
+
+    item = next(e for e in secciones["memoria"] if e["id"] == origen_id)
+    assert item["no_editable"] is True
+    assert item["texto"] == contenido
+
+    # Olvidar desde el panel (mismo flujo que pyApi.olvidar_memoria).
+    assert rm.resolver_olvidar(origen_id)["exito"] is True
+
+    secciones_tras = {s["id"]: s["elementos"] for s in rm.preparar_secciones()["secciones"]}
+    assert "memoria" not in secciones_tras or origen_id not in [
+        e["id"] for e in secciones_tras["memoria"]
+    ]

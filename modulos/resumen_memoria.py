@@ -78,6 +78,7 @@ ORDEN_SECCIONES = [
     "proyectos",
     "aprendizaje_y_carrera",
     "gaming",
+    "memoria",
 ]
 
 TITULOS_SECCIONES = {
@@ -86,6 +87,7 @@ TITULOS_SECCIONES = {
     "proyectos": "Proyectos",
     "aprendizaje_y_carrera": "Aprendizaje y carrera",
     "gaming": "Gaming",
+    "memoria": "Memoria",
 }
 
 # Temas de vida_personal que representan rutina/preferencias.
@@ -182,7 +184,7 @@ def _es_reciente(fecha_iso: str) -> bool:
         return False
 
 
-def _elemento(id_, etiqueta, texto, fecha=None, destacado=False):
+def _elemento(id_, etiqueta, texto, fecha=None, destacado=False, no_editable=False):
     """Construye un elemento con el contrato estable para la UI."""
     fecha_iso = _fecha_iso(fecha)
     return {
@@ -192,6 +194,7 @@ def _elemento(id_, etiqueta, texto, fecha=None, destacado=False):
         "fecha": fecha_iso or None,
         "reciente": _es_reciente(fecha_iso),
         "destacado": destacado,
+        "no_editable": no_editable,
     }
 
 
@@ -410,6 +413,37 @@ def _seccion_gamer(perfil_gamer: dict) -> list:
     return elementos
 
 
+def _seccion_memoria() -> list:
+    """
+    Recuerdos libres de la bóveda de ChromaDB, agrupados por familia
+    (`origen_id` `boveda:*`). Import lazy de modulos.memoria para no cargar
+    ChromaDB al importar resumen_memoria (offline-safe). Si la bóveda no
+    está disponible, devuelve una lista vacía sin romper el panel.
+    """
+    try:
+        from modulos.memoria import listar_recuerdos_boveda
+    except Exception:
+        return []
+    try:
+        recuerdos = listar_recuerdos_boveda()
+    except Exception:
+        return []
+
+    elementos = []
+    for r in recuerdos:
+        origen_id = r.get("origen_id")
+        if not origen_id:
+            continue
+        elementos.append(_elemento(
+            id_=origen_id,
+            etiqueta=r.get("etiqueta") or "Memoria",
+            texto=r.get("texto") or "",
+            fecha=r.get("fecha_guardado"),
+            no_editable=True,
+        ))
+    return elementos
+
+
 def preparar_secciones() -> dict:
     """
     Construye el dict listo para la UI con la memoria que Argus conoce
@@ -432,6 +466,8 @@ def preparar_secciones() -> dict:
 
     perfil_gamer = _cargar_perfil_gamer()
     acoplador["gaming"].extend(_seccion_gamer(perfil_gamer))
+
+    acoplador["memoria"].extend(_seccion_memoria())
 
     secciones = []
     for seccion_id in ORDEN_SECCIONES:

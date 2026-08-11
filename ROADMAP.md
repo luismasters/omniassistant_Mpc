@@ -12,7 +12,7 @@
 
 Argus es un asistente de escritorio de IA para Windows con 3 personalidades (General / Mentor / Gamer), interfaz web (PyWebView + WebView2), voz (Vosk wake word → Whisper STT → Edge TTS), visión, gamepad multi-mando, memoria persistente (ChromaDB), control del sistema y de audio, y un sistema de Skills extensible.
 
-**Línea de base técnica:** ~12k líneas de Python, frontend web en `gui/`, suite de tests actual (263 tests).
+**Línea de base técnica:** ~12k líneas de Python, frontend web en `gui/`, suite de tests actual (251 tests).
 
 ---
 
@@ -56,14 +56,17 @@ Objetivo: el usuario corrige/borra lo que Argus recuerda, sin esperar la siguien
 > - **Reaparición de datos por consolidación IA:** borrar/editar un dato en el panel no bloquea a ninguna consolidación futura. Si el LLM vuelve a extraer el mismo hecho en una sesión posterior, puede re-grabarlo y "resucitar" lo olvidado. Falta una lista negra de olvidos (tombstones) que filtre el guardado automático.
 > - **Bóveda desincronizada:** `gestor_boveda.py` guarda su propio almacén separado de los perfiles. Un dato olvidado/borrado del panel NO se propaga a la bóveda, así que ahí queda viva una copia desactualizada del dato.
 
-### Gestión de memoria — Fase 3 (bóveda: `origen_id`, ciclo de olvido y anti-reaparición)
-Objetivo: cerrar las dos deudas documentadas de la Fase 2 — la reaparición de datos por consolidación IA y la bóveda desincronizada.
+### Gestión de memoria — Fase 3 (bóveda: `origen_id` y ciclo de olvido)
+Objetivo: cerrar la deuda de la bóveda desincronizada documentada en la Fase 2 y darle a la memoria libre un `origen_id` invalidable.
 
 - [x] **`origen_id` determinista en la bóveda:** `guardar_recuerdo()` genera un `origen_id` canónico `boveda:memoria_ia:<hash>` (o respeta uno explícito); la familia lógica agrupa los documentos con el mismo origen.
-- [x] **Backfill histórico (`modulos/backfill_boveda.py`):** migra los documentos existentes de la bóveda a `origen_id` (18/18 migrados, 16 `origen_id` únicos, 0 ambiguos). Backup previo en `backups/boveda_memoria_20260810_151540`; `--dry-run` no escribe.
 - [x] **Ciclo "Olvidar esto" sobre la bóveda:** `resolver_olvidar("boveda:<origen>")` → `invalidar_por_origen()` borra TODA la familia del documento en ChromaDB y registra el tombstone en `modulos/olvidos.py`. Repetir el olvido del mismo origen es idempotente y no afecta a familias distintas.
-- [x] **Protección contra reaparición:** `guardar_recuerdo()` consulta `esta_olvidado(origen_id)` (lazy) y rechaza re-guardar una familia tombstoned; `quitar_olvido()` actúa como "desolvidar" y rehabilita la familia.
-- [x] **Tests:** `tests/test_olvido_ciclo_integracion.py` (7 tests, ChromaDB real en tmp, embeddings deterministas, `RUTA_OLVIDOS` en tmp) + `tests/test_backfill_boveda.py` (11 tests) + `tests/test_integracion_boveda.py` (6 tests). **Suite total: 263 tests pasando.**
+- [x] **Tests:** `tests/test_olvido_ciclo_integracion.py` (7 tests, ChromaDB real en tmp, embeddings deterministas, `RUTA_OLVIDOS` en tmp) + `tests/test_integracion_boveda.py` (6 tests). **Suite total: 255 tests pasando.**
+- [x] **Panel "Olvidar esto" alcanza la bóveda:** `preparar_secciones()` expone la sección "Memoria" con los recuerdos libres (familia por `origen_id`, `no_editable=True`); el botón "🗑️ Olvidar" existente ya despacha `resolver_olvidar("boveda:")` → `invalidar_por_origen()`.
+
+> **⏳ Pendiente / decisión abierta (Fase 3):**
+> - **Protección contra reaparición NO implementada.** `guardar_recuerdo()` no consulta el registro de olvidos ni valida tombstones: re-guardar exactamente el mismo contenido tras un olvido RE-CREA la familia en ChromaDB (test `test_re_guardado_mismo_contenido_tras_olvido_reaparece` fija este comportamiento actual). Falta decidir el mecanismo (p.ej. rechazar en `guardar_recuerdo()` si `esta_olvidado(origen_id)`, y un `quitar_olvido()` como "desolvidar").
+> - **Backfill histórico no realizado:** los recuerdos guardados ANTES del contrato `origen_id` no tienen ese metadata; un olvido `boveda:` no los alcanza. Pendiente un script de backfill (p.ej. `backfill_boveda.py`) que asigne `origen_id` a los documentos legacy.
 
 ### Calidad (reciente)
 - [x] Rotación de logs (10 MB, 5 backups, tolerante a bloqueos en Windows) — `modulos/logger.py`

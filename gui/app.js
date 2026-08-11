@@ -1685,7 +1685,9 @@ document.addEventListener('DOMContentLoaded', () => {
           html += `</div>`;
           html += `<div class="memoria-item-text">${escapeHtml(item.texto || '')}</div>`;
           html += `<div class="memoria-item-actions">`;
-          html += `<button type="button" class="memoria-item-action-btn" data-memoria-accion="editar" data-memoria-id="${escapeHtml(item.id || '')}" data-memoria-etiqueta="${escapeHtml(item.etiqueta || '')}" data-memoria-texto="${escapeHtml(item.texto || '')}">✏️ Editar</button>`;
+          if (!item.no_editable) {
+            html += `<button type="button" class="memoria-item-action-btn" data-memoria-accion="editar" data-memoria-id="${escapeHtml(item.id || '')}" data-memoria-etiqueta="${escapeHtml(item.etiqueta || '')}" data-memoria-texto="${escapeHtml(item.texto || '')}">✏️ Editar</button>`;
+          }
           html += `<button type="button" class="memoria-item-action-btn memoria-item-action-btn--olvidar" data-memoria-accion="olvidar" data-memoria-id="${escapeHtml(item.id || '')}" data-memoria-etiqueta="${escapeHtml(item.etiqueta || '')}" data-memoria-texto="${escapeHtml(item.texto || '')}">🗑️ Olvidar</button>`;
           html += `</div>`;
           html += `</div>`;

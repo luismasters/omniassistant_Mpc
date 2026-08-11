@@ -168,6 +168,45 @@ def invalidar_por_origen(origen_id):
         return False
 
 
+def listar_recuerdos_boveda():
+    """
+    Lista los recuerdos libres de la bóveda agrupados por familia (origen_id),
+    listos para el panel de memoria. Devuelve una lista de dicts:
+        {"origen_id", "etiqueta", "texto", "fecha_guardado"}
+
+    Solo considera documentos que llevan el contrato `boveda:*` en su
+    metadata `origen_id`. Los documentos legacy (guardados ANTES de ese
+    contrato, sin origen_id) se omiten: no hay un id invalidable para
+    mostrarlos — ver backfill pendiente en ROADMAP.
+    """
+    try:
+        fila = coleccion_principal.get(include=["documents", "metadatas"])
+    except Exception as e:
+        print(f"❌ [MEMORIA] Error listando recuerdos de la bóveda: {e}")
+        return []
+
+    ids = fila.get("ids") or []
+    docs = fila.get("documents") or []
+    metas = fila.get("metadatas") or []
+
+    mas_nuevos = {}
+    for i, meta in enumerate(metas):
+        origen = (meta or {}).get("origen_id")
+        if not origen or not str(origen).startswith("boveda:"):
+            continue
+        fecha = (meta or {}).get("fecha_guardado") or ""
+        anterior = mas_nuevos.get(origen, {})
+        if fecha >= anterior.get("fecha_guardado", ""):
+            mas_nuevos[origen] = {
+                "origen_id": origen,
+                "etiqueta": (meta or {}).get("etiqueta") or "Memoria",
+                "texto": (docs[i] if i < len(docs) else "") or "",
+                "fecha_guardado": fecha,
+            }
+
+    return list(mas_nuevos.values())
+
+
 def buscar_contexto(pregunta_usuario, cantidad_resultados=3):
     """
     Busca en la bóveda DIRECTO sin pasar por MCP.

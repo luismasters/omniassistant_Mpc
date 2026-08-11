@@ -399,7 +399,7 @@ def test_no_exposicion_estructuras_internas(con_perfiles):
     for s in res["secciones"]:
         assert set(s.keys()) == {"id", "titulo", "elementos"}
         for e in s["elementos"]:
-            assert set(e.keys()) == {"id", "etiqueta", "texto", "fecha", "reciente", "destacado"}
+            assert set(e.keys()) == {"id", "etiqueta", "texto", "fecha", "reciente", "destacado", "no_editable"}
     # No se filtran claves internas de perfiles ni ChromaDB. (Los prefijos
     # "funcional:" / "vida:" son parte del id estable del elemento, no claves crudas.)
     dump = str(res)
@@ -421,3 +421,71 @@ def test_tema_visible_preserva_acentos(con_perfiles):
     item = secc["aprendizaje_y_carrera"][0]
     assert item["etiqueta"] == "opinión profesional"
     assert item["id"] == "vida:opini_n_profesional"  # _slug preserva comportamiento previo
+
+
+# ── Sección "Memoria" (bóveda): listado + flag no_editable ──────────────────
+
+def test_seccion_memoria_vacia_omite_seccion(sin_perfiles, monkeypatch):
+    """Sin recuerdos de bóveda, la sección 'memoria' no aparece."""
+    monkeypatch.setattr(
+        rm, "_seccion_memoria",
+        lambda: [],
+    )
+    res = sin_perfiles.preparar_secciones()
+    assert "memoria" not in [s["id"] for s in res["secciones"]]
+
+
+def test_seccion_memoria_lista_recuerdos_con_no_editable(sin_perfiles, monkeypatch):
+    """
+    Los recuerdos libres se presentan con su origen_id como id estable,
+    con `no_editable=True` (la bóveda no soporta edición inline) y el
+    contrato completo del elemento.
+    """
+    recuerdos = [
+        {
+            "origen_id": "boveda:memoria_ia:a1b2c3d4e5",
+            "etiqueta": "Memoria_IA",
+            "texto": "El usuario prefiere café sin azúcar",
+            "fecha_guardado": "2026-08-10 09:30:00",
+        },
+        {
+            "origen_id": "boveda:memoria_ia:f6e7d8c9b0",
+            "etiqueta": "Memoria_IA",
+            "texto": "Tesis: título de ejemplo",
+            "fecha_guardado": "2026-08-08 18:00:00",
+        },
+    ]
+    monkeypatch.setattr(rm, "_seccion_memoria", lambda: [
+        rm._elemento(
+            id_=r["origen_id"],
+            etiqueta=r["etiqueta"],
+            texto=r["texto"],
+            fecha=r["fecha_guardado"],
+            no_editable=True,
+        )
+        for r in recuerdos
+    ])
+    res = sin_perfiles.preparar_secciones()
+    secc = {s["id"]: s["elementos"] for s in res["secciones"]}
+    assert "memoria" in secc
+    assert [e["id"] for e in secc["memoria"]] == [
+        "boveda:memoria_ia:a1b2c3d4e5",
+        "boveda:memoria_ia:f6e7d8c9b0",
+    ]
+    for e in secc["memoria"]:
+        assert e["no_editable"] is True
+        assert e["fecha"] in ("2026-08-10", "2026-08-08")
+        assert set(e.keys()) == {"id", "etiqueta", "texto", "fecha", "reciente", "destacado", "no_editable"}
+
+
+def test_seccion_memoria_boveda_offline_no_rompe(sin_perfiles, monkeypatch):
+    """
+    Si la bóveda de ChromaDB no está disponible (import falla), la sección
+    se omite y el panel NO se rompe (el import de modulos.memoria es lazy).
+    """
+    import sys
+
+    monkeypatch.setitem(sys.modules, "modulos.memoria", None)
+    res = sin_perfiles.preparar_secciones()
+    assert "memoria" not in [s["id"] for s in res["secciones"]]
+    assert res["secciones"] == []
