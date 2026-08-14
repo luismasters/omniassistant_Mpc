@@ -1261,9 +1261,16 @@ class HoloAvatarUI {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   4. INICIALIZACIÓN E INTEGRACIÓN CON EMO CANVAS
+   4. INICIALIZACIÓN E INTEGRACIÓN CON EMO CANVAS & ANIME AVATAR
    ───────────────────────────────────────────────────────────── */
 document.addEventListener('DOMContentLoaded', () => {
+  // Inicializar Anime Avatar Engine (Robot A10)
+  const animeStage = document.getElementById('animeAvatarStage');
+  if (animeStage && window.animeAvatarEngine) {
+    window.animeAvatarEngine.init(animeStage);
+  }
+
+  // Inicializar HoloAvatar Engine (Canvas 2D)
   const avatarCanvas   = document.getElementById('avatar-canvas');
   const particleCanvas = document.getElementById('particle-canvas');
 
@@ -1289,8 +1296,42 @@ document.addEventListener('DOMContentLoaded', () => {
     window.holoUI     = ui;
   }
 
+  // Configurar Selector de Modo de Avatar (Animado por defecto vs Holográfico)
+  setupAvatarModeToggle();
+
   hookEmoFace();
 });
+
+function setupAvatarModeToggle() {
+  const btnAnime = document.getElementById('btnModeAnime');
+  const btnHolo = document.getElementById('btnModeHolo');
+  const animeStage = document.getElementById('animeAvatarStage');
+  const holoStage = document.getElementById('holoAvatarStage');
+
+  function setAvatarMode(mode) {
+    if (mode === 'holo') {
+      if (animeStage) animeStage.classList.add('hidden');
+      if (holoStage) holoStage.classList.remove('hidden');
+      if (btnAnime) btnAnime.classList.remove('active');
+      if (btnHolo) btnHolo.classList.add('active');
+    } else {
+      // Default: 'anime'
+      if (animeStage) animeStage.classList.remove('hidden');
+      if (holoStage) holoStage.classList.add('hidden');
+      if (btnAnime) btnAnime.classList.add('active');
+      if (btnHolo) btnHolo.classList.remove('active');
+    }
+    try {
+      localStorage.setItem('argus_avatar_mode', mode);
+    } catch(e){}
+  }
+
+  if (btnAnime) btnAnime.addEventListener('click', () => setAvatarMode('anime'));
+  if (btnHolo) btnHolo.addEventListener('click', () => setAvatarMode('holo'));
+
+  const savedMode = localStorage.getItem('argus_avatar_mode') || 'anime';
+  setAvatarMode(savedMode);
+}
 
 function hookEmoFace() {
   const mapEmoToHoloState = (emoEstado) => {
@@ -1330,9 +1371,13 @@ function hookEmoFace() {
     const originalSetEstado = window.emoFace.setEstado.bind(window.emoFace);
     window.emoFace.setEstado = function(nuevo_estado, msg = '') {
       originalSetEstado(nuevo_estado, msg);
+      const stateKey = mapEmoToHoloState(nuevo_estado);
+
       if (window.holoUI) {
-        const stateKey = mapEmoToHoloState(nuevo_estado);
         window.holoUI.activateState(stateKey, msg);
+      }
+      if (window.animeAvatarEngine) {
+        window.animeAvatarEngine.activateState(stateKey, msg);
       }
     };
 
@@ -1340,7 +1385,6 @@ function hookEmoFace() {
       const originalSetClima = window.emoFace.setClima.bind(window.emoFace);
       window.emoFace.setClima = function(climaCondicion) {
         originalSetClima(climaCondicion);
-        // El clima ya no altera el avatar principal a warning en el arranque
       };
     }
   } else {

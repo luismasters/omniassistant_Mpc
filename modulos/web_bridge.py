@@ -20,6 +20,7 @@ Proporciona métodos thread-safe llamados desde el Frontend Web (JS vía window.
 
 import threading
 import json
+import re
 import webview
 from config import estado, TECLA_HABLAR
 from modulos.logger import logger
@@ -113,20 +114,32 @@ def obtener_texto_clima_para_contexto() -> str:
 
 def resolver_modelo_actual(modelo_seleccionado: str, modo_actual: str) -> str:
     """
-    Resuelve el nombre real del modelo activo cuando el usuario tiene 
-    seleccionado 'Por Defecto'. Esto permite mostrar en la UI qué modelo
-    se está usando realmente según el modo actual.
+    Resuelve el nombre real del modelo activo cuando el usuario tiene
+    seleccionado 'Por Defecto' (Auto).
+
+    Fase D (Punto 2): el default es UNA preferencia GLOBAL (config.
+    MODELO_DEFECTO_GLOBAL), NO depende del modo. Así cambiar de contexto no
+    cambia silenciosamente el modelo ni las capacidades MCP disponibles.
     """
     if modelo_seleccionado != "Por Defecto":
         return modelo_seleccionado
-    # Modo mentor usa DeepSeek V4 Flash por defecto (modelo más económico)
-    if modo_actual == "mentor":
-        return "DeepSeek V4 Flash"
-    # Modo gamer usa Gemini 3.1 Flash Lite por defecto
-    if modo_actual == "gamer":
-        return "Gemini 3.1 Flash Lite"
-    # General usa Gemini por defecto
-    return "Gemini 3.1 Flash Lite"
+    import config as _cfg
+    return getattr(_cfg, "MODELO_DEFECTO_GLOBAL", "Gemini 3.1 Flash Lite")
+
+
+def modelo_soporta_mcp(modelo_seleccionado: str, modo_actual: str) -> bool:
+    """
+    Determina si las herramientas MCP están disponibles para la selección de
+    modelo actual (resuelta): en `modulos/ia.py` los `tools` solo se arman si
+    el modelo activo es Gemini (`modelo_activo == "gemini"`). DeepSeek, Groq y
+    los modelos de respaldo no reciben herramientas. El indicador es estático
+    (modelo); una skill activa en el turno también desactiva los tools, eso
+    se explica en el tooltip de la UI.
+    """
+    try:
+        return str(resolver_modelo_actual(modelo_seleccionado, modo_actual)).startswith("Gemini")
+    except Exception:
+        return False
 
 class ArgusWebBridge:
     """Clase expuesta hacia JavaScript en window.pywebview.api."""
@@ -138,6 +151,7 @@ class ArgusWebBridge:
         # de que la ventana PyWebView estuviera lista
         self._cola_recordatorios_pendientes: list = []
         self._suscribir_recordatorios()
+        self._turno_actual = None
 
     def esta_hablando(self) -> bool:
         """Devuelve si el asistente está hablando actualmente (reproduciendo TTS)."""
@@ -223,22 +237,39 @@ class ArgusWebBridge:
     def _ui_callback(self, remitente, texto, color=None, nueva_linea=True):
         """Callback invocado por enviar_a_gemini para emitir respuestas hacia el chat web."""
         try:
+            # Extraer el turno_id temporal que viaja prefijado en el remitente
+            # (@@TURNO:<id>|). Mientras dura el turno, las señales de control
+            # (provisional/verificada) llevan ese mismo id para que la UI
+            # dirija los cambios a la burbuja correcta (C2).
+            turno_id = None
+            m = re.match(r'^@@TURNO:(\d+)\|', str(remitente or ""))
+            if m:
+                turno_id = int(m.group(1))
+                remitente = str(remitente)[m.end():]
+                self._turno_actual = turno_id
+
             # Señales especiales de verificación web (remitentes de control).
             remitente_control = str(remitente or "")
             if remitente_control == "__MARCAR_PROVISIONAL__":
                 win = self._window or (webview.windows[0] if webview.windows else None)
                 if win:
-                    win.evaluate_js("if (window.marcarRespuestaProvisional) window.marcarRespuestaProvisional();")
+                    win.evaluate_js(f"if (window.marcarRespuestaProvisional) window.marcarRespuestaProvisional({turno_id});")
                 return
             if remitente_control == "__CANCELAR_PROVISIONAL__":
                 win = self._window or (webview.windows[0] if webview.windows else None)
                 if win:
-                    win.evaluate_js("if (window.cancelarRespuestaProvisional) window.cancelarRespuestaProvisional();")
+                    win.evaluate_js(f"if (window.cancelarRespuestaProvisional) window.cancelarRespuestaProvisional({turno_id});")
                 return
             if remitente_control == "__RESPUESTA_VERIFICADA__":
                 win = self._window or (webview.windows[0] if webview.windows else None)
                 if win:
-                    js_cmd = f"if (window.reemplazarRespuestaProvisional) window.reemplazarRespuestaProvisional({json.dumps(texto)});"
+                    js_cmd = f"if (window.reemplazarRespuestaProvisional) window.reemplazarRespuestaProvisional({json.dumps(texto)}, {turno_id});"
+                    win.evaluate_js(js_cmd)
+                return
+            if remitente_control == "__CAPACIDAD_ACTIVA__":
+                win = self._window or (webview.windows[0] if webview.windows else None)
+                if win:
+                    js_cmd = f"if (window.actualizarChipCapacidad) window.actualizarChipCapacidad({json.dumps(str(texto or 'general'))});"
                     win.evaluate_js(js_cmd)
                 return
 
@@ -247,7 +278,7 @@ class ArgusWebBridge:
             win = self._window or (webview.windows[0] if webview.windows else None)
             if win:
                 es_continuacion = not nueva_linea
-                js_cmd = f"if (window.agregarRespuestaArgus) window.agregarRespuestaArgus({json.dumps(texto)}, {json.dumps(remitente or 'Argus Copilot')}, {json.dumps(es_continuacion)});"
+                js_cmd = f"if (window.agregarRespuestaArgus) window.agregarRespuestaArgus({json.dumps(texto)}, {json.dumps(remitente or 'Argus Copilot')}, {json.dumps(es_continuacion)}, {turno_id});"
                 win.evaluate_js(js_cmd)
         except Exception as e:
             logger.exception(f"Error enviando callback_ia a web: {e}")
@@ -265,7 +296,9 @@ class ArgusWebBridge:
                 "lista_perfiles": [perfil_actual],
                 "modelo_seleccionado": estado.modelo_seleccionado,
                 "modelo_real": modelo_real,
-                "workspace_actual": estado.workspace_actual
+                "mcp_disponible": modelo_soporta_mcp(estado.modelo_seleccionado, estado.modo_actual),
+                "workspace_actual": estado.workspace_actual,
+                "capacidad_fijada": estado.obtener_capacidad_fijada(),
             }
         except Exception as e:
             logger.exception(f"Error en obtener_estado_inicial: {e}")
@@ -409,8 +442,14 @@ class ArgusWebBridge:
                     def _hilo_guardar_saliente():
                         try:
                             if modo_anterior == "mentor":
-                                from modulos.perfil_mentor import extraer_y_procesar_sesion_mentor
-                                extraer_y_procesar_sesion_mentor(mensajes, estado.workspace_actual)
+                                from modulos.progreso_mentoria import sesion_ya_procesada
+                                if sesion_ya_procesada(mensajes):
+                                    logger.info("Sesión de mentoría ya persistida (cambio de modo); se omite re-examen.")
+                                else:
+                                    from modulos.perfil_mentor import extraer_y_procesar_sesion_mentor
+                                    extraer_y_procesar_sesion_mentor(mensajes, estado.workspace_actual)
+                                    from modulos.progreso_mentoria import procesar_sesion_progreso
+                                    procesar_sesion_progreso(mensajes)
                             elif modo_anterior == "gamer":
                                 from modulos.perfil_gamer import extraer_y_procesar_sesion_gamer
                                 extraer_y_procesar_sesion_gamer(mensajes)
@@ -423,6 +462,7 @@ class ArgusWebBridge:
                     threading.Thread(target=_hilo_guardar_saliente, daemon=True).start()
 
             estado.cambiar_modo(modo_lower)
+            self._guardar_preferencias()
             logger.info(f"Modo de interfaz cambiado a: {modo_lower.upper()}")
 
             # Si se activa el Modo Gamer, descargar Whisper de VRAM para liberar la GPU
@@ -436,10 +476,27 @@ class ArgusWebBridge:
                 except Exception as e_vram:
                     logger.warning(f"[GAMEPAD] Error al liberar VRAM de Whisper: {e_vram}")
 
-            return {"exito": True, "modo": modo_lower}
+            return {
+                "exito": True,
+                "modo": modo_lower,
+                "mcp_disponible": modelo_soporta_mcp(estado.modelo_seleccionado, modo_lower),
+            }
         except Exception as e:
             logger.exception(f"Error cambiando modo interfaz: {e}")
             return {"exito": False, "error": str(e)}
+
+    def _guardar_preferencias(self):
+        """Fase P: persiste las preferencias del usuario (best-effort)."""
+        try:
+            from modulos.persistencia import guardar_preferencias, cargar_preferencias
+            prefs = cargar_preferencias()
+            prefs["workspace_actual"] = estado.workspace_actual
+            prefs["modelo_seleccionado"] = estado.modelo_seleccionado
+            prefs["modo_visualizacion"] = estado.modo_visualizacion
+            prefs["modo_actual"] = estado.modo_actual
+            guardar_preferencias(prefs)
+        except Exception:
+            pass
 
     def cambiar_modo_visualizacion(self, modo_vis: str) -> dict:
         """
@@ -459,6 +516,7 @@ class ArgusWebBridge:
                 clave_host = "traditional"
 
             estado.cambiar_modo_visualizacion(clave_host)
+            self._guardar_preferencias()
 
             win = self._window or (webview.windows[0] if webview.windows else None)
             if win:
@@ -481,7 +539,11 @@ class ArgusWebBridge:
         (resolviendo 'Por Defecto' según el modo actual)."""
         try:
             modelo_real = resolver_modelo_actual(estado.modelo_seleccionado, estado.modo_actual)
-            return {"exito": True, "modelo_real": modelo_real}
+            return {
+                "exito": True,
+                "modelo_real": modelo_real,
+                "mcp_disponible": modelo_soporta_mcp(estado.modelo_seleccionado, estado.modo_actual),
+            }
         except Exception as e:
             logger.exception(f"Error obteniendo modelo real: {e}")
             return {"exito": False, "error": str(e)}
@@ -490,10 +552,45 @@ class ArgusWebBridge:
         """Cambia el modelo de IA seleccionado."""
         try:
             estado.cambiar_modelo_seleccionado(modelo)
+            self._guardar_preferencias()
             logger.info(f"Modelo cambiado a: {modelo}")
-            return {"exito": True, "modelo": modelo}
+            return {
+                "exito": True,
+                "modelo": modelo,
+                "mcp_disponible": modelo_soporta_mcp(modelo, estado.modo_actual),
+            }
         except Exception as e:
             logger.exception(f"Error cambiando modelo: {e}")
+            return {"exito": False, "error": str(e)}
+
+    def fijar_capacidad(self, capacidad: str) -> dict:
+        """
+        Fija la capacidad activa (pin) o la vuelve a automática.
+        "auto" → None (detección por modo/tema). También resetea el modo si
+        el usuario fija una capacidad distinta a la actual en modo explícito.
+        """
+        try:
+            if not capacidad or capacidad.lower() == "auto":
+                estado.fijar_capacidad(None)
+                return {"exito": True, "capacidad_fijada": None}
+            capacidad = capacidad.lower()
+            if capacidad not in ("general", "mentor", "gamer"):
+                return {"exito": False, "error": f"Capacidad inválida: {capacidad}"}
+            estado.fijar_capacidad(capacidad)
+            # Al fijar manualmente, no pelear contra el modo explícito.
+            if estado.modo_actual != capacidad:
+                estado.cambiar_modo("chat")
+            return {"exito": True, "capacidad_fijada": capacidad}
+        except Exception as e:
+            logger.exception(f"Error fijando capacidad: {e}")
+            return {"exito": False, "error": str(e)}
+
+    def obtener_capacidad_actual(self) -> dict:
+        """Devuelve la capacidad fijada (None = automática)."""
+        try:
+            return {"exito": True, "capacidad_fijada": estado.obtener_capacidad_fijada()}
+        except Exception as e:
+            logger.exception(f"Error obteniendo capacidad: {e}")
             return {"exito": False, "error": str(e)}
 
     def seleccionar_workspace(self) -> dict:
@@ -505,6 +602,14 @@ class ArgusWebBridge:
                 if res and len(res) > 0:
                     carpeta = res[0]
                     estado.cambiar_workspace(carpeta)
+                    # Fase P: recargar estado de proyecto y re-armar el radar.
+                    try:
+                        from modulos.persistencia import cargar_estado_proyecto, iniciar_radar_persistente
+                        estado.cambiar_snapshot(cargar_estado_proyecto(carpeta))
+                        iniciar_radar_persistente(carpeta, ui_callback=self._ui_callback)
+                    except Exception as e:
+                        logger.warning(f"[FASE P] Error cargando estado de proyecto: {e}")
+                    self._guardar_preferencias()
                     logger.info(f"Workspace seleccionado: {carpeta}")
                     return {"exito": True, "workspace": carpeta}
             return {"exito": False, "error": "No se seleccionó carpeta"}
@@ -552,6 +657,93 @@ class ArgusWebBridge:
             return {"exito": True}
         except Exception as e:
             logger.exception(f"Error limpiando contexto: {e}")
+            return {"exito": False, "error": str(e)}
+
+    # ─── FASE P: HISTORIAL PERSISTIDO ────────────────────────────────
+
+    def recuperar_historial(self) -> dict:
+        """
+        Recupera el tail de la última sesión persistida del contexto activo
+        y lo hidrata en el contexto RAM (para retomar la conversación).
+        Nunca carga todo el historial; respeta límites del store.
+        """
+        try:
+            from modulos.persistencia import recuperar_tail, armar_context_id
+            context_id = armar_context_id(estado.modo_actual)
+            mensajes = recuperar_tail(context_id)
+            if not mensajes:
+                return {"exito": False, "motivo": "sin_historial"}
+            estado.restaurar_historial_persistido(mensajes)
+            return {"exito": True, "cantidad": len(mensajes), "contexto": context_id, "mensajes": mensajes}
+        except Exception as e:
+            logger.exception(f"Error recuperando historial: {e}")
+            return {"exito": False, "error": str(e)}
+
+    def borrar_historial_contexto(self) -> dict:
+        """Borra TODO el historial persistido del contexto activo."""
+        try:
+            from modulos.persistencia import borrar_historial, armar_context_id
+            context_id = armar_context_id(estado.modo_actual)
+            ok = borrar_historial(context_id)
+            return {"exito": ok, "contexto": context_id}
+        except Exception as e:
+            logger.exception(f"Error borrando historial: {e}")
+            return {"exito": False, "error": str(e)}
+
+    def hay_historial_persistido(self) -> dict:
+        """Indica si el contexto activo tiene historial persistido en disco."""
+        try:
+            from modulos.persistencia import recuperar_tail, armar_context_id
+            context_id = armar_context_id(estado.modo_actual)
+            mensajes = recuperar_tail(context_id)
+            return {"exito": True, "hay": bool(mensajes), "cantidad": len(mensajes)}
+        except Exception as e:
+            logger.exception(f"Error consultando historial: {e}")
+            return {"exito": False, "hay": False, "error": str(e)}
+
+    # ─── FASE PENDIENTE §7: INGESTA DE ARCHIVOS / NOTAS A LA BÓVEDA ────────
+
+    def guardar_archivo_en_boveda(self, ruta: str) -> dict:
+        """
+        Indexa un archivo (PDF o texto) directamente en la bóveda, sin tocar
+        el contexto conversacional ni documento_volatil. Etiqueta automática
+        "Doc: <nombre>". Devuelve la cantidad de fragmentos guardados.
+        """
+        try:
+            from modulos.ingesta_pdf import ingestar_archivo_a_boveda
+            if not ruta or not ruta.strip():
+                return {"exito": False, "mensaje": "No se indicó ninguna ruta."}
+            res = ingestar_archivo_a_boveda(ruta.strip())
+            return res
+        except Exception as e:
+            logger.exception(f"Error guardando archivo en bóveda: {e}")
+            return {"exito": False, "mensaje": f"Error: {str(e)[:120]}", "fragmentos": 0, "etiqueta": ""}
+
+    def guardar_nota_en_boveda(self, texto: str, etiqueta: str = "") -> dict:
+        """
+        Guarda una nota (texto corto/mediano) en la bóveda con etiqueta
+        opcional. Si el texto es largo se fragmenta automáticamente.
+        """
+        try:
+            from modulos.ingesta_pdf import guardar_nota_a_boveda
+            return guardar_nota_a_boveda(texto or "", etiqueta or "")
+        except Exception as e:
+            logger.exception(f"Error guardando nota en bóveda: {e}")
+            return {"exito": False, "mensaje": f"Error: {str(e)[:120]}", "fragmentos": 0, "etiqueta": ""}
+
+    def leer_texto_con_voz(self, texto: str) -> dict:
+        """
+        Reproduce un texto con Edge TTS (botón 🔊 de las burbujas de Argus).
+        NO usa el LLM (cero tokens): solo síntesis de voz local con Edge TTS.
+        """
+        try:
+            if not texto or not str(texto).strip():
+                return {"exito": False, "error": "Texto vacío"}
+            texto_limpio = str(texto).strip()
+            hablar_no_bloqueante(texto_limpio)
+            return {"exito": True}
+        except Exception as e:
+            logger.exception(f"Error leyendo texto con voz: {e}")
             return {"exito": False, "error": str(e)}
 
     def iniciar_escucha_voz(self) -> dict:

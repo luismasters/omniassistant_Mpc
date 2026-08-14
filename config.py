@@ -39,12 +39,43 @@ MIN_FREE_SPACE_MB = 100
 MAX_MENSAJES_CONTEXTO = 25
 
 # =========================================================
+# RECUPERACIÓN AUTOMÁTICA DE MEMORIA (Fase 4)
+# =========================================================
+# La bóveda de ChromaDB usa el espacio por defecto de HNSW (l2).
+# ChromaDB devuelve `distances` = distancia euclídea (menor = más similar).
+# El recuperador la transforma a similitud como `sim = 1 - distancia`
+# (monotónica y simple, sin fórmula compleja innecesaria).
+#
+# MEMORIA_SCORE_MIN es un UMBRAL CONSERVADOR, NO un valor calibrado:
+# con la bóveda real (18 recuerdos, origen_fuente=perfil_proyecto) se
+# observó:
+#   - consulta RELEVANTE  → distancia ~0.47 (similitud ~0.53)
+#   - consulta IRRELEVANTE → distancia ~0.57+ (similitud ~0.43 o menos)
+#   - sin metadata custom → ChromaDB usa l2 por defecto.
+# Queda PENDIENTE de recalibrar con más datos reales si el comportamiento
+# en producción así lo requiere.
+MEMORIA_TOP_K = 3
+MEMORIA_SCORE_MIN = 0.45
+MEMORIA_MAX_CARACTERES = 800
+MEMORIA_DECAY_RECENCIA = 0.02
+
+# =========================================================
 # API KEYS
 # =========================================================
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+# =========================================================
+# MODELO POR DEFECTO GLOBAL (Fase D, Punto 2)
+# =========================================================
+# "Por Defecto"/"Auto" ya NO depende del modo: es UNA preferencia global.
+# Si el usuario no elige un modelo específico, se usa este (único) para
+# TODOS los contextos. Elegimos Gemini por defecto porque es el único con
+# tool-calling MCP disponible (mata el "parpadeo MCP" al cambiar de modo).
+# Configurable por env: ARGUS_MODELO_DEFECTO.
+MODELO_DEFECTO_GLOBAL = os.getenv("ARGUS_MODELO_DEFECTO", "Gemini 3.5 Flash Lite")
 
 # Ciudad para el widget de clima (configurable desde .env)
 CIUDAD_CLIMA = os.getenv("CIUDAD_CLIMA", "San Martin, Buenos Aires, Argentina")
@@ -90,6 +121,13 @@ MAX_GRABACION_SEGUNDOS = 180
 # =========================================================
 # ESTADO GLOBAL CON THREAD SAFETY (VERSIÓN SIMPLIFICADA)
 # =========================================================
+# Lock canónico de serialización del contexto de chat (C1). Lo usa
+# modulos.ia (alias `_RLOCK_PROC`, cada turno) y las mutaciones que rebinden
+# o limpian el contexto desde otros hilos (cambio de modo, limpieza): así un
+# cambio de modo / limpiado NUNCA se intercala con un turno en curso.
+RLOCK_CONTEXTO = threading.RLock()
+
+
 class EstadoGlobal:
     def __init__(self):
         self._lock = threading.Lock()
@@ -112,6 +150,9 @@ class EstadoGlobal:
         # extracción de hechos. Se incrementa en agregar_mensaje_chat y se
         # resetea vía obtener_y_reiniciar_mensajes_pendientes().
         self.mensajes_desde_ultima_extraccion = 0
+        # Capacidad fijada por el usuario (pin): "general" | "mentor" | "gamer"
+        # | None = automática (detección por modo/tema, Fase D).
+        self.capacidad_fijada = None
         self.modo_visualizacion = "traditional" # "traditional" | "floating" | "desktop"
 
     # ─── MÉTODOS SEGUROS PARA MODIFICAR EL ESTADO ──────────────────────
@@ -124,6 +165,20 @@ class EstadoGlobal:
                 self.mensajes_desde_ultima_extraccion += 1
             if len(self.contexto_chat) > MAX_MENSAJES_CONTEXTO:
                 self.contexto_chat = self.contexto_chat[-MAX_MENSAJES_CONTEXTO:]
+
+        # Fase P: persistencia durable (best-effort, nunca bloquea el turno).
+        # Se persiste DENTRO del lock canónico para no intercalarse con un
+        # cambio de modo ni con otro turno (misma garantía de H.2).
+        try:
+            from modulos.persistencia import registrar_mensaje
+            with RLOCK_CONTEXTO:
+                registrar_mensaje(
+                    self.modo_actual,
+                    mensaje.get("role", "user"),
+                    mensaje.get("parts", []),
+                )
+        except Exception:
+            pass
 
     def obtener_y_reiniciar_mensajes_pendientes(self):
         """
@@ -150,9 +205,10 @@ class EstadoGlobal:
         mensajes del perfil, ya que estos mensajes no representan conversación
         continua (ej. cambio de modo).
         """
-        with self._lock:
-            self.contexto_chat = nuevo_contexto
-            self.mensajes_desde_ultima_extraccion = 0
+        with RLOCK_CONTEXTO:
+            with self._lock:
+                self.contexto_chat = nuevo_contexto
+                self.mensajes_desde_ultima_extraccion = 0
 
     def agregar_archivo_memoria(self, ruta):
         """Añade un archivo a la caché de memoria de forma thread-safe."""
@@ -166,11 +222,12 @@ class EstadoGlobal:
 
     def limpiar_memoria(self):
         """Limpia el contexto y la caché de archivos de forma thread-safe."""
-        with self._lock:
-            self.contexto_chat.clear()
-            self.archivos_en_memoria.clear()
-            self.documento_volatil = ""
-            self.evidencia_web = []
+        with RLOCK_CONTEXTO:
+            with self._lock:
+                self.contexto_chat.clear()
+                self.archivos_en_memoria.clear()
+                self.documento_volatil = ""
+                self.evidencia_web = []
 
     def obtener_contexto_copia(self):
         """Devuelve una copia del contexto del chat para lectura thread-safe."""
@@ -211,24 +268,34 @@ class EstadoGlobal:
         """Cambia el modo actual de forma thread-safe.
         
         Aísla el contexto de chat por modo: guarda el contexto del modo anterior
-        y restaura el del nuevo modo. Cada modo (general, mentor, gamer) mantiene
+        y restaura el del nuevo modo.         Cada modo (general, mentor, gamer) mantiene
         su propio histórico de conversación.
         """
-        with self._lock:
-            # Guardar contexto actual en el modo que estamos dejando
-            modo_anterior = self.modo_actual
-            self._contextos_por_modo[modo_anterior] = list(self.contexto_chat)
-            
-            # Cambiar al nuevo modo
-            self.modo_actual = nuevo_modo
-            
-            # Restaurar contexto del nuevo modo (o vacío si nunca se usó)
-            self.contexto_chat = list(self._contextos_por_modo.get(nuevo_modo, []))
-            
-            # Resetear contador de perfil al cambiar de modo
-            self.mensajes_desde_ultima_extraccion = 0
-            # La evidencia web queda asociada a la conversación del modo anterior
-            self.evidencia_web = []
+        with RLOCK_CONTEXTO:
+            with self._lock:
+                # Guardar contexto actual en el modo que estamos dejando
+                modo_anterior = self.modo_actual
+                self._contextos_por_modo[modo_anterior] = list(self.contexto_chat)
+                
+                # Cambiar al nuevo modo
+                self.modo_actual = nuevo_modo
+                
+                # Restaurar contexto del nuevo modo (o vacío si nunca se usó)
+                self.contexto_chat = list(self._contextos_por_modo.get(nuevo_modo, []))
+                
+                # Resetear contador de perfil al cambiar de modo
+                self.mensajes_desde_ultima_extraccion = 0
+                # La evidencia web queda asociada a la conversación del modo anterior
+                self.evidencia_web = []
+
+            # Fase P: cerrar la sesión persistida del contexto saliente.
+            # (Fuera del lock anidado pero dentro de RLOCK_CONTEXTO: no
+            # interfiere con turnos en curso ni con el cambio de contexto.)
+            try:
+                from modulos.persistencia import cerrar_sesion, armar_context_id
+                cerrar_sesion(armar_context_id(modo_anterior))
+            except Exception:
+                pass
 
     def cambiar_modo_visualizacion(self, nuevo_modo_vis):
         """Cambia el modo de visualización (tradicional, flotante, escritorio) de forma thread-safe."""
@@ -239,6 +306,16 @@ class EstadoGlobal:
         """Cambia el modelo seleccionado de forma thread-safe."""
         with self._lock:
             self.modelo_seleccionado = nuevo_modelo
+
+    def fijar_capacidad(self, capacidad):
+        """Fija la capacidad activa (pin). None = automática. Thread-safe."""
+        with self._lock:
+            self.capacidad_fijada = capacidad
+
+    def obtener_capacidad_fijada(self):
+        """Devuelve la capacidad fijada (None = automática). Thread-safe."""
+        with self._lock:
+            return self.capacidad_fijada
 
     def cambiar_workspace(self, ruta):
         """Cambia el workspace actual de forma thread-safe."""
@@ -257,9 +334,35 @@ class EstadoGlobal:
 
     def limpiar_contexto(self):
         """Limpia el contexto del chat (thread-safe)."""
-        with self._lock:
-            self.contexto_chat.clear()
-            self.evidencia_web = []
+        with RLOCK_CONTEXTO:
+            with self._lock:
+                self.contexto_chat.clear()
+                self.evidencia_web = []
+
+    def restaurar_historial_persistido(self, mensajes_historial):
+        """
+        Hidrata el contexto con el historial recuperado de disco (Fase P).
+
+        Regla de retomar (decisión del 12/08/2026):
+        - Si el contexto actual está vacío → lo reemplaza por el historial.
+        - Si ya hay conversación en curso → ANEXA el historial al final
+          (no pierde lo que se está escribiendo), recortando a
+          MAX_MENSAJES_CONTEXTO si hace falta.
+
+        NO persiste el historial recuperado (no debe re-grabarse): solo toca
+        la RAM. Thread-safe (mismo RLOCK_CONTEXTO canónico, respeta H.2).
+        """
+        historial = [dict(m) for m in (mensajes_historial or [])]
+        if not historial:
+            return
+        with RLOCK_CONTEXTO:
+            with self._lock:
+                if not self.contexto_chat:
+                    self.contexto_chat = historial
+                else:
+                    self.contexto_chat.extend(historial)
+                    if len(self.contexto_chat) > MAX_MENSAJES_CONTEXTO:
+                        self.contexto_chat = self.contexto_chat[-MAX_MENSAJES_CONTEXTO:]
 
     def limpiar_archivos_memoria(self):
         """Limpia la caché de archivos (thread-safe)."""

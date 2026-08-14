@@ -207,6 +207,18 @@ def listar_recuerdos_boveda():
     return list(mas_nuevos.values())
 
 
+def _query_boveda(pregunta_usuario, cantidad_resultados):
+    """
+    Consulta cruda a ChromaDB con documents + metadatas + distances.
+    Lanza la excepción hacia arriba: cada llamador decide cómo degradar.
+    """
+    return coleccion_principal.query(
+        query_texts=[pregunta_usuario],
+        n_results=cantidad_resultados,
+        include=["documents", "metadatas", "distances"],
+    )
+
+
 def buscar_contexto(pregunta_usuario, cantidad_resultados=3):
     """
     Busca en la bóveda DIRECTO sin pasar por MCP.
@@ -220,10 +232,7 @@ def buscar_contexto(pregunta_usuario, cantidad_resultados=3):
 
     print(f"🔍 [MEMORIA] Escaneando bóveda para: '{pregunta_usuario[:60]}'")
     try:
-        resultados = coleccion_principal.query(
-            query_texts=[pregunta_usuario],
-            n_results=cantidad_resultados
-        )
+        resultados = _query_boveda(pregunta_usuario, cantidad_resultados)
         documentos_encontrados = resultados['documents'][0]
 
         if documentos_encontrados:
@@ -242,10 +251,59 @@ def buscar_contexto(pregunta_usuario, cantidad_resultados=3):
         return []
 
 
+def buscar_contexto_con_detalle(pregunta_usuario, cantidad_resultados=None):
+    """
+    Igual que buscar_contexto() pero devuelve CADA recuerdo con su metadata:
+        [{"documento", "origen_id", "origen_fuente", "etiqueta",
+          "fecha_guardado", "distancia"}]
+
+    Es la fuente del recuperador automático (Fase 4). NO reemplaza el
+    contrato de buscar_contexto() (sigue intacto y con su caché propia);
+    usa una clave de caché separada ('detalle:...').
+
+    `distancia` es la distancia euclídea l2 devuelta por ChromaDB
+    (menor = más similar). `cantidad_resultados` por defecto = MEMORIA_TOP_K.
+    """
+    n = cantidad_resultados or config.MEMORIA_TOP_K
+    clave_cache = f"detalle:{pregunta_usuario}:{n}"
+    resultado_cacheado = _cache_get(clave_cache)
+    if resultado_cacheado is not None:
+        print(f"⚡ [MEMORIA] Detalle desde caché para: '{pregunta_usuario[:40]}'")
+        return resultado_cacheado
+
+    print(f"🔍 [MEMORIA] Escaneando bóveda (con detalle) para: '{pregunta_usuario[:60]}'")
+    try:
+        resultados = _query_boveda(pregunta_usuario, n)
+    except Exception as e:
+        print(f"❌ [MEMORIA] Error al buscar contexto con detalle: {e}")
+        return []
+
+    ids = resultados.get("ids", [[]])[0] or []
+    docs = resultados.get("documents", [[]])[0] or []
+    metas = resultados.get("metadatas", [[]])[0] or []
+    dists = resultados.get("distances", [[]])[0] or []
+
+    salida = []
+    for i, doc in enumerate(docs):
+        meta = (metas[i] if i < len(metas) else {}) or {}
+        salida.append({
+            "documento": doc or "",
+            "origen_id": meta.get("origen_id") or "",
+            "origen_fuente": meta.get("origen_fuente") or "",
+            "etiqueta": meta.get("etiqueta") or "",
+            "fecha_guardado": meta.get("fecha_guardado") or "",
+            "distancia": float(dists[i]) if i < len(dists) and dists[i] is not None else None,
+        })
+
+    _cache_set(clave_cache, salida)
+    return salida
+
+
 # =====================================================================
 # BÚSQUEDA ANTICIPADA (pre-fetch mientras la IA piensa)
 # =====================================================================
 _resultado_anticipado = None
+_resultado_anticipado_detalle = None
 _anticipado_lock = threading.Lock()
 _anticipado_consulta = None
 
@@ -254,20 +312,31 @@ def iniciar_busqueda_anticipada(consulta: str):
     """
     Lanza la búsqueda en bóveda en un hilo paralelo mientras Gemini/DeepSeek
     procesa la consulta. El resultado queda disponible para cuando se necesite.
+
+    Calcula UNA sola consulta (con detalle) y deriva de ahí tanto el formato
+    clásico (lista de textos, para mcp_buscar_en_boveda) como el detalle con
+    metadata (para el recuperador automático de la Fase 4).
     """
-    global _resultado_anticipado, _anticipado_consulta
+    global _resultado_anticipado, _resultado_anticipado_detalle, _anticipado_consulta
 
     with _anticipado_lock:
         _resultado_anticipado = None
+        _resultado_anticipado_detalle = None
         _anticipado_consulta = consulta
 
     def _buscar():
-        global _resultado_anticipado
-        resultado = buscar_contexto(consulta)
+        global _resultado_anticipado, _resultado_anticipado_detalle
+        detalle = buscar_contexto_con_detalle(consulta)
         with _anticipado_lock:
             # Solo guardar si la consulta sigue siendo la misma
             if _anticipado_consulta == consulta:
-                _resultado_anticipado = resultado
+                _resultado_anticipado_detalle = detalle
+                if detalle:
+                    _resultado_anticipado = [
+                        " | ".join(d["documento"] for d in detalle if d.get("documento"))
+                    ]
+                else:
+                    _resultado_anticipado = []
                 print(f"⚡ [MEMORIA] Búsqueda anticipada lista para: '{consulta[:40]}'")
 
     hilo = threading.Thread(target=_buscar, daemon=True)
@@ -286,6 +355,21 @@ def obtener_resultado_anticipado(consulta: str):
 
     # Si no hay resultado anticipado listo, buscar directo
     return buscar_contexto(consulta)
+
+
+def obtener_resultado_anticipado_detalle(consulta: str):
+    """
+    Igual que obtener_resultado_anticipado() pero devuelve el detalle con
+    metadata (formato de buscar_contexto_con_detalle). Usado por el
+    recuperador automático de la Fase 4.
+    """
+    with _anticipado_lock:
+        if _anticipado_consulta == consulta and _resultado_anticipado_detalle is not None:
+            print(f"⚡ [MEMORIA] Usando detalle anticipado para: '{consulta[:40]}'")
+            return _resultado_anticipado_detalle
+
+    # Si no hay detalle anticipado listo, buscar directo
+    return buscar_contexto_con_detalle(consulta)
 
 
 # =====================================================================

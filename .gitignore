@@ -37,3 +37,7 @@ modulos/skills/wake_word/vosk-model/
 perfil_usuario.json
 olvidos.json
 modulos/skills/recordatorios/data/recordatorios.json
+
+# Prototipos / backups fuera del repo principal
+Avatar_anime/
+gui_backup_checkpoint/

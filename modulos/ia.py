@@ -3,6 +3,7 @@ import datetime
 import winsound
 import re
 import difflib
+import itertools
 from google import genai
 from google.genai import types
 from openai import OpenAI
@@ -47,9 +48,7 @@ from modulos.memoria import (
 from modulos.cliente_mcp import cliente_sistema
 
 from modulos.prompts import (
-    obtener_prompt_mentor,
-    obtener_prompt_general,
-    obtener_prompt_gamer
+    construir_contexto_sistema,
 )
 
 # ─── Perfil de usuario persistente ─────────────────────────────────────
@@ -65,7 +64,23 @@ gestor_skills = gestor
 # =====================================================================
 # Si faltan las keys, los clientes quedan en None y cada llamada responde
 # con un mensaje amigable (ver enviar_a_gemini) en vez de crashear al importar.
-cliente_genai = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+cliente_genai = (
+    genai.Client(
+        api_key=GEMINI_API_KEY,
+        http_options=types.HttpOptions(
+            # Sin reintentos internos del SDK (attempts=1): el 503/429 llega
+            # al instante a _gemini_stream_con_retry / _fallback_deepseek en
+            # vez de encadenar esperas internas de tenacity (delay de ~50s
+            # observado cuando Gemini está en "high demand").
+            retry_options=types.HttpRetryOptions(attempts=1, initial_delay=0.0, max_delay=0.5),
+            # Timeout acotado (MILISEGUNDOS en este SDK): si Gemini no responde
+            # en este plazo, fallamos y pasamos a DeepSeek de una.
+            timeout=30000,
+        ),
+    )
+    if GEMINI_API_KEY
+    else None
+)
 cliente_deepseek = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com") if DEEPSEEK_API_KEY else None
 cliente_groq = OpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1") if GROQ_API_KEY else None
 
@@ -129,6 +144,59 @@ def mcp_guardar_en_boveda(dato: str):
         # Fallback al servidor MCP si falla el acceso directo
         return cliente_sistema.ejecutar("guardar_en_boveda", {"dato": dato})
 
+
+def _normalizar_para_match(texto: str) -> str:
+    """Normaliza texto para el matcheo por tema (minúsculas, sin tildes)."""
+    import unicodedata
+    texto = unicodedata.normalize("NFD", str(texto or "").lower())
+    return "".join(c for c in texto if unicodedata.category(c) != "Mn").strip()
+
+
+def mcp_olvidar_tema(tema: str):
+    """
+    Olvida de la memoria a largo plazo TODO lo relacionado con un tema que
+    el usuario pida (ej. "olvidá lo de volcano", "olvidate de netflix").
+    Busca coincidencias en el panel de memoria (perfiles + bóveda), despacha
+    resolver_olvidar por id (registra el tombstone) y devuelve qué se olvidó.
+    NO es retroactivo sobre la conversación actual (contrato H.1).
+    """
+    try:
+        from modulos.resumen_memoria import preparar_secciones, resolver_olvidar
+        tema_norm = _normalizar_para_match(tema)
+        if not tema_norm:
+            return "No se entendió qué tema olvidar. Repetí qué querés olvidar."
+
+        # Buscar coincidencias en las secciones del panel de memoria.
+        coincidencias = []
+        datos = preparar_secciones()
+        for seccion in datos.get("secciones", []):
+            for elem in seccion.get("elementos", []):
+                id_ = elem.get("id")
+                if not id_:
+                    continue
+                texto_buscar = _normalizar_para_match(
+                    f"{elem.get('etiqueta', '')} {elem.get('texto', '')}"
+                )
+                if tema_norm in texto_buscar:
+                    coincidencias.append(id_)
+
+        if not coincidencias:
+            return f"No encontré nada en mi memoria sobre '{tema}' para olvidar."
+
+        olvidados = 0
+        for id_ in coincidencias:
+            res = resolver_olvidar(id_)
+            if res.get("exito"):
+                olvidados += 1
+
+        if olvidados:
+            return f"Listo, olvidé {olvidados} dato(s) relacionado(s) con '{tema}' de mi memoria a largo plazo."
+        return f"No pude olvidar nada de '{tema}' (los datos ya no existen)."
+    except Exception as e:
+        logger.exception("Error olvidando tema")
+        return f"Error al intentar olvidar el tema '{tema}'."
+
+
 def mcp_explorar_ruta(ruta: str):
     """
     Lista y muestra el contenido (archivos y carpetas) de un directorio en el chat,
@@ -151,14 +219,15 @@ def mcp_leer_documento(ruta: str):
 
 lista_herramientas_mcp = [
     mcp_estado_pc, mcp_hardware_pc, mcp_buscar_en_boveda,
-    mcp_explorar_ruta, mcp_leer_documento
+    mcp_explorar_ruta, mcp_leer_documento, mcp_guardar_en_boveda,
+    mcp_olvidar_tema
 ]
 
 # =====================================================================
 # HELPER: STREAMING DE VOZ PARALELO AL STREAMING DE IA
 # =====================================================================
 _PATRON_CORTE_VOZ = re.compile(r'(?<=[.!?])\s+')
-_MIN_CHARS_CHUNK_VOZ = 80
+_MIN_CHARS_CHUNK_VOZ = 30
 _PATRON_COMANDOS_VOZ = re.compile(
     r'^(audio:|buscar:|abrir:|cerrar:|mover:|guardar_archivo:|leer_archivo:|'
     r'reemplazar_bloque:|editar_archivo:|crear_carpeta:|github:|escanear_proyecto:|'
@@ -272,6 +341,159 @@ def _convertir_contexto_a_contents(contexto_chat):
         contents.append(types.Content(role=role, parts=parts))
     return contents
 
+def _modelo_gemini_str(nombre_opcion: str) -> str:
+    """Mapa nombre-de-opción → ID de modelo Gemini (para el default global)."""
+    return {
+        "Gemini 3.1 Flash Lite": "gemini-3.1-flash-lite",
+        "Gemini 3.5 Flash Lite": "gemini-3.5-flash-lite",
+        "Gemini 3.6 Flash (High)": "gemini-3.6-flash",
+        "Gemini 3.1 Pro (High)": "gemini-3.1-pro-preview",
+    }.get(str(nombre_opcion or ""), "gemini-3.5-flash-lite")
+
+
+def _ejecutar_herramienta_mcp(nombre: str, args: dict = None):
+    """
+    Ejecuta una herramienta MCP por nombre. Dispatcher ÚNICO: si una tool
+    está en lista_herramientas_mcp y no está acá, devuelve None (se detecta
+    como "no ejecutada"). Facilita tests unitarios del dispatcher.
+    """
+    args = args or {}
+    if nombre == "mcp_estado_pc":
+        return mcp_estado_pc()
+    if nombre == "mcp_hardware_pc":
+        return mcp_hardware_pc()
+    if nombre == "mcp_buscar_en_boveda":
+        return mcp_buscar_en_boveda(args.get("consulta", ""))
+    if nombre == "mcp_guardar_en_boveda":
+        return mcp_guardar_en_boveda(args.get("dato", ""))
+    if nombre == "mcp_olvidar_tema":
+        return mcp_olvidar_tema(args.get("tema", ""))
+    if nombre == "mcp_explorar_ruta":
+        return mcp_explorar_ruta(args.get("ruta", ""))
+    if nombre == "mcp_leer_documento":
+        return mcp_leer_documento(args.get("ruta", ""))
+    return None
+
+
+def _es_error_transitorio_gemini(e) -> bool:
+    """
+    True si el error de Gemini es transitorio (503 high demand / 429 rate
+    limit / ResourceExhausted / timeout de red): merece fallback a DeepSeek
+    en vez de crashear.
+    """
+    try:
+        texto = str(e).lower()
+        codigo = getattr(e, "code", None)
+        if codigo in (429, 503):
+            return True
+        if any(s in texto for s in (
+            "503", "429", "resourceexhausted", "high demand", "unavailable",
+            "rate limit", "timed out", "handshake", "connect", "read timed out",
+            "connection", "timeout",
+        )):
+            return True
+        # Timeouts de red por tipo (httpx / socket).
+        for clase in (
+            __import__("httpx").ConnectTimeout,
+            __import__("httpx").ReadTimeout,
+            __import__("httpx").TimeoutException,
+            __import__("socket").timeout,
+            TimeoutError,
+        ):
+            if isinstance(e, clase):
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def _gemini_stream_con_retry(modelo, contents, config, intentos=2, backoff_base=0.5, ui_callback=None):
+    """
+    Generador que consume el stream de Gemini reintentando SOLO si el error
+    transitorio (503/429) ocurre ANTES de emitir el primer chunk. Si ya se
+    emitieron chunks y luego falla, re-lanza (no se reintenta para no duplicar
+    una respuesta a mitad). Al agotar los reintentos, re-lanza la excepción.
+
+    Con el SDK configurado sin reintentos internos (HttpRetryOptions.attempts=1),
+    el 503/429 llega acá al instante: un solo reintento rápido y si sigue, el
+    turno cae a _fallback_deepseek (DeepSeek de una).
+    """
+    import time
+    ultimo_error = None
+    for intento in range(1, intentos + 1):
+        emitido = False
+        try:
+            stream = cliente_genai.models.generate_content_stream(
+                model=modelo, contents=contents, config=config
+            )
+            for chunk in stream:
+                if chunk is not None:
+                    emitido = True
+                yield chunk
+            return  # stream completo sin error
+        except Exception as e:
+            ultimo_error = e
+            if not _es_error_transitorio_gemini(e):
+                raise
+            if emitido:
+                # Ya arrancó la respuesta: reintentar duplicaría contenido.
+                raise
+            if intento < intentos:
+                espera = backoff_base * (2 ** (intento - 1))
+                logger.warning(f"⚠️ Gemini transitorio (intento {intento}/{intentos}); reintentando en {espera:.1f}s: {str(e)[:80]}")
+                if ui_callback:
+                    ui_callback("⚙️ Sistema", f"⚠️ Gemini saturado; reintentando ({intento}/{intentos})...", "#FFA500")
+                time.sleep(espera)
+    raise ultimo_error
+
+
+def _fallback_deepseek(contexto_sistema, contexto_chat, texto_usuario, ocultador_stream, modo_voz, ui_callback, motivo="respuesta vacía"):
+    """
+    Reintenta el turno con DeepSeek (streaming) cuando Gemini falla de forma
+    transitoria o devuelve respuesta vacía. Devuelve el texto de respuesta
+    ("" si falló del todo) y setea buffer de voz si aplica.
+    """
+    logger.warning(f"⚠️ Fallback a DeepSeek ({motivo}).")
+    if ui_callback:
+        ui_callback("⚠️ Sistema", f"Gemini no disponible ({motivo}). Usando respaldo DeepSeek...", "#FFA500")
+    mensajes_ds = [{"role": "system", "content": contexto_sistema}]
+    for msg in (contexto_chat or []):
+        rol_ds = "assistant" if msg['role'] == "model" else "user"
+        texto_historico = "".join([p for p in msg['parts'] if isinstance(p, str)])
+        mensajes_ds.append({"role": rol_ds, "content": texto_historico})
+    mensajes_ds.append({"role": "user", "content": texto_usuario})
+    respuesta = ""
+    buffer_voz_fallback = ""
+    try:
+        response = cliente_deepseek.chat.completions.create(
+            model="deepseek-chat", messages=mensajes_ds, stream=True
+        )
+        if ui_callback:
+            ui_callback("🤖 Argus (DeepSeek)", "", "#A8C7FA", nueva_linea=False)
+        for chunk in response:
+            delta = chunk.choices[0].delta
+            if getattr(delta, 'content', None):
+                texto_chunk = delta.content
+                respuesta += texto_chunk
+                texto_visible = ocultador_stream.procesar(texto_chunk)
+                if texto_visible:
+                    print(texto_visible, end='', flush=True)
+                    if ui_callback:
+                        ui_callback("", texto_visible, "#E8EAED", nueva_linea=False)
+                    if modo_voz:
+                        buffer_voz_fallback += texto_visible
+                        buffer_voz_fallback = _procesar_buffer_voz(buffer_voz_fallback, forzar=False)
+    except Exception as e:
+        logger.exception("Error en fallback DeepSeek")
+        if ui_callback:
+            ui_callback("⚙️ Sistema", f"❌ Fallback DeepSeek falló: {str(e)[:100]}", "#FF4500")
+        respuesta = "⚠️ Lo siento, la API bloqueó esta respuesta por políticas de seguridad."
+    finally:
+        if modo_voz and buffer_voz_fallback.strip():
+            _procesar_buffer_voz(buffer_voz_fallback, forzar=True)
+    return respuesta
+
+
 def _extraer_funciones_de_respuesta(response):
     """
     Extrae function_calls de una respuesta de streaming del nuevo SDK.
@@ -290,11 +512,34 @@ def _extraer_funciones_de_respuesta(response):
     return None
 
 # =====================================================================
-# ENRUTADOR PRINCIPAL
+# SERIALIZACIÓN DE TURNOS (C1) Y MARCADOR TEMPORAL (C2)
+#
+# Todas las entradas (texto, voz, gamepad, wake word) convergen en
+# enviar_a_gemini. Un único RLock serializa el procesamiento para que dos
+# turnos concurrentes no mezclen contexto, streams ni persistencia.
+# El turno_id es un identificador temporal (contador monótono, sin
+# persistencia) que viaja hacia la UI dentro del remitente del ui_callback
+# con el prefijo @@TURNO:<id>|, de modo que app.js pueda dirigir las
+# señales provisionales/verificadas a la burbuja correcta.
 # =====================================================================
-def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
+# Todos los turnos y las mutaciones que rebinden/limpian el contexto por
+# modo (config.RLOCK_CONTEXTO: cambiar_modo, limpiar_contexto) comparten el
+# MISMO lock canónico: un cambio de modo nunca se intercala con un turno.
+_RLOCK_PROC = config.RLOCK_CONTEXTO
+_CONTADOR_TURNOS = itertools.count(1)
+
+def _marcar_turno_en_remitente(turno_id, remitente):
+    """Prefija el remitente del ui_callback con el turno_id temporal."""
+    return f"@@TURNO:{turno_id}|{remitente or ''}"
+
+def _procesar_mensaje(texto_usuario, modo_voz=False, ui_callback=None, turno_id=None):
     """Enrutador Universal y traductor de acciones con soporte para Skills."""
     import config
+    if ui_callback is not None:
+        ui_callback_original = ui_callback
+        if turno_id is not None:
+            def ui_callback(remitente, texto, color=None, nueva_linea=True):
+                ui_callback_original(_marcar_turno_en_remitente(turno_id, remitente), texto, color, nueva_linea)
     if not config.GEMINI_API_KEY:
         mensaje = ("⚠️ Argus todavía no tiene configurada su API Key de Gemini. "
                    "Agregá GEMINI_API_KEY a tu archivo .env y reiniciá la app.")
@@ -314,6 +559,34 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
 
     config.RUTA_WORKSPACE_ACTUAL = WORKSPACE_ACTUAL
     texto_usuario_lower = texto_usuario.lower().strip()
+
+    # ─── RETOMAR HISTORIAL PERSISTIDO (Fase P) ───────────────────────────
+    # Frases naturales que hidratan el contexto con el tail persistido del
+    # contexto activo. Solo se dispara si hay historial en disco; si no, la
+    # conversación continúa normalmente.
+    _FRASES_RETOMAR = (
+        "dónde quedamos", "donde quedamos", "retomá la conversación",
+        "retoma la conversacion", "retomá la charla", "retoma la charla",
+        "seguimos con la conversación", "seguimos con la conversacion",
+        "continuá la conversación", "continua la conversacion", "retomar",
+    )
+    _es_retomar = texto_usuario_lower in _FRASES_RETOMAR or any(
+        frase in texto_usuario_lower for frase in _FRASES_RETOMAR
+    )
+    if _es_retomar:
+        try:
+            from modulos.persistencia import recuperar_tail, armar_context_id
+            mensajes_hist = recuperar_tail(armar_context_id(config.estado.modo_actual))
+            if mensajes_hist:
+                config.estado.restaurar_historial_persistido(mensajes_hist)
+                msg_retomar = f"↩️ Retomé los últimos {len(mensajes_hist)} mensajes de la conversación guardada. ¿Seguimos?"
+                if ui_callback:
+                    ui_callback("⚙️ Sistema", msg_retomar, "#A8C7FA")
+                if modo_voz:
+                    hablar_no_bloqueante("Retomé la conversación guardada.")
+                return
+        except Exception:
+            pass
 
     # ─── LIMPIAR CONTEXTO ────────────────────────────────────────────────
     _FRASES_LIMPIAR = {
@@ -572,10 +845,31 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                     logger.debug(f"No se pudo obtener clima para contexto: {e}")
             # ─── FIN DATOS DE CLIMA ──────────────────────────────────────────
 
+            # Fase D (Punto 3): la CAPACIDAD activa se decide ANTES de elegir
+            # perfil y prompt. Un pin del usuario (capacidad_fijada) manda
+            # SIEMPRE; si no, en mentor/gamer manda el toggle y en
+            # general/chat se activa por el contenido del mensaje.
+            capacidad_fijada = config.estado.obtener_capacidad_fijada()
+            if capacidad_fijada:
+                capacidad_activa = capacidad_fijada
+            elif MODO_ACTUAL in ("mentor", "gamer"):
+                capacidad_activa = MODO_ACTUAL
+            else:
+                from modulos.prompts import detectar_capacidad_por_tema
+                capacidad_activa = detectar_capacidad_por_tema(texto_usuario) or "general"
+
+            # Señal a la UI: la capacidad activa del turno (para el chip).
+            try:
+                if ui_callback:
+                    ui_callback("__CAPACIDAD_ACTIVA__", capacidad_activa, "#A8C7FA")
+            except Exception:
+                pass
+
             from modulos.perfil_usuario import texto_perfil_para_prompt
 
-            # En modo Gamer usar perfil Gamer separado; en otros modos usar perfil general
-            if MODO_ACTUAL == "gamer":
+            # El perfil se consulta según la CAPACIDAD activa (no solo por
+            # modo): si la capacidad es gaming, se usa el perfil gamer.
+            if capacidad_activa == "gamer":
                 from modulos.perfil_gamer import texto_perfil_gamer_para_prompt
                 texto_perfil = texto_perfil_gamer_para_prompt()
             else:
@@ -585,20 +879,19 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             texto_snapshot = f"[ESTADO DEL PROYECTO]:\n{SNAPSHOT_ACTUAL}\n\n" if SNAPSHOT_ACTUAL else ""
             texto_doc_volatil = f"[DOCUMENTOS EN MEMORIA]:\n{DOCUMENTO_VOLATIL}\n\n" if DOCUMENTO_VOLATIL else ""
 
-            if MODO_ACTUAL == "mentor":
-                contexto_sistema = obtener_prompt_mentor(
+            if capacidad_activa == "mentor":
+                contexto_sistema = construir_contexto_sistema(
+                    "mentor", fecha_hoy, os.path.expanduser("~"), ventanas_abiertas,
                     texto_workspace, texto_snapshot, texto_doc_volatil, texto_perfil
                 )
-            elif MODO_ACTUAL == "gamer":
-                ruta_home = os.path.expanduser("~")
-                contexto_sistema = obtener_prompt_gamer(
-                    fecha_hoy, ruta_home, ventanas_abiertas,
+            elif capacidad_activa == "gamer":
+                contexto_sistema = construir_contexto_sistema(
+                    "gamer", fecha_hoy, os.path.expanduser("~"), ventanas_abiertas,
                     texto_workspace, texto_snapshot, texto_doc_volatil, texto_perfil
                 )
             else:
-                ruta_home = os.path.expanduser("~")
-                contexto_sistema = obtener_prompt_general(
-                    fecha_hoy, ruta_home, ventanas_abiertas,
+                contexto_sistema = construir_contexto_sistema(
+                    "general", fecha_hoy, os.path.expanduser("~"), ventanas_abiertas,
                     texto_workspace, texto_snapshot, texto_doc_volatil, texto_perfil
                 )
 
@@ -607,14 +900,31 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 contexto_sistema += f"\n\n⚠️ [CLIMA ACTUAL] (Datos en tiempo real):\n{texto_clima}\n[FIN CLIMA]\n"
                 contexto_sistema += "\n⚠️ IMPORTANTE: Cuando el usuario pregunte sobre el clima, actividades al aire libre (lavar ropa, salir, etc.), USÁ estos datos. No necesitás buscar en internet para responder sobre el clima actual.\n"
 
+            # ─── RECUPERACIÓN AUTOMÁTICA DE MEMORIA (Fase 4) ───────────────
+            # Reutiliza el mismo filtro que el prefetch (mismos modos, sin
+            # intenciones de comando directo). El bloque se inyecta como
+            # contexto adicional; si no hay nada relevante devuelve "".
+            if MODO_ACTUAL in ("general", "chat", "gamer", "mentor") and not _es_intencion_comando_directo(texto_usuario):
+                try:
+                    from modulos.recuperador_memoria import bloque_memoria_para_contexto
+                    texto_memoria = bloque_memoria_para_contexto(texto_usuario)
+                    if texto_memoria:
+                        contexto_sistema += f"\n\n{texto_memoria}\n"
+                except Exception as e:
+                    logger.debug(f"No se pudo recuperar memoria para contexto: {e}")
+
             # Determinar modelo_activo según la selección del usuario o por defecto
             modelo_sel = getattr(config.estado, 'modelo_seleccionado', 'Por Defecto')
-            gemini_model_str = "gemini-3.1-flash-lite"
-            if modelo_sel == "Gemini 3.1 Flash Lite":
+            gemini_model_str = "gemini-3.5-flash-lite"
+            if modelo_sel == "Gemini 3.5 Flash Lite":
                 modelo_activo = "gemini"
+                gemini_model_str = "gemini-3.5-flash-lite"
+            elif modelo_sel == "Gemini 3.1 Flash Lite":
+                modelo_activo = "gemini"
+                gemini_model_str = "gemini-3.1-flash-lite"
             elif modelo_sel == "Gemini 3.1 Pro (High)":
                 modelo_activo = "gemini"
-                gemini_model_str = "gemini-3.1-pro"
+                gemini_model_str = "gemini-3.1-pro-preview"
             elif modelo_sel == "Gemini 3.6 Flash (High)":
                 modelo_activo = "gemini"
                 gemini_model_str = "gemini-3.6-flash"
@@ -629,12 +939,15 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
             elif modelo_sel == "Groq GPT-OSS 120B":
                 modelo_activo = "groq:openai/gpt-oss-120b"
             else:
-                # "Por Defecto" -> usa los del modo
-                if MODO_ACTUAL == "mentor":
-                    modelo_activo = "deepseek-v4-flash"
-                elif MODO_ACTUAL == "gamer":
+                # "Por Defecto"/"Auto" → UNA preferencia global (Fase D Punto 2).
+                # Ya no depende del modo: se usa config.MODELO_DEFECTO_GLOBAL.
+                # Por defecto es Gemini (único con tool-calling MCP), así el
+                # MCP no "parpadea" al cambiar de contexto.
+                if config.MODELO_DEFECTO_GLOBAL.startswith("Gemini"):
                     modelo_activo = "gemini"
-                    gemini_model_str = "gemini-3.1-flash-lite"
+                    gemini_model_str = _modelo_gemini_str(config.MODELO_DEFECTO_GLOBAL)
+                elif "DeepSeek" in config.MODELO_DEFECTO_GLOBAL:
+                    modelo_activo = "deepseek-v4-flash"
                 else:
                     modelo_activo = "gemini"
 
@@ -668,6 +981,14 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                     system_instruction=contexto_sistema,
                     temperature=0.1,
                     max_output_tokens=8192,
+                    # FIX (12/08/2026): el SDK google-genai 2.11 tiene AFC
+                    # (Automatic Function Calling) activo por defecto: consume
+                    # las function_calls del stream y las ejecuta internamente,
+                    # dejando `respuesta_ia` vacía y disparando el falso
+                    # "bloqueo por Safety/PII" + fallback a DeepSeek. Argus
+                    # maneja las tools con su propio dispatcher (ronda manual),
+                    # así que AFC debe estar DESACTIVADO.
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
                     safety_settings=[
                         types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HARASSMENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
                         types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold=types.HarmBlockThreshold.BLOCK_NONE),
@@ -714,64 +1035,29 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
 
                 mensajes_para_gemini.append(types.Content(role='user', parts=partes_usuario))
 
-                try:
-                    response_stream = cliente_genai.models.generate_content_stream(
-                        model=gemini_model_str,
-                        contents=mensajes_para_gemini,
-                        config=gemini_config
-                    )
-                except genai.errors.ClientError as e:
-                    err_str = str(e)
-                    logger.exception(f"Error de cliente Gemini: {err_str[:200]}")
-                    if "blocked" in err_str.lower() or "safety" in err_str.lower():
-                        if ui_callback:
-                            ui_callback("⚙️ Sistema", "⚠️ Mensaje bloqueado por filtros de seguridad.", "#FF4500")
-                    elif "429" in err_str or "ResourceExhausted" in err_str:
-                        if ui_callback:
-                            ui_callback("⚙️ Sistema", "⚠️ Límite de tokens alcanzado. Limpiá el contexto.", "#FF4500")
-                    elif "401" in err_str or "Unauthenticated" in err_str:
-                        if ui_callback:
-                            ui_callback("⚙️ Sistema", "❌ Error de autenticación. Verificá tu API Key.", "#FF4500")
-                    elif "403" in err_str or "PermissionDenied" in err_str:
-                        if ui_callback:
-                            ui_callback("⚙️ Sistema", "❌ Permiso denegado. Verificá tu API Key.", "#FF4500")
-                    else:
-                        if ui_callback:
-                            ui_callback("⚙️ Sistema", f"❌ Error en Gemini: {err_str[:100]}", "#FF4500")
-                    error_ocurrido = True
-                    return
-                except Exception as e:
-                    err_str = str(e)
-                    if "ResourceExhausted" in err_str or "429" in err_str:
-                        if ui_callback:
-                            ui_callback("⚙️ Sistema", "⚠️ Límite de tokens alcanzado. Limpiá el contexto.", "#FF4500")
-                    elif "Unauthenticated" in err_str or "401" in err_str:
-                        if ui_callback:
-                            ui_callback("⚙️ Sistema", "❌ Error de autenticación. Verificá tu API Key.", "#FF4500")
-                    elif "PermissionDenied" in err_str or "403" in err_str:
-                        if ui_callback:
-                            ui_callback("⚙️ Sistema", "❌ Permiso denegado. Verificá tu API Key.", "#FF4500")
-                    else:
-                        if ui_callback:
-                            ui_callback("⚙️ Sistema", f"❌ Error al iniciar generación: {err_str[:100]}", "#FF4500")
-                    logger.exception("Error al iniciar generación en Gemini")
-                    error_ocurrido = True
-                    return
-
+                # El stream se consume vía _gemini_stream_con_retry (retry con
+                # backoff ante 503/429 transitorios ANTES de emitir el primer
+                # chunk). Los errores no-transitorios (auth/safety/blocked) se
+                # manejan en el except del bucle de abajo.
+                buffer_voz = ""
                 if ui_callback:
                     ui_callback("🤖 Argus", "", "#A8C7FA", nueva_linea=False)
 
-                buffer_voz = ""
-
                 try:
-                    for chunk in response_stream:
+                    for chunk in _gemini_stream_con_retry(
+                        gemini_model_str, mensajes_para_gemini, gemini_config,
+                        ui_callback=ui_callback,
+                    ):
                         try:
-                            # DEBUG: Loggear finish_reason cuando sea SAFETY o RECITATION
+                            # DEBUG: Loggear finish_reason SIEMPRE (no solo cuando
+                            # es SAFETY/RECITATION) para distinguir un bloqueo real
+                            # de un stream vacío por AFC/otras causas.
                             if hasattr(chunk, 'candidates') and chunk.candidates:
                                 candidate = chunk.candidates[0]
                                 if hasattr(candidate, 'finish_reason') and candidate.finish_reason:
                                     fr_name = candidate.finish_reason.name if hasattr(candidate.finish_reason, 'name') else str(candidate.finish_reason)
                                     fr_val = candidate.finish_reason.value if hasattr(candidate.finish_reason, 'value') else str(candidate.finish_reason)
+                                    logger.info(f"📡 Gemini finish_reason={fr_name} (valor={fr_val})")
                                     # SAFETY=2, RECITATION=4, OTHER=5 son los problemáticos
                                     if fr_val in (2, 4, 5):
                                         logger.warning(f"⚠️ Gemini finish_reason={fr_name} (SAFETY=2, RECITATION=4, OTHER=5)")
@@ -786,23 +1072,14 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                         ui_callback("⚙️ Sistema", f"Consultando: {n_func}...", "#80868B")
                                     args = dict(fc.args) if fc.args else {}
                                     try:
-                                        if n_func == "mcp_estado_pc":
-                                            resultado_mcp = mcp_estado_pc()
-                                        elif n_func == "mcp_hardware_pc":
-                                            resultado_mcp = mcp_hardware_pc()
-                                        elif n_func == "mcp_buscar_en_boveda":
-                                            resultado_mcp = mcp_buscar_en_boveda(args.get("consulta", ""))
-                                        elif n_func == "mcp_guardar_en_boveda":
-                                            resultado_mcp = mcp_guardar_en_boveda(args.get("dato", ""))
-                                        elif n_func == "mcp_explorar_ruta":
-                                            resultado_mcp = mcp_explorar_ruta(args.get("ruta", ""))
-                                        elif n_func == "mcp_leer_documento":
-                                            resultado_mcp = mcp_leer_documento(args.get("ruta", ""))
+                                        resultado_mcp = _ejecutar_herramienta_mcp(n_func, args)
 
-                                        if resultado_mcp and "TIMEOUT" not in str(resultado_mcp):
+                                        if resultado_mcp is None:
+                                            logger.warning(f"⚠️ Tool '{n_func}' sin dispatcher: está en lista_herramientas_mcp pero no en _ejecutar_herramienta_mcp.")
+                                        elif "TIMEOUT" not in str(resultado_mcp):
                                             if ui_callback:
                                                 ui_callback("⚙️ Sistema", f"✅ Dato obtenido: {str(resultado_mcp)[:120]}...", "#80868B")
-                                        elif resultado_mcp and "TIMEOUT" in str(resultado_mcp):
+                                        elif "TIMEOUT" in str(resultado_mcp):
                                             if ui_callback:
                                                 ui_callback("⚙️ Sistema", "⚠️ Timeout en herramienta MCP.", "#FFA500")
                                     except Exception as e:
@@ -826,7 +1103,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                     print(texto_visible, end='', flush=True)
                                     if ui_callback:
                                         ui_callback("", texto_visible, "#E8EAED", nueva_linea=False)
-                                    if modo_voz and not usaste_mcp:
+                                    if modo_voz:
                                         if "argus:" not in respuesta_ia.lower():
                                             buffer_voz += texto_visible
                                             buffer_voz = _procesar_buffer_voz(buffer_voz, forzar=False)
@@ -840,54 +1117,62 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                 ui_callback("⚙️ Sistema", f"❌ Error en streaming: {str(e)[:80]}", "#FF4500")
                             break
                 except Exception as e:
-                    logger.exception("Error en el bucle de streaming de Gemini")
-                    if ui_callback:
-                        ui_callback("⚙️ Sistema", f"❌ Error en el streaming: {str(e)[:80]}", "#FF4500")
-                    error_ocurrido = True
+                    # Errores de cliente (auth/safety/blocked) → mensaje claro,
+                    # sin fallback ni retry.
+                    if isinstance(e, genai.errors.ClientError):
+                        err_str = str(e)
+                        logger.exception(f"Error de cliente Gemini: {err_str[:200]}")
+                        if "blocked" in err_str.lower() or "safety" in err_str.lower():
+                            if ui_callback:
+                                ui_callback("⚙️ Sistema", "⚠️ Mensaje bloqueado por filtros de seguridad.", "#FF4500")
+                        elif "429" in err_str or "ResourceExhausted" in err_str:
+                            if ui_callback:
+                                ui_callback("⚙️ Sistema", "⚠️ Límite de tokens alcanzado. Limpiá el contexto.", "#FF4500")
+                        elif "401" in err_str or "Unauthenticated" in err_str:
+                            if ui_callback:
+                                ui_callback("⚙️ Sistema", "❌ Error de autenticación. Verificá tu API Key.", "#FF4500")
+                        elif "403" in err_str or "PermissionDenied" in err_str:
+                            if ui_callback:
+                                ui_callback("⚙️ Sistema", "❌ Permiso denegado. Verificá tu API Key.", "#FF4500")
+                        else:
+                            if ui_callback:
+                                ui_callback("⚙️ Sistema", f"❌ Error en Gemini: {err_str[:100]}", "#FF4500")
+                        error_ocurrido = True
+                    elif _es_error_transitorio_gemini(e):
+                        # 503 high demand / 429 rate limit: fallback a DeepSeek
+                        # en vez de crashear el turno.
+                        logger.warning(f"Error transitorio de Gemini: {str(e)[:120]}")
+                        respuesta_ia = _fallback_deepseek(
+                            contexto_sistema, CONTEXTO_CHAT, texto_usuario,
+                            ocultador_stream, modo_voz, ui_callback,
+                            motivo="Gemini transitoriamente no disponible",
+                        )
+                        # Si el fallback produjo respuesta, el turno NO se
+                        # considera fallido: la respuesta fluye al chat.
+                        if respuesta_ia and not respuesta_ia.startswith("⚠️"):
+                            error_ocurrido = False
+                        else:
+                            error_ocurrido = True
+                    else:
+                        logger.exception("Error en el bucle de streaming de Gemini")
+                        if ui_callback:
+                            ui_callback("⚙️ Sistema", f"❌ Error en el streaming: {str(e)[:80]}", "#FF4500")
+                        error_ocurrido = True
                 finally:
-                    if modo_voz and buffer_voz.strip() and not usaste_mcp and "argus:" not in respuesta_ia.lower():
+                    # La voz se ata al MODO DE ENTRADA (habló por micrófono),
+                    # no a si se usó una tool MCP: siempre que modo_voz, hablamos
+                    # el buffer acumulado. (FIX 13/08: antes `not usaste_mcp`
+                    # silenciaba la voz cuando el turno consultaba la bóveda.)
+                    if modo_voz and buffer_voz.strip() and "argus:" not in respuesta_ia.lower():
                         _procesar_buffer_voz(buffer_voz, forzar=True)
 
                 # ─── FALLBACK POR RESPUESTA VACÍA (Safety/PII blocking) ─────
                 if not respuesta_ia and not error_ocurrido and not usaste_mcp:
-                    logger.warning("⚠️ Respuesta vacía — probable bloqueo por Safety/PII. Fallback a DeepSeek.")
-                    if ui_callback:
-                        ui_callback("⚙️ Sistema", "⚠️ La API bloqueó esta respuesta. Usando respaldo DeepSeek...", "#FFA500")
-                    # Reintentar con DeepSeek como fallback
-                    mensajes_ds = [{"role": "system", "content": contexto_sistema}]
-                    for msg in CONTEXTO_CHAT:
-                        rol_ds = "assistant" if msg['role'] == "model" else "user"
-                        texto_historico = "".join([p for p in msg['parts'] if isinstance(p, str)])
-                        mensajes_ds.append({"role": rol_ds, "content": texto_historico})
-                    mensajes_ds.append({"role": "user", "content": texto_usuario})
-                    buffer_voz_fallback = ""
-                    try:
-                        response = cliente_deepseek.chat.completions.create(
-                            model="deepseek-chat", messages=mensajes_ds, stream=True
-                        )
-                        if ui_callback:
-                            ui_callback("🤖 Argus (DeepSeek)", "", "#A8C7FA", nueva_linea=False)
-                        for chunk in response:
-                            delta = chunk.choices[0].delta
-                            if getattr(delta, 'content', None):
-                                texto_chunk = delta.content
-                                respuesta_ia += texto_chunk
-                                texto_visible = ocultador_stream.procesar(texto_chunk)
-                                if texto_visible:
-                                    print(texto_visible, end='', flush=True)
-                                    if ui_callback:
-                                        ui_callback("", texto_visible, "#E8EAED", nueva_linea=False)
-                                    if modo_voz:
-                                        buffer_voz_fallback += texto_visible
-                                        buffer_voz_fallback = _procesar_buffer_voz(buffer_voz_fallback, forzar=False)
-                    except Exception as e:
-                        logger.exception("Error en fallback DeepSeek")
-                        if ui_callback:
-                            ui_callback("⚙️ Sistema", f"❌ Fallback DeepSeek falló: {str(e)[:100]}", "#FF4500")
-                        respuesta_ia = "⚠️ Lo siento, la API bloqueó esta respuesta por políticas de seguridad."
-                    finally:
-                        if modo_voz and buffer_voz_fallback.strip():
-                            _procesar_buffer_voz(buffer_voz_fallback, forzar=True)
+                    respuesta_ia = _fallback_deepseek(
+                        contexto_sistema, CONTEXTO_CHAT, texto_usuario,
+                        ocultador_stream, modo_voz, ui_callback,
+                        motivo="respuesta vacía / posible bloqueo",
+                    )
 
                 # ─── MCP SEGUNDA RONDA ────────────────────────────────────────
                 if usaste_mcp and not error_ocurrido and not skill_activa:
@@ -908,6 +1193,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                                 system_instruction=contexto_sistema,
                                 temperature=0.1,
                                 max_output_tokens=8192,
+                                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
                                 safety_settings=[
                                     types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HARASSMENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
                                     types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold=types.HarmBlockThreshold.BLOCK_NONE),
@@ -1037,6 +1323,12 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 print(resto_stream, end='', flush=True)
                 if ui_callback:
                     ui_callback("", resto_stream, "#E8EAED", nueva_linea=False)
+                # FIX (13/08): el texto retenido por el ocultador (respuestas de
+                # una sola línea sin \n) salía por finalizar() pero NUNCA se
+                # hablaba → el TTS no sonaba en respuestas cortas por voz.
+                # Se habla directamente, sin depender del buffer del proveedor.
+                if modo_voz:
+                    _procesar_buffer_voz(resto_stream, forzar=True)
             if ui_callback:
                 ui_callback("", "", "#E8EAED", nueva_linea=True)
 
@@ -1141,6 +1433,7 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                     system_instruction=contexto_sistema,
                     temperature=0.1,
                     max_output_tokens=8192,
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
                     safety_settings=[
                         types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HARASSMENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
                         types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold=types.HarmBlockThreshold.BLOCK_NONE),
@@ -1172,8 +1465,14 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
                 # protocolo de señal; por eso puede re-emitir `[WEB: ...]`/
                 # `[CONSULTA: ...]`. Se sanea siempre (UI, TTS y persistencia).
                 respuesta_final_limpia = limpiar_respuesta_web(respuesta_final)
-                if modo_voz and buffer_voz_web_raw.strip():
-                    _procesar_buffer_voz(limpiar_respuesta_web(buffer_voz_web_raw), forzar=True)
+                if modo_voz:
+                    texto_voz = limpiar_respuesta_web(buffer_voz_web_raw)
+                    if texto_voz.strip():
+                        _procesar_buffer_voz(texto_voz, forzar=True)
+                    elif draft_limpio and draft_limpio.strip():
+                        # A3: si la 2ª generación quedó vacía, hablamos el
+                        # borrador provisional (evita "responde pero no habla").
+                        _procesar_buffer_voz(draft_limpio, forzar=True)
                 # Reemplazar el borrador provisional por la respuesta verificada,
                 # o desmarcarlo si la segunda generación quedó vacía.
                 if ui_callback:
@@ -1204,6 +1503,17 @@ def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
     if respuesta_ia and not error_ocurrido:
         config.estado.agregar_mensaje_chat({'role': 'user', 'parts': [texto_usuario]})
         config.estado.agregar_mensaje_chat(armar_mensaje_modelo_persistido(limpiar_respuesta_web(respuesta_ia)))
+
+
+def enviar_a_gemini(texto_usuario, modo_voz=False, ui_callback=None):
+    """
+    Punto de entrada único de todos los turnos (texto, voz, gamepad, wake
+    word). Adquiere el RLock de serialización para que los turnos no se
+    pisen entre sí y genera un turno_id temporal que acompaña a la UI.
+    """
+    with _RLOCK_PROC:
+        turno_id = next(_CONTADOR_TURNOS)
+        _procesar_mensaje(texto_usuario, modo_voz=modo_voz, ui_callback=ui_callback, turno_id=turno_id)
 
 
 # =====================================================================

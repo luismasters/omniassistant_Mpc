@@ -175,3 +175,69 @@ OmniAssistant/
 4. **Implementar modo offline parcial** — Muchas funcionalidades (control de ventanas, audio local, recordatorios) no requieren internet. Si la API de Gemini falla, se podría caer a un modelo local más pequeño (Llama.cpp, Ollama).
 
 5. **Grabar sesiones de voz para debugging** — Cuando Whisper falla, no hay forma de saber qué dijo el usuario. Guardar el audio crudo (opcional, con permiso) facilitaría el debugging.
+
+---
+
+## 7. 🔀 Fusión & ensamblado de contexto (flujo real, auditado)
+
+Auditoría del recorrido completo del mensaje desde el input hasta el LLM y la respuesta.
+
+### 7.1 Entradas del usuario (convergen todas en `enviar_a_gemini`)
+
+| Entrada | Ruta | `modo_voz` |
+|---------|------|------------|
+| Texto escrito | JS → `web_bridge.recibir_mensaje` | `False` |
+| Voz (mic) | `web_bridge.iniciar_escucha_voz` → `capturar_voz_micro` → `enviar_a_gemini(texto, modo_voz=True)` (web_bridge.py:563-580) | `True` |
+| Voz por gamepad (L3+R3) | `iniciar_escucha_voz_gamepad` → `capturar_voz_micro(condicion_seguir_grabando=self.check_gamepad_combo_js)` (web_bridge.py:802-823) | `True` |
+| Wake word | `activar_desactivar_wake_word` → `enviar_a_gemini` (web_bridge.py:873-884) | `True` |
+
+El gamepad corre en **subproceso aislado** (`gamepad_service.py`) vía `modulos/gamepad_control.py`, para no interferir con el event loop de PyWebView. Los combos (L3+R3) llegan por la callback `callback_activar_voz`.
+
+### 7.2 Interceptación antes del LLM (`procesar_mensaje`, ia.py:554-614)
+
+Antes de armar el prompt, Argus decide si puede resolver la petición sin LLM:
+
+1. **Comandos directos de sistema** — `_es_intencion_comando_directo()` (ia.py:192-210) detecta patrones y derivan a `controlador_acciones.procesar_acciones` (IA, cerrar/abrir/mover ventanas, `mover:`, `argus:`, audio, recordatorios, `buscar:`, `github:`, `capturar:`, bóveda, `escanear_proyecto:`).
+2. **Acciones naturales de ventana** — frases tipo "movete a la pantalla 2", "maximizate", "ponte al frente" se detectan con heurística de palabras (ia.py:380-430) y se resuelven localmente (regla CRÍTICA: respuesta corta "Listo, acción ejecutada.").
+3. **Búsqueda web** — se fusiona el legado `buscar:` con el parser de señales `[WEB: SI]/[CONSULTA: ...]` de la Arquitectura C+D (`modulos/senal_web.py`), incluyendo el marcador `[TEMA WEB ANTERIOR]`.
+4. **Captura de pantalla** — los verbos de visión ("mirá", "fijate", "qué ves", "capturá") disparan `capturar_pantalla()` de `modulos/vision.py` (multimonitor por número).
+
+Solo si nada interceptó, se arma el contexto completo y se llama al modelo.
+
+### 7.3 Ensamblado del contexto (en orden)
+
+1. **Modo actual** — `MODO_ACTUAL = config.estado.modo_actual` (chat/mentor/gamer/general). En `gamer` se inyecta `texto_perfil_gamer_para_prompt()`; en `mentor` se usa `obtener_prompt_mentor`.
+2. **Prompt base por modo** — `obtener_prompt_*` en `modulos/prompts.py` (incluye reglas de comandos, visión, respuesta corta).
+3. **Contexto de ventanas/workspace** — `texto_workspace`, `texto_snapshot`, `texto_doc_volatil` pasan como argumentos al prompt (prompts.py:129).
+4. **Recuperación automática de memoria** — Fase 4: si no es comando directo, se recupera memoria relevante de la Bóveda/ChromaDB y se agrega a `contexto_sistema` (ia.py:614-622).
+5. **Selección de modelo** — `config.estado.modelo_seleccionado`: Gemini 3.1 Flash Lite (default) / Pro (High) / 3.6 Flash (High), DeepSeek Reasoner, Groq (Llama 3.3/3.1, Qwen, GPT-OSS). En `gamer` el default es Gemini Flash Lite.
+6. **Inyección de skills** — `gestor_skills.obtener_skill_relevante(texto_usuario)` por palabras clave hardcodeadas (gestor_skills.py). Si activa, se inyecta `[SKILL ACTIVADA: <nombre>]` + `instructions.md` al final del contexto. **Detalle clave:** con skill activa se **deshabilitan las tools MCP** (`if not skill_activa: gemini_config.tools = lista_herramientas_mcp`).
+7. **Herencia temática web** — si hay evidencia previa (`config.estado.obtener_evidencia_web()`), se agrega `texto_marcador_tema_web_anterior()` (instrucción semántica para el LLM, no heurística Python).
+8. **Multimodal** — las imágenes capturadas se pasan como `Part.from_bytes(...)` directo (FIX google-genai v2: PIL no se envuelve en Part ni Content).
+
+### 7.4 Verificación web C+D y segunda generación
+
+- El LLM decide con la señal estructurada `[WEB: SI]`/`[WEB: NO]` + `[CONSULTA: ...]`; Python solo ejecuta la búsqueda.
+- `modulos/senal_web.py`: oculta las señales del streaming, parsea, fusiona con `buscar:` legacy y emite el marcador `[TEMA WEB ANTERIOR]`.
+- `modulos/mensajes_web.py`: segunda generación con **evidencia** y persistencia separada. El borrador provisional (`marcarRespuestaProvisional`) se reemplaza al final por la respuesta verificada (ia.py:1181-1211, web_bridge.py:231-241).
+
+### 7.5 Radar de proyecto (memoria sincronizada)
+
+`iniciar_radar_proyecto` (memoria.py:486-498) monta un watchdog `watchdog.Observer` sobre la carpeta de trabajo con **debounce de 500 ms**. Al confirmar un cambio de archivo:
+
+1. Detecta si la ruta está en `archivos_memoria` (config.estado).
+2. Elimina el archivo de la copia de memoria.
+3. Remueve del `contexto_chat` todo mensaje que contenga `[CONTENIDO DE '<ruta>']:` — **vía `reemplazar_contexto_chat()`, nunca asignación directa** (FIX documentado de condición de carrera: el handler corre en un `threading.Timer` mientras el hilo principal puede estar en `agregar_mensaje_chat()`).
+4. Notifica por `ui_callback`.
+
+### 7.6 Perfiles derivados (extracción post-conversación)
+
+- `perfil_gamer.py: extraer_y_procesar_sesion_gamer` parsea los últimos mensajes con el LLM, los filtra contra el sistema de olvidos (`olvidos.py`, prefijos `funcional:`, `vida:`, `mentor:`, `gamer:`, `boveda:`) y persiste en `perfil_gamer.json` (thread-safe, corrupto → reset).
+- `resumen_memoria.py` transforma todos los perfiles (usuario, mentor, gamer, bóveda) en secciones curadas para la UI con ids canónicos (`mentor:`, `gamer:`), y enruta edición/olvido a la implementación única por prefijo.
+
+### 7.7 Observaciones de la auditoría
+
+1. **La regla `if not skill_activa: tools = MCP` es un tradeoff importante**: activar una skill le quita a Gemini las tools MCP (la herramienta principal de "hacer"). No hay fallback ni aviso al usuario.
+2. **Skills = 3** (`control_audio`, `busqueda_web_actualizada`, `recordatorios`), todas con `instructions.md`. La activación por keyword sigue hardcodeada en `gestor_skills.py`.
+3. **El routing a modelo y la inyección de contexto están acoplados en una sola función gigante** (`procesar_mensaje`, ~700 líneas): intercepción, ensamblado, multimodal y stream. Es el archivo más riesgoso de tocar.
+4. **`escanear_proyecto:` (crawler + Gemini → `PROJECT_STATE.md`) es un comando directo**: se resuelve en `controlador_acciones` y **saltea** tanto la recuperación automática de memoria como el envío al LLM general — ojo porque genera costos de tokens cuando corre en modo "crawler + Gemini".

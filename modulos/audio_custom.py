@@ -79,7 +79,7 @@ def limpiar_texto_para_voz(texto):
         texto_final = texto_final.replace(viejo, nuevo)
     return texto_final
 
-def _agrupar_oraciones(oraciones, min_chars=80):
+def _agrupar_oraciones(oraciones, min_chars=30):
     grupos = []
     buffer = ""
     for o in oraciones:
@@ -434,15 +434,15 @@ def capturar_voz_micro(condicion_seguir_grabando=None):
         hablo_algo = [False]
         palabra_corte_detectada = [False]
 
-        # Reconocedor de palabra clave de corte en tiempo real vía Vosk.
-        # La palabra clave se corta SOLO si es la última palabra de la frase,
-        # así el usuario puede dar la instrucción completa antes de que corte.
+        # Reconocedor de palabras clave de corte en tiempo real vía Vosk.
+        # Soporta 'procede', 'corta', 'listo', 'proceda', 'cortar', etc.
         recognizer_corte = None
+        palabras_corte_list = list(set([PALABRA_CORTE_VOZ.lower(), "corta", "cortar", "proceda", "proceder", "listo", "terminar"]))
         try:
             from modulos.skills.wake_word.gestor_wake_word import gestor_wake_word
             if gestor_wake_word._modelo is not None:
                 import vosk, json
-                gramatica_corte = json.dumps([PALABRA_CORTE_VOZ, "[unk]"])
+                gramatica_corte = json.dumps(palabras_corte_list + ["[unk]"])
                 recognizer_corte = vosk.KaldiRecognizer(gestor_wake_word._modelo, FS_AUDIO, gramatica_corte)
                 recognizer_corte.SetWords(False)
         except Exception:
@@ -452,8 +452,11 @@ def capturar_voz_micro(condicion_seguir_grabando=None):
             audio_data.append(indata.copy())
             bytes_audio = indata.tobytes()
             try:
-                rms = np.sqrt(np.mean(indata.astype(np.float32)**2))
-                if rms > 350:  # Umbral de voz activa
+                from config import RMS_UMBRAL_VOZ
+                # indata es int16
+                indata_float = indata.astype(np.float32)
+                rms = float(np.sqrt(np.mean(indata_float**2))) if indata_float.size else 0.0
+                if rms >= RMS_UMBRAL_VOZ:  # Umbral de voz activa
                     hablo_algo[0] = True
                     ultimo_sonido[0] = time.time()
                 
@@ -465,16 +468,15 @@ def capturar_voz_micro(condicion_seguir_grabando=None):
                         part = json.loads(recognizer_corte.PartialResult())
                         txt = part.get("partial", "").lower()
                     
-                    # La palabra clave debe ser la ÚLTIMA palabra reconocida
-                    # ("abre chrome procede") corta, pero ("si procede...") no.
+                    # La palabra de corte debe ser la ÚLTIMA palabra reconocida
                     palabras_txt = txt.split()
-                    if palabras_txt and palabras_txt[-1] == PALABRA_CORTE_VOZ:
+                    if palabras_txt and palabras_txt[-1] in palabras_corte_list:
                         palabra_corte_detectada[0] = True
             except Exception:
                 pass
 
         try:
-            with sd.InputStream(samplerate=FS_AUDIO, channels=1, callback=callback):
+            with sd.InputStream(samplerate=FS_AUDIO, channels=1, dtype='int16', callback=callback):
                 time.sleep(0.2)
                 inicio = time.time()
                 while condicion_seguir_grabando():
@@ -515,10 +517,11 @@ def capturar_voz_micro(condicion_seguir_grabando=None):
         if os.path.exists(archivo_temporal):
             os.remove(archivo_temporal)
 
-        # Despojar la palabra clave de corte al final del texto transcrito si estuviera presente
+        # Despojar palabras de corte al final del texto transcrito si estuvieran presentes
         if texto:
+            patron_corte = r'|'.join([re.escape(w) for w in palabras_corte_list])
             texto = re.sub(
-                rf'\s*\b({re.escape(PALABRA_CORTE_VOZ)})\b[\s\.\,\!\?]*$',
+                rf'\s*\b({patron_corte})\b[\s\.\,\!\?]*$',
                 '', texto, flags=re.IGNORECASE
             ).strip()
 

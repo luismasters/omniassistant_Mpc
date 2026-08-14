@@ -14,7 +14,7 @@
   <!-- Marked.js (Markdown parser) -->
   <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
   <!-- Styles -->
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=3">
 </head>
 <body class="theme-chat">
   <div class="app-container">
@@ -33,15 +33,25 @@
           <span id="emoStatusText">REPOSO</span>
         </div>
 
-        <!-- STAGE AVATAR HOLOGRÁFICO (HoloAvatar v2) -->
+        <!-- STAGE AVATAR (Animado Robot A10 por defecto / HoloAvatar v2) -->
         <div class="avatar-section" id="avatarStageContainer">
-          <canvas id="particle-canvas" width="320" height="320" class="particle-layer" aria-hidden="true"></canvas>
+          <!-- Selector de Modo de Avatar -->
+          <div class="avatar-mode-toggle" id="avatarModeToggle">
+            <button class="avatar-toggle-btn active" id="btnModeAnime" title="Ver Avatar Robot Animado (A10)">🤖 Avatar</button>
+            <button class="avatar-toggle-btn" id="btnModeHolo" title="Ver Avatar Holográfico">🔮 Holo</button>
+          </div>
 
-          <div class="ring-outer" id="ring-outer"></div>
-          <div class="ring-mid" id="ring-mid"></div>
-          <div class="ring-inner" id="ring-inner"></div>
+          <!-- Escenario 1: AVATAR ROBOT ANIMADO A10 (Por defecto) -->
+          <div class="avatar-stage-layer" id="animeAvatarStage"></div>
 
-          <canvas id="avatar-canvas" width="220" height="220" aria-label="Avatar holográfico de estado de IA"></canvas>
+          <!-- Escenario 2: AVATAR HOLOGRÁFICO V2 (HoloAvatar) -->
+          <div class="avatar-stage-layer hidden" id="holoAvatarStage">
+            <canvas id="particle-canvas" width="320" height="320" class="particle-layer" aria-hidden="true"></canvas>
+            <div class="ring-outer" id="ring-outer"></div>
+            <div class="ring-mid" id="ring-mid"></div>
+            <div class="ring-inner" id="ring-inner"></div>
+            <canvas id="avatar-canvas" width="220" height="220" aria-label="Avatar holográfico de estado de IA"></canvas>
+          </div>
 
           <div class="status-overlay">
             <div class="status-label" id="status-label">REPOSO</div>
@@ -50,44 +60,27 @@
           </div>
         </div>
 
-        <!-- MÉTRICAS NEURALES HUD -->
-        <div class="metrics-mini-panel">
-          <div class="metric-row">
-            <span class="metric-label">CARGA NEURAL</span>
-            <div class="metric-bar"><div class="metric-fill" id="metric-neural" style="width:12%"></div></div>
-            <span class="metric-value mono" id="val-neural">12%</span>
-          </div>
-          <div class="metric-row">
-            <span class="metric-label">FLUJO DE AUDIO</span>
-            <div class="metric-bar"><div class="metric-fill" id="metric-audio" style="width:0%"></div></div>
-            <span class="metric-value mono" id="val-audio">0%</span>
-          </div>
-          <div style="display:none;">
-            <div class="metric-fill" id="metric-resp" style="width:0%"></div><span id="val-resp">0%</span>
-            <div class="metric-fill" id="metric-exec" style="width:0%"></div><span id="val-exec">0%</span>
-          </div>
-        </div>
-
-        <!-- TELEMETRÍA OCULTA -->
+        <!-- TELEMETRÍA Y MÉTRICAS OCULTAS (Para mantener compatibilidad con bindings JS) -->
         <div style="display:none;">
+          <div class="metric-fill" id="metric-neural" style="width:0%"></div><span id="val-neural">0%</span>
+          <div class="metric-fill" id="metric-audio" style="width:0%"></div><span id="val-audio">0%</span>
+          <div class="metric-fill" id="metric-resp" style="width:0%"></div><span id="val-resp">0%</span>
+          <div class="metric-fill" id="metric-exec" style="width:0%"></div><span id="val-exec">0%</span>
           <span id="clock">--:--:--</span>
           <span id="uptime">00:00:00</span>
           <span id="fps-counter">60fps</span>
           <span id="scroll-text"></span>
         </div>
-
-        <!-- RELOJ DIGITAL -->
-        <div class="digital-clock" id="digitalClock">--:--:--</div>
       </div>
 
-      <!-- MODOS DE OPERACIÓN -->
+      <!-- CAPACIDADES (antes "Modos") -->
       <div class="sidebar-section">
-        <div class="section-title">Modo Activo</div>
+        <div class="section-title">Capacidades</div>
         <div class="mode-buttons-group">
           <button class="mode-btn active" id="btnModeChat" data-mode="chat">
             <div class="mode-btn-icon">💬</div>
             <div class="mode-btn-content">
-              <span class="mode-btn-label">Chat General</span>
+              <span class="mode-btn-label">General</span>
               <span class="mode-btn-sub">Asistente multimodal</span>
             </div>
             <span class="mode-active-dot"></span>
@@ -95,7 +88,7 @@
           <button class="mode-btn" id="btnModeMentor" data-mode="mentor">
             <div class="mode-btn-icon">🎓</div>
             <div class="mode-btn-content">
-              <span class="mode-btn-label">Modo Mentor</span>
+              <span class="mode-btn-label">Mentoría</span>
               <span class="mode-btn-sub">Guía técnica & carrera</span>
             </div>
             <span class="mode-active-dot"></span>
@@ -130,14 +123,14 @@
       <!-- GAMING & GAMEPAD -->
       <div class="sidebar-section">
         <div class="section-title">Gaming</div>
-        <button class="mode-btn gaming-btn" id="btnModeGamer">
-          <div class="mode-btn-icon">🎮</div>
-          <div class="mode-btn-content">
-            <span class="mode-btn-label" id="lblGamerMode">Modo Gaming</span>
-            <span class="mode-btn-sub" id="lblGamepadStatus">Sin mando detectado</span>
-          </div>
-          <span class="mode-active-dot gaming-dot"></span>
-        </button>
+          <button class="mode-btn gaming-btn" id="btnModeGamer">
+            <div class="mode-btn-icon">🎮</div>
+            <div class="mode-btn-content">
+              <span class="mode-btn-label" id="lblGamerMode">Gaming</span>
+              <span class="mode-btn-sub" id="lblGamepadStatus">Sin mando detectado</span>
+            </div>
+            <span class="mode-active-dot gaming-dot"></span>
+          </button>
         <div class="select-wrapper" style="margin-top: 4px;">
           <select id="gamepadSelect" class="hud-select" title="Seleccionar mando para Modo Gaming">
             <option value="-1">Escaneando mandos...</option>
@@ -165,10 +158,18 @@
       <!-- HEADER -->
       <header class="chat-header">
         <div class="header-info">
-          <h1 id="headerModeTitle">💬 Chat General</h1>
-          <p id="headerModeSubtitle">Asistente IA multimodal con integración MCP activa</p>
+          <h1 id="headerModeTitle">💬 Argus</h1>
+          <p id="headerModeSubtitle">Asistente IA con capacidades contextuales (general, mentoría, gaming)</p>
         </div>
         <div class="header-actions">
+          <!-- CHIP CAPACIDAD ACTIVA (auto/fijado, Fase D) -->
+          <span class="cap-chip" id="capacidadChip" title="Capacidad activa del turno. Click para fijar/liberar (pin).">
+            <span class="cap-icon" id="capacidadChipIcon">💬</span>
+            <span id="capacidadChipLabel">General</span>
+            <span class="cap-pin" id="capacidadChipPin" title="Click para fijar (📌) o volver a automático">⚡</span>
+          </span>
+          <!-- CHIP ESTADO MCP (herramientas según modelo/skill) -->
+          <span class="mcp-chip" id="mcpStatusChip" title="Herramientas MCP: solo se activan con modelo Gemini y sin skill activa en el turno.">🧩 MCP ✓</span>
           <!-- WIDGET DE CLIMA COMPACTO EN HEADER -->
           <div class="header-weather" id="weatherWidget">
             <span class="header-weather-icon" id="weatherIcon">🌤</span>
@@ -179,9 +180,15 @@
             <span class="header-weather-divider">·</span>
             <span class="header-weather-detail" id="weatherWind">💨 -- km/h</span>
           </div>
+          <!-- RELOJ DIGITAL EN NAVBAR -->
+          <div class="header-clock" id="headerClockWidget" title="Hora local del sistema">
+            <span class="header-clock-icon">🕒</span>
+            <span class="digital-clock" id="digitalClock">--:--:--</span>
+          </div>
           <span class="hotkey-badge">Presiona <strong>F8</strong> para hablar</span>
           <button class="icon-btn" id="btnReminders" title="Recordatorios (Agenda & Alertas)">⏰</button>
           <button class="icon-btn" id="btnUpdateMemoria" title="Actualizar memoria de perfil (Extraer datos de la sesión)">🧠</button>
+          <button class="icon-btn" id="btnRetomarHistorial" title="Retomar la última conversación guardada">↩️</button>
           <button class="icon-btn" id="btnClearContext" title="Limpiar contexto de IA (Reiniciar memoria del modelo)">🔄</button>
           <button class="icon-btn" id="btnClearChat" title="Limpiar pantalla (Borrar chat visible)">🗑️</button>
         </div>
@@ -226,7 +233,9 @@
             <div class="model-pill-wrapper">
               <select id="modelSelect" class="model-pill-select" title="Seleccionar modelo">
                 <option value="Por Defecto">Auto</option>
-                <option value="Gemini 3.1 Flash Lite">Flash Lite</option>
+                <option value="Gemini 3.5 Flash Lite">Flash Lite 3.5</option>
+                <option value="Gemini 3.1 Flash Lite">Flash Lite 3.1</option>
+                <option value="Gemini 3.6 Flash (High)">Flash 3.6</option>
                 <option value="DeepSeek Reasoner">DeepSeek</option>
                 <option value="Groq Llama 3.3 70B">Llama 70B</option>
                 <option value="Groq Llama 3.1 8B">Llama 8B</option>
@@ -395,12 +404,44 @@
       </div>
 
       <div class="modal-body memoria-body">
+        <div class="memoria-ingesta">
+          <button class="hud-btn-primary" id="btnGuardarArchivoBoveda" title="Guardar un PDF o archivo de texto en la bóveda (sin gastar contexto)">📄 Guardar archivo en bóveda</button>
+          <button class="hud-btn-secondary" id="btnGuardarNotaBoveda" title="Guardar una nota corta en la bóveda">✍️ Guardar nota</button>
+          <div id="ingestaFeedback" class="ingesta-feedback" style="display:none;"></div>
+        </div>
         <div class="memoria-empty" id="memoriaEmpty" style="display:none;">
           Todavía no tengo mucha información sobre vos. Hablá conmigo y la iré anotando.
         </div>
         <div id="memoriaSections" class="memoria-sections"></div>
         <div class="memoria-footer">
           Estos datos viven en tu PC y se actualizan con cada conversación.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MODAL GUARDAR NOTA EN BÓVEDA ──────────────────────── -->
+  <div class="modal-overlay hidden" id="modalGuardarNota">
+    <div class="modal-card modal-card-memoria">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span class="modal-icon">✍️</span>
+          <div>
+            <h3>Guardar nota en la bóveda</h3>
+            <span class="modal-subtitle">Se guarda en memoria a largo plazo, sin gastar contexto.</span>
+          </div>
+        </div>
+        <button class="modal-close-btn" id="btnCloseGuardarNota">✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="memoria-nota-label" for="notaEtiquetaInput">Etiqueta (opcional):</label>
+        <input type="text" id="notaEtiquetaInput" class="memoria-nota-input" placeholder="p.ej. Receta, Proyecto, Preferencia" />
+        <label class="memoria-nota-label" for="notaTextoInput">Contenido:</label>
+        <textarea id="notaTextoInput" class="memoria-nota-textarea" rows="6" placeholder="Escribí lo que querés que Argus recuerde..."></textarea>
+        <div id="notaFeedback" class="ingesta-feedback" style="display:none;"></div>
+        <div class="memoria-confirm-actions">
+          <button class="hud-btn-secondary" id="btnCancelarNota">Cancelar</button>
+          <button class="hud-btn-primary" id="btnConfirmarNota">💾 Guardar en bóveda</button>
         </div>
       </div>
     </div>
@@ -469,7 +510,9 @@
     </div>
   </div>
 
+  <script src="anime.min.js"></script>
   <script src="emo_face.js"></script>
+  <script src="avatar_anime.js"></script>
   <script src="avatar_holo.js"></script>
   <script src="app.js"></script>
 </body>

@@ -1,9 +1,9 @@
 {
-  "juego_activo": "Street Fighter VI",
+  "juego_activo": "Grim Dawn",
   "juegos": {
     "Grim Dawn": {
       "progreso_historico": "nivel 25",
-      "ultima_sesion": "2026-07-26",
+      "ultima_sesion": "2026-08-10",
       "contenido_poseido": "juego base, Ashes of Malmouth, Forgotten Gods",
       "personaje_clase": "Caballero de la Muerte",
       "nivel_actual": "6",
@@ -33,7 +33,12 @@
       "dificultad": "Veterano",
       "build_tipo": "Físico/Éter",
       "habilidades_secundarias": "Enlace espectral, Ira espectral",
-      "rama_maestria": "Nigromante"
+      "rama_maestria": "Nigromante",
+      "volumen": "10%",
+      "equipo_equipado": "Machacadora de Voldrak",
+      "equipo_descartado": "Hachuela de obsidiana",
+      "habilidad_secundaria": "Pacto de Mogdrogen",
+      "bono_equipo": "+184% daño físico, +7% velocidad de ataque"
     }
   }
 }

@@ -30,6 +30,7 @@ def sin_perfiles(monkeypatch):
     monkeypatch.setattr(rm, "_cargar_perfil_usuario", lambda: perfil_usuario)
     monkeypatch.setattr(rm, "_cargar_perfil_mentor", lambda: {})
     monkeypatch.setattr(rm, "_cargar_perfil_gamer", lambda: {})
+    monkeypatch.setattr(rm, "_seccion_memoria", lambda: [])
     return rm
 
 
@@ -42,6 +43,7 @@ def con_perfiles(monkeypatch):
         monkeypatch.setattr(rm, "_cargar_perfil_usuario", lambda: perfil_usuario)
         monkeypatch.setattr(rm, "_cargar_perfil_mentor", lambda: (mentor or {}))
         monkeypatch.setattr(rm, "_cargar_perfil_gamer", lambda: (gamer or {}))
+        monkeypatch.setattr(rm, "_seccion_memoria", lambda: [])
         return rm
     _aplicar()
     return _aplicar
@@ -478,14 +480,20 @@ def test_seccion_memoria_lista_recuerdos_con_no_editable(sin_perfiles, monkeypat
         assert set(e.keys()) == {"id", "etiqueta", "texto", "fecha", "reciente", "destacado", "no_editable"}
 
 
-def test_seccion_memoria_boveda_offline_no_rompe(sin_perfiles, monkeypatch):
+def test_seccion_memoria_boveda_offline_no_rompe(monkeypatch):
     """
     Si la bóveda de ChromaDB no está disponible (import falla), la sección
     se omite y el panel NO se rompe (el import de modulos.memoria es lazy).
+    Este test ejercita la ruta real (sin el stub de `_seccion_memoria` de los
+    fixtures) para no depender del estado cacheado de otros tests de la suite.
     """
     import sys
 
+    perfil_usuario = {"funcional": {c: "" for c in ESQUEMA_FUNCIONAL_CLAVES}, "vida_personal": []}
+    monkeypatch.setattr(rm, "_cargar_perfil_usuario", lambda: perfil_usuario)
+    monkeypatch.setattr(rm, "_cargar_perfil_mentor", lambda: {})
+    monkeypatch.setattr(rm, "_cargar_perfil_gamer", lambda: {})
     monkeypatch.setitem(sys.modules, "modulos.memoria", None)
-    res = sin_perfiles.preparar_secciones()
+    res = rm.preparar_secciones()
     assert "memoria" not in [s["id"] for s in res["secciones"]]
     assert res["secciones"] == []

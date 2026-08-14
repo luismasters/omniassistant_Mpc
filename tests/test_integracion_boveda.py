@@ -104,6 +104,7 @@ def memoria_real_chromadb(monkeypatch, tmp_path):
 
     fake_config = types.ModuleType("config")
     fake_config.estado = types.SimpleNamespace()
+    fake_config.MEMORIA_TOP_K = 3
     monkeypatch.setitem(sys.modules, "config", fake_config)
 
     # ── chromadb real, cliente redirigido a tmp_path ─────────────────
@@ -315,3 +316,91 @@ def test_invalidar_familia_inexistente_comportamiento_actual(memoria_real_chroma
     assert exito is True
     # Y no destruyó nada de la familia real.
     assert len(coleccion.get()["ids"]) == 1
+
+
+# ─── 5. buscar_contexto_con_detalle (Fase 4) ────────────────────────────────
+
+def test_buscar_contexto_con_detalle_devuelve_metadata(memoria_real_chromadb):
+    modulo, path = memoria_real_chromadb
+    etiqueta = "Memoria_IA"
+    contenido = "El usuario prefiere trabajar de noche"
+
+    assert modulo.guardar_recuerdo(
+        texto_a_guardar=contenido, etiqueta_tema=etiqueta,
+        origen_fuente="memoria_manual",
+    ) is True
+
+    detalle = modulo.buscar_contexto_con_detalle(contenido, cantidad_resultados=3)
+
+    assert detalle, "debe recuperar al menos el documento guardado"
+    primero = detalle[0]
+    for clave in ("documento", "origen_id", "origen_fuente", "etiqueta", "fecha_guardado", "distancia"):
+        assert clave in primero, f"falta la clave '{clave}'"
+    assert primero["documento"] == contenido
+    assert primero["origen_id"].startswith("boveda:")
+    assert primero["origen_fuente"] == "memoria_manual"
+    assert primero["etiqueta"] == etiqueta
+    assert isinstance(primero["distancia"], float)
+
+
+def test_buscar_contexto_con_detalle_sin_datos_devuelve_vacio(memoria_real_chromadb):
+    modulo, path = memoria_real_chromadb
+    assert modulo.buscar_contexto_con_detalle("consulta sin datos", cantidad_resultados=3) == []
+
+
+def _esperar_detalle_anticipado(modulo, consulta, timeout=10.0):
+    """Espera (con poll) a que el hilo de prefetch guarde el detalle."""
+    import time
+
+    limite = time.time() + timeout
+    while time.time() < limite:
+        with modulo._anticipado_lock:
+            if (
+                modulo._anticipado_consulta == consulta
+                and modulo._resultado_anticipado_detalle is not None
+            ):
+                return modulo._resultado_anticipado_detalle
+        time.sleep(0.05)
+    return None
+
+
+def test_prefetch_anticipada_guarda_detalle_y_texto(memoria_real_chromadb):
+    modulo, path = memoria_real_chromadb
+    etiqueta = "Memoria_IA"
+    contenido = "El usuario migró el backend a FastAPI"
+
+    assert modulo.guardar_recuerdo(
+        texto_a_guardar=contenido, etiqueta_tema=etiqueta
+    ) is True
+
+    consulta = "backend FastAPI"
+    modulo.iniciar_busqueda_anticipada(consulta)
+
+    detalle = _esperar_detalle_anticipado(modulo, consulta)
+    assert detalle is not None, "el hilo de prefetch no terminó a tiempo"
+    assert any(d["documento"] == contenido for d in detalle)
+
+    with modulo._anticipado_lock:
+        texto = modulo._resultado_anticipado
+    assert texto is not None
+    assert len(texto) == 1
+    assert contenido in texto[0]
+
+
+def test_obtener_resultado_anticipado_detalle_cae_a_busqueda_directa(memoria_real_chromadb):
+    modulo, path = memoria_real_chromadb
+    etiqueta = "Memoria_IA"
+    contenido = "Recuerdo de prueba para el fallback"
+
+    assert modulo.guardar_recuerdo(
+        texto_a_guardar=contenido, etiqueta_tema=etiqueta
+    ) is True
+
+    # Sin prefetch en curso (consulta distinta) → debe caer a la búsqueda directa.
+    with modulo._anticipado_lock:
+        modulo._anticipado_consulta = "otra consulta"
+        modulo._resultado_anticipado_detalle = None
+
+    detalle = modulo.obtener_resultado_anticipado_detalle(contenido)
+    assert detalle
+    assert any(d["documento"] == contenido for d in detalle)

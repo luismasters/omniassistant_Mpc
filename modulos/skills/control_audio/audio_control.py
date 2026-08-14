@@ -3,6 +3,28 @@ audio_control.py — Funciones de control de audio para Argus.
 Usa pycaw (Windows Core Audio API) para control de volumen maestro y por app.
 Requiere: pip install pycaw comtypes
 """
+# Parche de protección anti-crash COM durante Recolección de Basura (Garbage Collection).
+# Reemplaza __del__ en clases de comtypes por un no-op seguro para evitar que la llamada
+# C a Release() provoque 'Windows fatal exception: access violation' en el GC de Python.
+try:
+    import comtypes
+    import comtypes._post_coinit.unknwn
+    def _no_op_del(self):
+        pass
+    for target_cls in (
+        getattr(comtypes, 'IUnknown', None),
+        getattr(comtypes, '_compointer_base', None),
+        getattr(comtypes._post_coinit.unknwn, '_IUnknown', None),
+        getattr(comtypes._post_coinit.unknwn, 'IUnknown', None)
+    ):
+        if target_cls:
+            try:
+                target_cls.__del__ = _no_op_del
+            except Exception:
+                pass
+except Exception:
+    pass
+
 import subprocess
 from modulos.logger import logger
 
@@ -207,106 +229,271 @@ def silenciar(silenciar: bool = True) -> str:
 
 # ─── VOLUMEN POR APLICACIÓN ───────────────────────────────────────────────────
 
-def _encontrar_sesion(nombre_app: str):
-    """Busca la sesión de audio de una app por nombre (parcial, case-insensitive)."""
-    import comtypes
+def _obtener_pids_por_titulo_ventana(nombre_lower: str) -> set:
+    """Devuelve un conjunto de PIDs de ventanas visibles cuyo título contiene nombre_lower."""
+    pids = set()
     try:
-        comtypes.CoInitialize()
-    except OSError:
+        import win32gui, win32process
+        def enum_cb(hwnd, _):
+            if win32gui.IsWindowVisible(hwnd):
+                title = win32gui.GetWindowText(hwnd).lower()
+                if title and nombre_lower in title:
+                    _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                    pids.add(pid)
+        win32gui.EnumWindows(enum_cb, None)
+    except Exception:
         pass
-    from pycaw.pycaw import AudioUtilities
-    sesiones = AudioUtilities.GetAllSessions()
-    nombre_lower = nombre_app.lower()
-    for sesion in sesiones:
-        if sesion.Process:
-            proc_name = sesion.Process.name().lower()
-            if nombre_lower in proc_name:
-                return sesion
-    return None
+    return pids
 
 
 def obtener_volumen_app(nombre_app: str) -> str:
     """Devuelve el volumen actual de una aplicación específica."""
+    nombre_clean = _limpiar_nombre_dispositivo(nombre_app)
+    if not nombre_clean:
+        return "⚠️ Nombre de aplicación no especificado."
+
+    import comtypes
+    co_initted = False
     try:
-        from pycaw.pycaw import ISimpleAudioVolume
-        sesion = _encontrar_sesion(nombre_app)
-        if not sesion:
-            return f"No encontré ninguna app activa con el nombre '{nombre_app}'."
-        vol = sesion._ctl.QueryInterface(ISimpleAudioVolume)
-        nivel = round(vol.GetMasterVolume() * 100)
-        muted = vol.GetMute()
-        estado = " (silenciada)" if muted else ""
-        proc = sesion.Process.name()
-        return f"Volumen de {proc}: {nivel}%{estado}"
+        try:
+            comtypes.CoInitialize()
+            co_initted = True
+        except Exception:
+            pass
+
+        from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume
+        nombre_lower = nombre_clean.lower()
+        pids_objetivo = _obtener_pids_por_titulo_ventana(nombre_lower)
+
+        sesiones = AudioUtilities.GetAllSessions()
+        for sesion in sesiones:
+            try:
+                if not sesion:
+                    continue
+                proc = nombre_clean
+                match = False
+                if getattr(sesion, 'Process', None):
+                    try:
+                        pname = sesion.Process.name()
+                        proc = pname
+                        pstem = pname.lower().rsplit('.', 1)[0]
+                        if nombre_lower in pname.lower() or nombre_lower in pstem or pstem in nombre_lower:
+                            match = True
+                        if not match and sesion.Process.pid in pids_objetivo:
+                            match = True
+                    except Exception:
+                        pass
+
+                if match and getattr(sesion, '_ctl', None):
+                    try:
+                        vol = sesion._ctl.QueryInterface(ISimpleAudioVolume)
+                        if vol:
+                            nivel = round(vol.GetMasterVolume() * 100)
+                            muted = vol.GetMute()
+                            estado = " (silenciada)" if muted else ""
+                            return f"Volumen de {proc}: {nivel}%{estado}"
+                    except Exception as e:
+                        logger.warning(f"Error COM consultando volumen de {proc}: {e}")
+            except Exception:
+                continue
+
+        return f"No encontré ninguna app activa con el nombre '{nombre_clean}'."
     except ImportError:
-        return "Error: pycaw no está instalado. Ejecutá: pip install pycaw"
+        return "Error: pycaw no está instalado."
     except Exception as e:
-        logger.exception(f"Error obteniendo volumen de {nombre_app}")
-        return f"Error al obtener volumen de {nombre_app}: {e}"
+        logger.exception(f"Error obteniendo volumen de {nombre_clean}")
+        return f"Error al obtener volumen de {nombre_clean}: {e}"
+    finally:
+        if co_initted:
+            try:
+                comtypes.CoUninitialize()
+            except Exception:
+                pass
 
 
 def establecer_volumen_app(nombre_app: str, porcentaje: int) -> str:
     """Establece el volumen de una aplicación específica al porcentaje indicado."""
+    nombre_clean = _limpiar_nombre_dispositivo(nombre_app)
+    if not nombre_clean:
+        return "⚠️ Nombre de aplicación no especificado."
+    porcentaje = max(0, min(100, porcentaje))
+
+    import comtypes
+    co_initted = False
     try:
-        from pycaw.pycaw import ISimpleAudioVolume
-        porcentaje = max(0, min(100, porcentaje))
-        sesion = _encontrar_sesion(nombre_app)
-        if not sesion:
-            return f"No encontré ninguna app activa con el nombre '{nombre_app}'."
-        vol = sesion._ctl.QueryInterface(ISimpleAudioVolume)
-        vol.SetMasterVolume(porcentaje / 100.0, None)
-        proc = sesion.Process.name()
-        return f"✅ Volumen de {proc} establecido al {porcentaje}%"
+        try:
+            comtypes.CoInitialize()
+            co_initted = True
+        except Exception:
+            pass
+
+        from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume
+        nombre_lower = nombre_clean.lower()
+        pids_objetivo = _obtener_pids_por_titulo_ventana(nombre_lower)
+
+        sesiones = AudioUtilities.GetAllSessions()
+        for sesion in sesiones:
+            try:
+                if not sesion:
+                    continue
+                proc = nombre_clean
+                match = False
+                if getattr(sesion, 'Process', None):
+                    try:
+                        pname = sesion.Process.name()
+                        proc = pname
+                        pstem = pname.lower().rsplit('.', 1)[0]
+                        if nombre_lower in pname.lower() or nombre_lower in pstem or pstem in nombre_lower:
+                            match = True
+                        if not match and sesion.Process.pid in pids_objetivo:
+                            match = True
+                    except Exception:
+                        pass
+
+                if match and getattr(sesion, '_ctl', None):
+                    try:
+                        vol = sesion._ctl.QueryInterface(ISimpleAudioVolume)
+                        if vol:
+                            vol.SetMasterVolume(porcentaje / 100.0, None)
+                            return f"✅ Volumen de {proc} establecido al {porcentaje}%"
+                    except Exception as e:
+                        logger.warning(f"Error COM cambiando volumen de {proc}: {e}")
+            except Exception:
+                continue
+
+        return f"No encontré ninguna app activa con el nombre '{nombre_clean}'."
     except ImportError:
-        return "Error: pycaw no está instalado. Ejecutá: pip install pycaw"
+        return "Error: pycaw no está instalado."
     except Exception as e:
-        logger.exception(f"Error estableciendo volumen de {nombre_app}")
-        return f"Error al establecer volumen de {nombre_app}: {e}"
+        logger.exception(f"Error estableciendo volumen de {nombre_clean}")
+        return f"Error al establecer volumen de {nombre_clean}: {e}"
+    finally:
+        if co_initted:
+            try:
+                comtypes.CoUninitialize()
+            except Exception:
+                pass
 
 
 def silenciar_app(nombre_app: str, silenciar_flag: bool = True) -> str:
     """Silencia o activa el audio de una aplicación específica."""
+    nombre_clean = _limpiar_nombre_dispositivo(nombre_app)
+    if not nombre_clean:
+        return "⚠️ Nombre de aplicación no especificado."
+
+    # Intento 1: nircmd (inmune a COM C crashes)
     try:
-        from pycaw.pycaw import ISimpleAudioVolume
-        sesion = _encontrar_sesion(nombre_app)
-        if not sesion:
-            return f"No encontré ninguna app activa con el nombre '{nombre_app}'."
-        vol = sesion._ctl.QueryInterface(ISimpleAudioVolume)
-        vol.SetMute(1 if silenciar_flag else 0, None)
-        proc = sesion.Process.name()
-        accion = "silenciada" if silenciar_flag else "activada"
-        return f"✅ {proc} {accion}"
+        val = 1 if silenciar_flag else 0
+        cmd_nircmd = ["nircmd", "muteappvolume", nombre_clean, str(val)]
+        res = subprocess.run(cmd_nircmd, capture_output=True, text=True, timeout=2)
+        if res.returncode == 0 and not res.stderr.strip():
+            accion = "silenciada" if silenciar_flag else "activada"
+            return f"✅ {nombre_clean} {accion}"
+    except Exception:
+        pass
+
+    # Intento 2: pycaw aislado localmente con CoInitialize/CoUninitialize
+    import comtypes
+    co_initted = False
+    try:
+        try:
+            comtypes.CoInitialize()
+            co_initted = True
+        except Exception:
+            pass
+
+        from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume
+        nombre_lower = nombre_clean.lower()
+        pids_objetivo = _obtener_pids_por_titulo_ventana(nombre_lower)
+
+        sesiones = AudioUtilities.GetAllSessions()
+        for sesion in sesiones:
+            try:
+                if not sesion:
+                    continue
+                proc = nombre_clean
+                match = False
+                if getattr(sesion, 'Process', None):
+                    try:
+                        pname = sesion.Process.name()
+                        proc = pname
+                        pstem = pname.lower().rsplit('.', 1)[0]
+                        if nombre_lower in pname.lower() or nombre_lower in pstem or pstem in nombre_lower:
+                            match = True
+                        if not match and sesion.Process.pid in pids_objetivo:
+                            match = True
+                    except Exception:
+                        pass
+
+                if match and getattr(sesion, '_ctl', None):
+                    try:
+                        vol = sesion._ctl.QueryInterface(ISimpleAudioVolume)
+                        if vol:
+                            vol.SetMute(1 if silenciar_flag else 0, None)
+                            accion = "silenciada" if silenciar_flag else "activada"
+                            return f"✅ {proc} {accion}"
+                    except Exception as e:
+                        logger.warning(f"Error COM silenciando {proc}: {e}")
+            except Exception:
+                continue
+
+        return f"No se encontró la aplicación '{nombre_clean}' produciendo audio."
     except ImportError:
-        return "Error: pycaw no está instalado. Ejecutá: pip install pycaw"
+        return "Error: pycaw no está instalado."
     except Exception as e:
-        logger.exception(f"Error silenciando {nombre_app}")
-        return f"Error al silenciar {nombre_app}: {e}"
+        logger.exception(f"Error silenciando {nombre_clean}")
+        return f"Error al silenciar {nombre_clean}: {e}"
+    finally:
+        if co_initted:
+            try:
+                comtypes.CoUninitialize()
+            except Exception:
+                pass
 
 
 def listar_apps_con_audio() -> str:
     """Lista todas las aplicaciones que actualmente producen audio."""
+    import comtypes
+    co_initted = False
     try:
+        try:
+            comtypes.CoInitialize()
+            co_initted = True
+        except Exception:
+            pass
         from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume
         sesiones = AudioUtilities.GetAllSessions()
         apps = []
         for sesion in sesiones:
-            if sesion.Process:
-                try:
-                    vol = sesion._ctl.QueryInterface(ISimpleAudioVolume)
-                    nivel = round(vol.GetMasterVolume() * 100)
-                    muted = vol.GetMute()
-                    estado = " 🔇" if muted else ""
-                    apps.append(f"  • {sesion.Process.name()} — {nivel}%{estado}")
-                except Exception:
-                    apps.append(f"  • {sesion.Process.name()}")
+            try:
+                if sesion and getattr(sesion, 'Process', None) and getattr(sesion, '_ctl', None):
+                    pname = sesion.Process.name()
+                    try:
+                        vol = sesion._ctl.QueryInterface(ISimpleAudioVolume)
+                        nivel = round(vol.GetMasterVolume() * 100)
+                        muted = vol.GetMute()
+                        estado = " 🔇" if muted else ""
+                        apps.append(f"  • {pname} — {nivel}%{estado}")
+                    except Exception:
+                        apps.append(f"  • {pname}")
+            except Exception:
+                continue
         if apps:
             return "Apps con audio activo:\n" + "\n".join(apps)
         return "No hay aplicaciones produciendo audio en este momento."
     except ImportError:
-        return "Error: pycaw no está instalado. Ejecutá: pip install pycaw"
+        return "Error: pycaw no está instalado."
     except Exception as e:
         logger.exception("Error listando apps con audio")
         return f"Error al listar apps: {e}"
+    finally:
+        import gc
+        gc.collect()
+        if co_initted:
+            try:
+                comtypes.CoUninitialize()
+            except Exception:
+                pass
 
 
 # ─── CAMBIO NATIVO DE DISPOSITIVO POR DEFECTO (sin PowerShell externo) ───────
@@ -404,23 +591,71 @@ def _establecer_dispositivo_nativo(device_id: str) -> bool:
 # ─── DISPOSITIVOS DE SALIDA ───────────────────────────────────────────────────
 
 def listar_dispositivos_audio() -> str:
-    """Lista todos los dispositivos de salida de audio disponibles."""
+    """Lista todos los dispositivos de salida de audio disponibles de forma segura."""
+    import comtypes
+    co_initted = False
     try:
-        result = subprocess.run(
-            ["powershell", "-Command",
-             "Get-AudioDevice -List | Where-Object {$_.Type -eq 'Playback'} | Select-Object Index, Name, Default | Format-Table -AutoSize"],
-            capture_output=True, text=True, timeout=5
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return f"Dispositivos de audio disponibles:\n{result.stdout.strip()}"
-        # Fallback: pycaw enumerate
-        from pycaw.pycaw import AudioUtilities
-        dispositivos = AudioUtilities.GetAllDevices()
-        lista = [f"  • {d.FriendlyName}" for d in dispositivos if d.state == 1]
-        return "Dispositivos de audio activos:\n" + "\n".join(lista) if lista else "No se encontraron dispositivos."
-    except Exception as e:
-        logger.exception("Error listando dispositivos")
-        return f"Error al listar dispositivos: {e}"
+        try:
+            comtypes.CoInitialize()
+            co_initted = True
+        except Exception:
+            pass
+
+        # 1. Intento PowerShell Get-AudioDevice (si el módulo está instalado)
+        try:
+            result = subprocess.run(
+                ["powershell", "-ExecutionPolicy", "Bypass", "-Command",
+                 "Get-AudioDevice -List | Where-Object {$_.Type -eq 'Playback'} | Select-Object Index, Name, Default | Format-Table -AutoSize"],
+                capture_output=True, text=True, timeout=3
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return f"Dispositivos de audio disponibles:\n{result.stdout.strip()}"
+        except Exception:
+            pass
+
+        # 2. Intento sounddevice (nativo Python, 100% seguro sin COM crashes)
+        try:
+            import sounddevice as sd
+            dispositivos = sd.query_devices()
+            salidas = []
+            nombres_vistos = set()
+            for i, d in enumerate(dispositivos):
+                if d.get('max_output_channels', 0) > 0:
+                    name = d.get('name', '').strip()
+                    if name and name not in nombres_vistos:
+                        nombres_vistos.add(name)
+                        salidas.append(f"  • [{i}] {name}")
+            if salidas:
+                return "Dispositivos de salida de audio activos:\n" + "\n".join(salidas)
+        except Exception as e:
+            logger.warning(f"Error listando dispositivos vía sounddevice: {e}")
+
+        # 3. Intento pycaw con try/except defensivo en cada propiedad
+        try:
+            from pycaw.pycaw import AudioUtilities
+            dispositivos = AudioUtilities.GetAllDevices()
+            lista = []
+            for d in dispositivos:
+                try:
+                    if getattr(d, 'state', 0) == 1:
+                        fname = getattr(d, 'FriendlyName', 'Dispositivo de audio')
+                        lista.append(f"  • {fname}")
+                except Exception:
+                    continue
+            if lista:
+                return "Dispositivos de audio activos:\n" + "\n".join(lista)
+        except Exception as e:
+            logger.exception("Error listando dispositivos vía pycaw")
+
+        return "No se pudieron listar los dispositivos de audio."
+    finally:
+        import gc
+        gc.collect()
+        if co_initted:
+            try:
+                comtypes.CoUninitialize()
+            except Exception:
+                pass
 
 
 def _buscar_dispositivo_powershell(nombre_o_indice: str):
@@ -538,7 +773,7 @@ def cambiar_dispositivo_audio(nombre_o_indice: str) -> str:
     import comtypes
     try:
         comtypes.CoInitialize()
-    except OSError:
+    except Exception:
         pass
 
     try:
@@ -548,24 +783,36 @@ def cambiar_dispositivo_audio(nombre_o_indice: str) -> str:
         target = None
         if nombre_o_indice.strip().isdigit():
             idx = int(nombre_o_indice.strip()) - 1
-            activos = [d for d in devices if d.state == 1]
+            activos = []
+            for d in devices:
+                try:
+                    if getattr(d, 'state', 0) == 1:
+                        activos.append(d)
+                except Exception:
+                    continue
             if 0 <= idx < len(activos):
                 target = activos[idx]
         else:
             nombre_lower = nombre_o_indice.lower()
             for d in devices:
-                if d.state == 1 and nombre_lower in d.FriendlyName.lower():
-                    target = d
-                    break
+                try:
+                    if getattr(d, 'state', 0) == 1:
+                        fname = getattr(d, 'FriendlyName', '')
+                        if fname and nombre_lower in fname.lower():
+                            target = d
+                            break
+                except Exception:
+                    continue
 
         if target:
             device_id = getattr(target, 'id', None)
+            target_name = getattr(target, 'FriendlyName', nombre_o_indice)
             if device_id and _establecer_dispositivo_nativo(device_id):
-                return f"✅ Dispositivo cambiado a: {target.FriendlyName}"
+                return f"✅ Dispositivo cambiado a: {target_name}"
             if hasattr(target, 'SetAsDefault'):
                 try:
                     target.SetAsDefault()
-                    return f"✅ Dispositivo cambiado a: {target.FriendlyName}"
+                    return f"✅ Dispositivo cambiado a: {target_name}"
                 except Exception:
                     pass
     except Exception:

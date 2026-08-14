@@ -69,6 +69,44 @@ def main():
     logger.info("🚀 Iniciando Argus Copilot — Web HUD (PyWebView)")
     logger.info("==================================================")
 
+    # 0. Fase P — restaurar preferencias persistentes del usuario.
+    #    (workspace/modelo/visualización). Best-effort: si falla, defaults.
+    try:
+        from config import estado as _estado
+        from modulos.persistencia import (
+            cargar_preferencias, cargar_estado_proyecto,
+            iniciar_radar_persistente, marcar_sesiones_abiertas_como_aborted,
+            sesion_abierta_en_disco,
+        )
+        prefs = cargar_preferencias()
+        if prefs.get("modelo_seleccionado"):
+            _estado.cambiar_modelo_seleccionado(prefs["modelo_seleccionado"])
+        if prefs.get("modo_visualizacion"):
+            _estado.cambiar_modo_visualizacion(prefs["modo_visualizacion"])
+        if prefs.get("modo_actual"):
+            try:
+                _estado.cambiar_modo(prefs["modo_actual"])
+            except Exception:
+                pass
+        workspace = prefs.get("workspace_actual") or ""
+        if workspace and os.path.isdir(workspace):
+            _estado.cambiar_workspace(workspace)
+            # Recargar el estado del proyecto desde lo que YA existe en disco.
+            _estado.cambiar_snapshot(cargar_estado_proyecto(workspace))
+            # Re-armar el radar de cambios de archivos (estaba solo en main_gui).
+            try:
+                iniciar_radar_persistente(workspace)
+            except Exception as e:
+                logger.warning(f"[RADAR] No se pudo re-armar el radar: {e}")
+        # Marcar sesiones que quedaron abiertas por un cierre anormal previo.
+        aborted = marcar_sesiones_abiertas_como_aborted()
+        if aborted:
+            logger.info(f"[FASE P] Sesiones recuperadas de cierre anormal: {aborted}")
+        # Reabrir una sesión para el contexto activo si quedó historial en disco.
+        sesion_abierta_en_disco()
+    except Exception as e:
+        logger.warning(f"[FASE P] No se pudieron restaurar preferencias/sesión: {e}")
+
     # 1. Instanciar Puente de Comunicación (API Bridge)
     bridge = ArgusWebBridge()
 
@@ -233,11 +271,23 @@ def main():
                 pass
         try:
             from config import estado
+            # Fase P — flush del historial: cerrar la sesión del contexto activo.
+            try:
+                from modulos.persistencia import cerrar_sesion, armar_context_id
+                cerrar_sesion(armar_context_id(estado.modo_actual))
+            except Exception:
+                pass
             mensajes = estado.obtener_contexto_copia()
             if mensajes:
                 if estado.modo_actual == "mentor":
-                    from modulos.perfil_mentor import extraer_y_procesar_sesion_mentor
-                    extraer_y_procesar_sesion_mentor(mensajes, estado.workspace_actual)
+                    from modulos.progreso_mentoria import sesion_ya_procesada
+                    if sesion_ya_procesada(mensajes):
+                        logger.info("Sesión de mentoría ya persistida (cambio de modo previo); se omite re-examen al cierre.")
+                    else:
+                        from modulos.perfil_mentor import extraer_y_procesar_sesion_mentor
+                        extraer_y_procesar_sesion_mentor(mensajes, estado.workspace_actual)
+                        from modulos.progreso_mentoria import procesar_sesion_progreso
+                        procesar_sesion_progreso(mensajes)
                 elif estado.modo_actual == "gamer":
                     from modulos.perfil_gamer import extraer_y_procesar_sesion_gamer
                     extraer_y_procesar_sesion_gamer(mensajes)

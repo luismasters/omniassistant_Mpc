@@ -554,8 +554,11 @@ def rutear_hecho(hecho: dict, perfil: dict) -> dict:
 
     elif tipo == "proyecto":
         # Llamar directo a guardar_recuerdo() de memoria.py
-        # Los hechos de tipo "proyecto" NO tienen id de panel equivalente, así
-        # que NO llevan origen_id (no se pueden invalidar por un olvido único).
+        # Los hechos de tipo "proyecto" no tienen un id de panel equivalente
+        # (vida:* / funcional:* / ...), así que no se pasa origen_id y
+        # guardar_recuerdo() genera el determinista `boveda:*`. Esos recuerdos
+        # SÍ son invalidables individualmente por olvido boveda:* (Fase 3) y
+        # SÍ pueden ser recuperados por el recuperador automático (Fase 4).
         # Se etiqueta el origen como clasificación para capacidad futura.
         try:
             from modulos.memoria import guardar_recuerdo

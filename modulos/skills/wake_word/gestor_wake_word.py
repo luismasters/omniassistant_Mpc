@@ -42,29 +42,25 @@ except ImportError:
 # Constantes
 FS_AUDIO = 16000
 FRAME_LENGTH = 4096
-SILENCIO_MAX_GRABACION = 8
+SILENCIO_MAX_GRABACION = 20
 PALABRA_CLAVE = "ok argus"
 
 # Gramática de Vosk optimizada para reducir uso de CPU y maximizar detección fonética.
-# Solo variantes reales de "ok argus" — sin sufijos lejanos como "algo", "arcos",
-# "angus" que generan falsos positivos con frases coloquiales comunes.
+# Incluye la frase principal "ok argus" y sus variaciones fonéticas comunes.
 GRAMATICA_WAKE_WORD = [
-    "ok argos", "okey argos", "oquei argos", "okey argus",
+    "ok argus", "ok argos", "okey argos", "oquei argos", "okey argus",
     "oquei argus", "o cargos", "o cargo", "o cargus",
     "ocargos", "ocargo", "ocargus", "okargo", "okargos", "okargus",
     "corta", "[unk]"
 ]
 
-# Prefijos FUERTES: solo variantes claras de "ok". Se eliminan "o" y "k" sueltos
-# porque "o algo", "o cargos" en medio de frases coloquiales causan falsos positivos.
+# Prefijos FUERTES: variantes de "ok".
 PREFIJOS_OK = {"ok", "okey", "oquei"}
 
-# Sufijos realmente cercanos fonéticamente a "argus". Se eliminan
-# "algo", "arcos", "angus", "algus" por ser demasiado lejanos y coloquiales.
+# Sufijos cercanos fonéticamente a "argus".
 SUFIJOS_ARGUS = {"argus", "argos", "argo", "cargus", "cargos", "cargo"}
 
-# Variantes de frase completa que se permiten en resultados parciales.
-# Solo la literal "ok argus" dispara con parciales; el resto requiere frase cerrada.
+# Variantes directas aceptadas.
 VARIANTES_DIRECTAS = [
     "ok argus", "ok argos", "okey argos", "oquei argos", "okey argus",
     "oquei argus", "o cargos", "o cargo", "o cargus",
@@ -72,15 +68,10 @@ VARIANTES_DIRECTAS = [
 ]
 
 
-def _es_match_wake_word(texto: str, permitir_parcial: bool = True) -> bool:
+def _es_match_wake_word(texto: str) -> bool:
     """
     Comprueba si el texto reconocido coincide con 'ok argus' o sus variaciones
-    fonéticas equivales en el vocabulario en español de Vosk.
-
-    Args:
-        texto: texto reconocido por Vosk (lowercase)
-        permitir_parcial: si False, solo detecta la frase literal "ok argus"
-            (para resultados parciales ambiguos)
+    fonéticas equivalentes en el vocabulario en español de Vosk.
     """
     texto = texto.lower().strip()
     if not texto:
@@ -90,23 +81,14 @@ def _es_match_wake_word(texto: str, permitir_parcial: bool = True) -> bool:
     if not palabras:
         return False
 
-    # La coincidencia debe estar al INICIO del texto (o tras silencio).
-    # "quiero que ok argus abra chrome" NO debe disparar.
     primera_palabra = palabras[0]
 
-    # La frase literal "ok argus" SIEMPRE es aceptada si va al inicio
-    if primera_palabra == "ok" and len(palabras) >= 2 and palabras[1] == "argus":
-        return True
+    # Caso 1: Prefijo ok/okey/oquei + sufijo argus/argos/cargo
+    if len(palabras) >= 2:
+        if primera_palabra in PREFIJOS_OK and palabras[1] in SUFIJOS_ARGUS:
+            return True
 
-    # Para variantes fonéticas se requiere frase cerrada
-    if not permitir_parcial:
-        return False
-
-    # Caso 1: Prefijo fuerte + sufijo válido al inicio
-    if len(palabras) >= 2 and primera_palabra in PREFIJOS_OK and palabras[1] in SUFIJOS_ARGUS:
-        return True
-
-    # Caso 2: Variantes fonéticas de una sola palabra
+    # Caso 2: Variantes fonéticas de una sola palabra ("ocargos", "okargus", etc.)
     if primera_palabra in {"ocargos", "ocargo", "ocargus", "okargo", "okargos", "okargus"}:
         return True
 
@@ -115,6 +97,10 @@ def _es_match_wake_word(texto: str, permitir_parcial: bool = True) -> bool:
         par_inicial = f"{palabras[0]} {palabras[1]}"
         if par_inicial in ("o cargos", "o cargo", "o cargus"):
             return True
+
+    # Caso 4: Coincidencia substring explícita
+    if "ok argus" in texto or "okey argus" in texto or "oquei argus" in texto or "ok argos" in texto:
+        return True
 
     return False
 
@@ -232,9 +218,6 @@ class GestorWakeWord:
     def _loop_escucha(self):
         from modulos.audio_custom import detener_voz, esta_hablando
         cooldown_hasta = 0.0
-        # Ventana de confirmación para reducir falsos positivos:
-        # un candidato debe confirmarse en frames consecutivos antes de disparar.
-        candidato_pendiente = None
         try:
             with sd.InputStream(
                 samplerate=FS_AUDIO,
@@ -272,9 +255,9 @@ class GestorWakeWord:
                         rms = float(np.sqrt(np.mean(bloque_float**2))) if bloque_float.size else 0.0
                         hay_voz = rms >= RMS_UMBRAL_VOZ
 
-                        # Si hay silencio, resetear candidato pendiente
+                        # Si no supera el umbral de voz RMS, continuar escuchando
                         if not hay_voz:
-                            candidato_pendiente = None
+                            continue
 
                         # Alimentar al recognizer (devuelve True si cerró frase/silencio)
                         es_final = self._recognizer.AcceptWaveform(datos_bytes)
@@ -290,48 +273,23 @@ class GestorWakeWord:
                             continue
 
                         # ─── PALABRA DE INTERRUPCIÓN ──────────────────────
-                        # Si el usuario dice "corta" mientras el asistente habla,
-                        # detener la voz inmediatamente
+                        # Si el usuario dice "corta" mientras habla, detener la voz del asistente
                         if "corta" in texto.split():
                             logger.info("✋ Palabra de interrupción 'corta' detectada — deteniendo voz del asistente")
                             detener_voz()
-                            # Cooldown breve para evitar que el eco del "corta"
-                            # dispare otra detección de palabra clave
                             cooldown_hasta = time.time() + 0.5
-                            continue
-
-                        # ─── VALIDAR QUE HAY VOZ REAL ANTES DE DETECTAR ─────
-                        # Sin voz real no hay detección, aunque Vosk reconozca texto
-                        if not hay_voz:
-                            candidato_pendiente = None
+                            if self._recognizer:
+                                self._recognizer.Reset()
                             continue
 
                         # ─── DETECCIÓN DE FRASE CLAVE ─────────────────────
-                        # En frases finales (es_final=True) se permiten todas las
-                        # variantes fonéticas. En parciales solo la literal "ok argus".
-                        # Esto evita falsos positivos con audio ambiguo.
-                        if es_final:
-                            permitir_parcial = True
-                        else:
-                            permitir_parcial = False
-
-                        if _es_match_wake_word(texto, permitir_parcial=permitir_parcial):
-                            # ─── VENTANA DE CONFIRMACIÓN ──────────────────
-                            # Si ya hay un candidato pendiente y el texto coincide,
-                            # confirmar la detección. Si no, marcar como candidato.
-                            if candidato_pendiente is not None and candidato_pendiente == texto:
-                                logger.info(f"🔊 Frase clave '{self._palabra_clave}' detectada en: '{texto}'")
-                                # Activar cooldown post-detección para evitar doble disparo
-                                cooldown_hasta = ahora + 1.0
-                                self._on_wake_word_detectado()
-                                return
-                            else:
-                                candidato_pendiente = texto
-                        else:
-                            # El texto no coincide; si no es "ok argus" literal
-                            # en parcial, descartar candidato (podría ser otra frase)
-                            if not permitir_parcial:
-                                candidato_pendiente = None
+                        if _es_match_wake_word(texto):
+                            logger.info(f"🔊 Frase clave '{self._palabra_clave}' detectada en: '{texto}'")
+                            cooldown_hasta = ahora + 2.0
+                            if self._recognizer:
+                                self._recognizer.Reset()
+                            self._on_wake_word_detectado()
+                            continue
                                 
                     except Exception as e:
                         if self.esta_activo():

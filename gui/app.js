@@ -217,6 +217,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         cargarPerfilesMentor(estado.lista_perfiles || []);
         if (estado.modelo_real) actualizarModeloLabel(estado.modelo_real);
+        if (estado.mcp_disponible !== undefined) actualizarIndicadorMcp(estado.mcp_disponible);
+        if (estado.capacidad_fijada !== undefined) actualizarChipCapacidad(estado.capacidad_fijada || estado.modo_actual || 'general');
       }
     } catch (e) { console.error('Error init:', e); }
     // Iniciar reloj digital cada segundo
@@ -307,6 +309,75 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // ─── ESTADO MCP ───────────────────────────────────────────────────────
+  // Herramientas MCP: solo se activan en el turno si el modelo activo es
+  // Gemini y no hay skill activa. El indicador es estático (modelo); la
+  // restricción por skill se explica en el tooltip.
+  function actualizarIndicadorMcp(disponible) {
+    const chip = document.getElementById('mcpStatusChip');
+    if (!chip) return;
+    if (disponible) {
+      chip.textContent = '🧩 MCP ✓';
+      chip.classList.remove('off');
+      chip.classList.add('on');
+      chip.title = 'Herramientas MCP activas: el modelo actual es Gemini. Nota: una skill activa en el turno también las desactiva.';
+    } else {
+      chip.textContent = '🧩 MCP ✗';
+      chip.classList.remove('on');
+      chip.classList.add('off');
+      chip.title = 'Herramientas MCP inactivas: requieren un modelo Gemini activo (el actual no lo es). Nota: una skill activa en el turno también las desactiva.';
+    }
+  }
+
+  // ─── CHIP DE CAPACIDAD ACTIVA (Fase D, UI opción B) ─────────────────────
+  let capacidadFijada = null; // null = automática
+
+  const _CAP_ICONO = { general: '💬', mentor: '🎓', gamer: '🎮' };
+  const _CAP_LABEL = { general: 'General', mentor: 'Mentoría', gamer: 'Gaming' };
+
+  function actualizarChipCapacidad(capacidad) {
+    const chip = document.getElementById('capacidadChip');
+    const iconEl = document.getElementById('capacidadChipIcon');
+    const labelEl = document.getElementById('capacidadChipLabel');
+    const pinEl = document.getElementById('capacidadChipPin');
+    if (!chip || !iconEl || !labelEl || !pinEl) return;
+    const cap = (capacidad || 'general');
+    iconEl.textContent = _CAP_ICONO[cap] || '💬';
+    labelEl.textContent = _CAP_LABEL[cap] || 'General';
+    if (capacidadFijada) {
+      chip.classList.add('pinned');
+      pinEl.textContent = '📌';
+      chip.title = `Capacidad fijada: ${labelEl.textContent}. Click para volver a automático.`;
+    } else {
+      chip.classList.remove('pinned');
+      pinEl.textContent = '⚡';
+      chip.title = `Capacidad activa del turno: ${labelEl.textContent} (automática). Click para fijar.`;
+    }
+  }
+
+  function initChipCapacidad() {
+    const chip = document.getElementById('capacidadChip');
+    if (!chip) return;
+    chip.addEventListener('click', async () => {
+      if (!pyApi) return;
+      const label = document.getElementById('capacidadChipLabel');
+      const capActual = (label && label.textContent) || 'General';
+      const capKey = { 'General': 'general', 'Mentoría': 'mentor', 'Gaming': 'gamer' }[capActual] || 'general';
+      if (capacidadFijada) {
+        // Liberar pin → automático
+        capacidadFijada = null;
+        await pyApi.fijar_capacidad('auto');
+        agregarMensajeSistema('⚡ Capacidad en automático: Argus la detecta según la actividad.');
+      } else {
+        // Fijar la capacidad actual
+        capacidadFijada = capKey;
+        await pyApi.fijar_capacidad(capKey);
+        agregarMensajeSistema(`📌 Capacidad fijada: <strong>${capActual}</strong>.`);
+      }
+      actualizarChipCapacidad(capacidadFijada || capKey);
+    });
+  }
+
   function cargarPerfilesMentor(perfiles) {
     if (!mentorProfileSelect) return;
     mentorProfileSelect.innerHTML = '';
@@ -364,23 +435,29 @@ document.addEventListener('DOMContentLoaded', () => {
     if (modo === 'mentor') {
       body.classList.add('theme-mentor');
       if (btnMentor) btnMentor.classList.add('active');
-      if (headerTitle) headerTitle.innerText = '🎓 Modo Mentor';
+      if (headerTitle) headerTitle.innerText = '🎓 Mentoría';
       if (headerSubtitle) headerSubtitle.innerText = 'Orientación técnica, roadmap y preparación de arquitectura';
       if (window.emoFace) { window.emoFace.setAccentColor('#00ff9d'); window.emoFace.setEstado('idle'); }
     } else if (modo === 'gamer') {
       body.classList.add('theme-gamer');
       if (btnGamer) btnGamer.classList.add('active');
-      if (headerTitle) headerTitle.innerText = '🎮 Modo Gamer';
-      if (headerSubtitle) headerSubtitle.innerText = 'Modo arcade de alto rendimiento sin interrupciones';
-      if (lblGamerMode) lblGamerMode.innerText = 'Modo Gaming · ON';
+      if (headerTitle) headerTitle.innerText = '🎮 Gaming';
+      if (headerSubtitle) headerSubtitle.innerText = 'Capacidad gaming de alto rendimiento sin interrupciones';
+      if (lblGamerMode) lblGamerMode.innerText = 'Gaming · ON';
       if (window.emoFace) { window.emoFace.setAccentColor('#ff0055'); window.emoFace.setEstado('idle'); }
     } else {
       body.classList.add('theme-chat');
       if (btnChat) btnChat.classList.add('active');
-      if (headerTitle) headerTitle.innerText = '💬 Chat General';
-      if (headerSubtitle) headerSubtitle.innerText = 'Asistente IA multimodal con integración MCP activa';
-      if (lblGamerMode) lblGamerMode.innerText = 'Modo Gaming';
+      if (headerTitle) headerTitle.innerText = '💬 Argus';
+      if (headerSubtitle) headerSubtitle.innerText = 'Asistente IA con capacidades contextuales';
+      if (lblGamerMode) lblGamerMode.innerText = 'Gaming';
       if (window.emoFace) { window.emoFace.setAccentColor('#00f3ff'); window.emoFace.setEstado('idle'); }
+    }
+
+    // Reflejar el modo en el chip de capacidad (si no hay pin fijado).
+    if (!capacidadFijada) {
+      const capKey = (modo === 'mentor') ? 'mentor' : (modo === 'gamer') ? 'gamer' : 'general';
+      actualizarChipCapacidad(capKey);
     }
 
     // ─── 3. Resetear estado de streaming ────────────────────────────────
@@ -402,9 +479,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (nuevaKey === 'general') {
           agregarMensajeSistema('¡Hola, Luis! Soy <strong>Argus</strong> — tu asistente IA. Presiona <strong>F8</strong> o <strong>L3+R3</strong> en tu mando para hablar.');
         } else if (nuevaKey === 'mentor') {
-          agregarMensajeSistema('🎓 <strong>Modo Mentor</strong> activado. Estoy aquí para guiarte en tu desarrollo profesional y técnico.');
+          agregarMensajeSistema('🎓 <strong>Capacidad de Mentoría</strong> activada. Estoy aquí para guiarte en tu desarrollo profesional y técnico.');
         } else if (nuevaKey === 'gamer') {
-          agregarMensajeSistema('🎮 <strong>Modo Gamer</strong> activado. ¡Modo arcade de alto rendimiento sin interrupciones!');
+          agregarMensajeSistema('🎮 <strong>Capacidad Gaming</strong> activada. ¡Modo arcade de alto rendimiento sin interrupciones!');
         }
       }
       scrollBottom();
@@ -416,7 +493,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!pyApi) return;
     try {
       const res = await pyApi.obtener_modelo_real();
-      if (res && res.exito) actualizarModeloLabel(res.modelo_real);
+      if (res && res.exito) {
+        actualizarModeloLabel(res.modelo_real);
+        if (res.mcp_disponible !== undefined) actualizarIndicadorMcp(res.mcp_disponible);
+      }
     } catch (e) { console.error('Error refreshing model label:', e); }
   }
 
@@ -495,12 +575,131 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // ─── INGESTA A LA BÓVEDA (Fase pendiente §7) ─────────────────────────────
+  const btnGuardarArchivoBoveda = document.getElementById('btnGuardarArchivoBoveda');
+  const ingestaFeedback = document.getElementById('ingestaFeedback');
+
+  function mostrarIngestaFeedback(texto, exito) {
+    if (!ingestaFeedback) return;
+    ingestaFeedback.style.display = 'block';
+    ingestaFeedback.textContent = texto;
+    ingestaFeedback.className = 'ingesta-feedback ' + (exito ? 'ok' : 'err');
+  }
+
+  if (btnGuardarArchivoBoveda) {
+    btnGuardarArchivoBoveda.addEventListener('click', async () => {
+      if (!pyApi) return;
+      try {
+        // Reutiliza el diálogo de archivos existente del bridge.
+        const sel = await pyApi.adjuntar_archivo();
+        if (!sel || !sel.exito || !sel.rutas || sel.rutas.length === 0) {
+          mostrarIngestaFeedback('No se seleccionó ningún archivo.', false);
+          return;
+        }
+        mostrarIngestaFeedback('⏳ Leyendo y fragmentando archivo(s)...', true);
+        const ruta = sel.rutas[0];
+        const res = await pyApi.guardar_archivo_en_boveda(ruta);
+        if (res && res.exito) {
+          mostrarIngestaFeedback(`✅ ${res.mensaje}`, true);
+          cargarPanelMemoria();
+        } else {
+          mostrarIngestaFeedback(`❌ ${res && res.mensaje ? res.mensaje : 'No se pudo guardar.'}`, false);
+        }
+      } catch (e) {
+        console.error('Error guardando archivo en bóveda:', e);
+        mostrarIngestaFeedback('❌ Error inesperado al guardar el archivo.', false);
+      }
+    });
+  }
+
+  const btnGuardarNotaBoveda = document.getElementById('btnGuardarNotaBoveda');
+  if (btnGuardarNotaBoveda) {
+    btnGuardarNotaBoveda.addEventListener('click', () => {
+      const modalNota = document.getElementById('modalGuardarNota');
+      if (modalNota) modalNota.classList.remove('hidden');
+      const feedback = document.getElementById('notaFeedback');
+      if (feedback) feedback.style.display = 'none';
+    });
+  }
+
+  const btnCloseGuardarNota = document.getElementById('btnCloseGuardarNota');
+  const btnCancelarNota = document.getElementById('btnCancelarNota');
+  const btnConfirmarNota = document.getElementById('btnConfirmarNota');
+
+  function cerrarModalNota() {
+    const modalNota = document.getElementById('modalGuardarNota');
+    if (modalNota) modalNota.classList.add('hidden');
+  }
+  if (btnCloseGuardarNota) btnCloseGuardarNota.addEventListener('click', cerrarModalNota);
+  if (btnCancelarNota) btnCancelarNota.addEventListener('click', cerrarModalNota);
+
+  if (btnConfirmarNota) {
+    btnConfirmarNota.addEventListener('click', async () => {
+      if (!pyApi) return;
+      const texto = document.getElementById('notaTextoInput');
+      const etiqueta = document.getElementById('notaEtiquetaInput');
+      const feedback = document.getElementById('notaFeedback');
+      const valorTexto = texto ? texto.value.trim() : '';
+      const valorEtiqueta = etiqueta ? etiqueta.value.trim() : '';
+      if (!valorTexto) {
+        if (feedback) { feedback.style.display = 'block'; feedback.textContent = '❌ La nota está vacía.'; feedback.className = 'ingesta-feedback err'; }
+        return;
+      }
+      if (feedback) { feedback.style.display = 'block'; feedback.textContent = '⏳ Guardando nota...'; feedback.className = 'ingesta-feedback'; }
+      const res = await pyApi.guardar_nota_en_boveda(valorTexto, valorEtiqueta);
+      if (feedback) {
+        feedback.style.display = 'block';
+        feedback.textContent = res && res.exito ? `✅ ${res.mensaje}` : `❌ ${res && res.mensaje ? res.mensaje : 'No se pudo guardar.'}`;
+        feedback.className = 'ingesta-feedback ' + (res && res.exito ? 'ok' : 'err');
+      }
+      if (res && res.exito) {
+        if (texto) texto.value = '';
+        if (etiqueta) etiqueta.value = '';
+        setTimeout(() => { cerrarModalNota(); cargarPanelMemoria(); }, 1200);
+      }
+    });
+  }
+
   if (btnClearContext) {
     btnClearContext.addEventListener('click', async () => {
       if (pyApi) {
         await pyApi.limpiar_contexto();
         if (chatMessages) chatMessages.innerHTML = '';
         agregarMensajeSistema('🧹 Contexto de conversación reiniciado.');
+      }
+    });
+  }
+
+  // ─── CHIP DE CAPACIDAD (pin auto/fijado) ─────────────────────────────────
+  initChipCapacidad();
+
+  // ─── RETOMAR HISTORIAL PERSISTIDO (Fase P) ───────────────────────────────
+  const btnRetomarHistorial = document.getElementById('btnRetomarHistorial');
+  if (btnRetomarHistorial) {
+    btnRetomarHistorial.addEventListener('click', async () => {
+      if (!pyApi) return;
+      agregarMensajeSistema('↩️ Buscando la última conversación guardada...');
+      const res = await pyApi.recuperar_historial();
+      if (res && res.exito) {
+        if (chatMessages) chatMessages.innerHTML = '';
+        // Pintar los mensajes recuperados (user → model, agrupados por turno).
+        if (res.mensajes && Array.isArray(res.mensajes)) {
+          res.mensajes.forEach(m => {
+            if (m.role === 'user') {
+              agregarMensajeUsuario(m.parts && m.parts[0] ? m.parts[0] : '');
+            } else {
+              agregarRespuestaArgus(
+                m.parts && m.parts[0] ? m.parts[0] : '',
+                'Argus',
+                false,
+                null
+              );
+            }
+          });
+        }
+        agregarMensajeSistema(`↩️ Se retomaron los últimos <strong>${res.cantidad}</strong> mensajes de la conversación guardada.`);
+      } else {
+        agregarMensajeSistema('↩️ No hay historial guardado para este contexto todavía.');
       }
     });
   }
@@ -1068,6 +1267,7 @@ document.addEventListener('DOMContentLoaded', () => {
     currentAiBodyDiv = null;
     currentAiRow = null;
     currentAiRawText = '';
+    currentAiTurnoId = null;
 
     const row = document.createElement('div');
     row.className = 'msg-row user-row';
@@ -1157,6 +1357,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     actions.appendChild(copyBtn);
 
+    // Botón 🔊 para reproducir la respuesta con voz (Edge TTS, sin tokens).
+    const voiceBtn = document.createElement('button');
+    voiceBtn.className = 'msg-action-btn';
+    voiceBtn.type = 'button';
+    voiceBtn.title = 'Escuchar esta respuesta con voz';
+    voiceBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5 6 9H2v6h4l5 4V5z"></path><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg><span>Escuchar</span>`;
+    voiceBtn.addEventListener('click', () => {
+      const raw = (row && row.dataset && row.dataset.rawText) || '';
+      if (raw && window.pywebview && window.pywebview.api) {
+        window.pywebview.api.leer_texto_con_voz(raw);
+      }
+    });
+
+    actions.appendChild(voiceBtn);
+
     content.appendChild(meta);
     content.appendChild(bubble);
     content.appendChild(actions);
@@ -1241,6 +1456,23 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentAiRow = null;
   let currentAiAvatarDiv = null;
   let currentAiRawText = '';
+  let currentAiTurnoId = null;
+
+  function resolverBurbujaPorTurno(turnoId) {
+    // Devuelve { row, bodyDiv } de la burbuja de IA que corresponde a un
+    // turno, o null si no se encuentra. Si no hay turno (streaming antiguo
+    // sin marcar), usa la burbuja activa actual como respaldo.
+    if (turnoId != null && chatMessages) {
+      const row = chatMessages.querySelector(`.msg-row.ai-row[data-turno-id="${turnoId}"]`);
+      if (row) {
+        return { row: row, bodyDiv: row.querySelector('.msg-body') };
+      }
+    }
+    if (currentAiRow) {
+      return { row: currentAiRow, bodyDiv: currentAiBodyDiv || currentAiRow.querySelector('.msg-body') };
+    }
+    return null;
+  }
 
   let emoFaceTimer = null;
 
@@ -1261,7 +1493,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }, delayMs);
   }
 
-  window.agregarRespuestaArgus = function(textoMarkdown, remitente, esContinuacion) {
+  window.agregarRespuestaArgus = function(textoMarkdown, remitente, esContinuacion, turnoId) {
+    if (turnoId != null) {
+      currentAiTurnoId = turnoId;
+    }
     if (remitente === "⚙️ Sistema") {
       agregarMensajeSistema(textoMarkdown);
       currentAiBodyDiv = null; // rompe la continuación
@@ -1275,6 +1510,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (currentAiRow) {
         currentAiRow.dataset.rawText = textoLimpio;
+        if (turnoId != null) {
+          currentAiRow.dataset.turnoId = turnoId;
+        }
         if (emocion && currentAiAvatarDiv) {
           currentAiAvatarDiv.innerHTML = generarMiniEmoAvatarSVG(emocion);
           if (window.emoFace && window.emoFace.estado !== 'talking') {
@@ -1296,6 +1534,9 @@ document.addEventListener('DOMContentLoaded', () => {
         currentAiBodyDiv = result.bodyDiv;
         currentAiRow = result.row;
         currentAiAvatarDiv = result.avatarDiv;
+        if (turnoId != null) {
+          currentAiRow.dataset.turnoId = turnoId;
+        }
       }
       if (window.emoFace && window.emoFace.estado !== 'talking') {
         window.emoFace.setEstado('thinking');
@@ -1311,46 +1552,52 @@ document.addEventListener('DOMContentLoaded', () => {
   // búsqueda web, la burbuja que contiene ese borrador se marca como
   // provisional y su contenido es REEMPLAZADO al final por la respuesta
   // verificada (nunca se concatena, nunca queda un doble 'model' visual).
-  window.marcarRespuestaProvisional = function () {
-    if (!currentAiRow) return;
-    if (!currentAiRow.querySelector('.chip-provisional')) {
+  window.marcarRespuestaProvisional = function (turnoId) {
+    const destino = resolverBurbujaPorTurno(turnoId);
+    if (!destino || !destino.row) return;
+    const row = destino.row;
+    if (!row.querySelector('.chip-provisional')) {
       const chip = document.createElement('span');
       chip.className = 'chip chip-provisional';
       chip.textContent = 'Verificando…';
-      const metaEl = currentAiRow.querySelector('.msg-meta');
+      const metaEl = row.querySelector('.msg-meta');
       if (metaEl) metaEl.appendChild(chip);
     }
-    currentAiRow.classList.add('ai-provisional');
+    row.classList.add('ai-provisional');
   };
 
-  window.cancelarRespuestaProvisional = function () {
-    if (!currentAiRow) return;
-    currentAiRow.querySelectorAll('.chip-provisional').forEach(c => c.remove());
-    currentAiRow.classList.remove('ai-provisional');
-    delete currentAiRow.dataset.reemplazada;
+  window.cancelarRespuestaProvisional = function (turnoId) {
+    const destino = resolverBurbujaPorTurno(turnoId);
+    if (!destino || !destino.row) return;
+    const row = destino.row;
+    row.querySelectorAll('.chip-provisional').forEach(c => c.remove());
+    row.classList.remove('ai-provisional');
+    delete row.dataset.reemplazada;
   };
 
-  window.reemplazarRespuestaProvisional = function (textoMarkdown) {
-    if (!currentAiRow) return;
-    const bodyDiv = currentAiBodyDiv || currentAiRow.querySelector('.msg-body');
+  window.reemplazarRespuestaProvisional = function (textoMarkdown, turnoId) {
+    const destino = resolverBurbujaPorTurno(turnoId);
+    if (!destino || !destino.row) return;
+    const row = destino.row;
+    const bodyDiv = destino.bodyDiv || row.querySelector('.msg-body');
     if (!bodyDiv) return;
     const { emocion, textoLimpio } = extraerEmocionYTexto(textoMarkdown || '');
     currentAiRawText = textoLimpio;
     bodyDiv.innerHTML = renderMarkdown(textoLimpio);
-    currentAiRow.dataset.rawText = textoLimpio;
-    currentAiRow.dataset.reemplazada = '1';
-    currentAiRow.querySelectorAll('.chip-provisional').forEach(c => c.remove());
-    currentAiRow.classList.remove('ai-provisional');
-    currentAiRow.classList.add('ai-verificado');
-    if (!currentAiRow.querySelector('.chip-verificado')) {
+    row.dataset.rawText = textoLimpio;
+    row.dataset.reemplazada = '1';
+    row.querySelectorAll('.chip-provisional').forEach(c => c.remove());
+    row.classList.remove('ai-provisional');
+    row.classList.add('ai-verificado');
+    if (!row.querySelector('.chip-verificado')) {
       const chipOk = document.createElement('span');
       chipOk.className = 'chip chip-verificado';
       chipOk.textContent = '✓ Verificado con fuentes';
-      const metaEl = currentAiRow.querySelector('.msg-meta');
+      const metaEl = row.querySelector('.msg-meta');
       if (metaEl) metaEl.appendChild(chipOk);
     }
     if (typeof hljs !== 'undefined') {
-      currentAiRow.querySelectorAll('pre code:not(.hljs)').forEach(b => {
+      row.querySelectorAll('pre code:not(.hljs)').forEach(b => {
         try { hljs.highlightElement(b); } catch (e) {}
       });
     }

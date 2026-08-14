@@ -26,7 +26,15 @@ ESQUEMA_MENTOR_DEFECTO = {
         "¿Prefieres enfocarte en desarrollo Frontend, Backend o Fullstack?",
         "¿Qué lenguajes o tecnologías aprendiste en la UTN FRGP y con cuáles te sentiste más cómodo?",
         "¿Tienes en mente alguna idea de proyecto para construir como parte de tu portafolio?"
-    ]
+    ],
+    "progreso": {
+        "objetivos": [],
+        "proximos_pasos": [],
+        "dificultades_activas": [],
+        "hitos_completados": [],
+        "continuidad": {"ultimo_tema": "", "ultima_fecha": "", "donde_quedamos": ""},
+        "recuerdos_persistidos": []
+    }
 }
 
 def cargar_perfil_mentor() -> dict:
@@ -46,6 +54,8 @@ def cargar_perfil_mentor() -> dict:
             for k, v in ESQUEMA_MENTOR_DEFECTO.items():
                 if k not in perfil:
                     perfil[k] = v
+            # Asegurar la estructura anidada del bloque progreso (Fase 5)
+            perfil["progreso"] = _progreso(perfil)
             return perfil
         except Exception as e:
             logger.exception(f"Error cargando perfil_mentor.json: {e}")
@@ -77,6 +87,52 @@ def _slug_estable(texto: str) -> str:
         return "item"
     limpio = re.sub(r"[^a-zA-Z0-9]+", "_", texto.strip().lower()).strip("_")
     return limpio or "item"
+
+
+def _progreso(perfil: dict) -> dict:
+    """Acceso seguro al bloque 'progreso' del perfil mentor (no persiste)."""
+    import copy
+    p = perfil.get("progreso")
+    if not isinstance(p, dict):
+        p = {}
+    base = ESQUEMA_MENTOR_DEFECTO["progreso"]
+    result = dict(p)
+    for k, v in base.items():
+        result.setdefault(k, copy.deepcopy(v))
+    return result
+
+
+def _indices_progreso_objetivos_por_slug(perfil: dict, slug: str) -> list:
+    """Índices de objetivos cuyo 'titulo' tiene el slug dado."""
+    objetivos = _progreso(perfil).get("objetivos", [])
+    if not isinstance(objetivos, list):
+        return []
+    return [
+        i for i, o in enumerate(objetivos)
+        if isinstance(o, dict) and _slug_estable(str(o.get("titulo", ""))) == slug
+    ]
+
+
+def _indices_progreso_dificultades_por_slug(perfil: dict, slug: str) -> list:
+    """Índices de dificultades activas cuyo 'tema' tiene el slug dado."""
+    difs = _progreso(perfil).get("dificultades_activas", [])
+    if not isinstance(difs, list):
+        return []
+    return [
+        i for i, d in enumerate(difs)
+        if isinstance(d, dict) and _slug_estable(str(d.get("tema", ""))) == slug
+    ]
+
+
+def _indices_progreso_hitos_por_slug(perfil: dict, slug: str) -> list:
+    """Índices de hitos cuyo 'texto' tiene el slug dado."""
+    hitos = _progreso(perfil).get("hitos_completados", [])
+    if not isinstance(hitos, list):
+        return []
+    return [
+        i for i, h in enumerate(hitos)
+        if isinstance(h, dict) and _slug_estable(str(h.get("texto", ""))) == slug
+    ]
 
 
 def _dividir_lista_segun(texto: str, separador: str = " · ") -> list:
@@ -153,6 +209,40 @@ def _olvidar_en_perfil(perfil: dict, id_elemento: str) -> bool:
             historial[-1]["proximos_pasos"] = []
             return True
         return False
+
+    if resto.startswith("progreso_objetivo:"):
+        slug = resto[len("progreso_objetivo:"):]
+        indices = _indices_progreso_objetivos_por_slug(perfil, slug)
+        if len(indices) != 1:
+            return False
+        del perfil["progreso"]["objetivos"][indices[0]]
+        return True
+
+    if resto.startswith("progreso_dificultad:"):
+        slug = resto[len("progreso_dificultad:"):]
+        indices = _indices_progreso_dificultades_por_slug(perfil, slug)
+        if len(indices) != 1:
+            return False
+        del perfil["progreso"]["dificultades_activas"][indices[0]]
+        return True
+
+    if resto.startswith("progreso_hito:"):
+        slug = resto[len("progreso_hito:"):]
+        indices = _indices_progreso_hitos_por_slug(perfil, slug)
+        if len(indices) != 1:
+            return False
+        del perfil["progreso"]["hitos_completados"][indices[0]]
+        return True
+
+    if resto == "progreso_proximos_pasos":
+        perfil.setdefault("progreso", {})["proximos_pasos"] = []
+        return True
+
+    if resto == "progreso_continuidad":
+        perfil.setdefault("progreso", {})["continuidad"] = {
+            "ultimo_tema": "", "ultima_fecha": "", "donde_quedamos": ""
+        }
+        return True
 
     return False
 
@@ -244,6 +334,42 @@ def editar_elemento(id_elemento: str, texto: str) -> bool:
             return True
         return False
 
+    if resto == "progreso_proximos_pasos":
+        perfil = cargar_perfil_mentor()
+        perfil.setdefault("progreso", {})["proximos_pasos"] = _dividir_lista_segun(texto)
+        guardar_perfil_mentor(perfil)
+        return True
+
+    if resto.startswith("progreso_objetivo:"):
+        slug = resto[len("progreso_objetivo:"):]
+        perfil = cargar_perfil_mentor()
+        indices = _indices_progreso_objetivos_por_slug(perfil, slug)
+        if len(indices) != 1:
+            return False
+        perfil["progreso"]["objetivos"][indices[0]]["titulo"] = texto
+        guardar_perfil_mentor(perfil)
+        return True
+
+    if resto.startswith("progreso_dificultad:"):
+        slug = resto[len("progreso_dificultad:"):]
+        perfil = cargar_perfil_mentor()
+        indices = _indices_progreso_dificultades_por_slug(perfil, slug)
+        if len(indices) != 1:
+            return False
+        perfil["progreso"]["dificultades_activas"][indices[0]]["tema"] = texto
+        guardar_perfil_mentor(perfil)
+        return True
+
+    if resto.startswith("progreso_hito:"):
+        slug = resto[len("progreso_hito:"):]
+        perfil = cargar_perfil_mentor()
+        indices = _indices_progreso_hitos_por_slug(perfil, slug)
+        if len(indices) != 1:
+            return False
+        perfil["progreso"]["hitos_completados"][indices[0]]["texto"] = texto
+        guardar_perfil_mentor(perfil)
+        return True
+
     return False
 
 
@@ -269,6 +395,64 @@ def obtener_bitacora_workspace(workspace_path: str = "") -> str:
             except Exception as e:
                 logger.warning(f"Error leyendo bitácora del workspace {ruta_file}: {e}")
     return ""
+
+def _texto_progreso_para_prompt(p: dict) -> str:
+    """Formatea el bloque de Progreso/Mentoría estructurado para el prompt."""
+    prog = _progreso(p)
+    lineas = []
+
+    objetivos = prog.get("objetivos", [])
+    if isinstance(objetivos, list) and objetivos:
+        partes = []
+        for o in objetivos:
+            if isinstance(o, dict) and str(o.get("titulo", "")).strip():
+                estado = str(o.get("estado", "")).strip()
+                prioridad = str(o.get("prioridad", "")).strip()
+                proy = str(o.get("proyecto_asociado", "")).strip()
+                ref = o["titulo"]
+                if estado:
+                    ref += f" [{estado}]"
+                if prioridad:
+                    ref += f" (prioridad {prioridad})"
+                if proy:
+                    ref += f" · proyecto: {proy}"
+                partes.append(ref)
+        if partes:
+            lineas.append(f"- OBJETIVOS: {', '.join(partes)}")
+
+    pasos = prog.get("proximos_pasos", [])
+    if isinstance(pasos, list) and pasos:
+        pasos_limpios = [str(x).strip() for x in pasos if str(x).strip()]
+        if pasos_limpios:
+            lineas.append("- PRÓXIMOS PASOS: " + " · ".join(pasos_limpios))
+
+    difs = prog.get("dificultades_activas", [])
+    if isinstance(difs, list) and difs:
+        partes = []
+        for d in difs:
+            if isinstance(d, dict) and str(d.get("tema", "")).strip():
+                partes.append(f"{d['tema']} (×{d.get('ocurrencias', 1)})")
+        if partes:
+            lineas.append("- DIFICULTADES ACTIVAS: " + ", ".join(partes))
+
+    hitos = prog.get("hitos_completados", [])
+    if isinstance(hitos, list) and hitos:
+        partes = []
+        for h in hitos:
+            if isinstance(h, dict) and str(h.get("texto", "")).strip():
+                partes.append(h["texto"])
+        if partes:
+            lineas.append("- HITOS COMPLETADOS: " + " · ".join(partes))
+
+    cont = prog.get("continuidad") or {}
+    quedamos = str(cont.get("donde_quedamos", "")).strip()
+    if quedamos:
+        lineas.append(f"- CONTINUIDAD (dónde quedamos la última sesión): {quedamos}")
+
+    if not lineas:
+        return ""
+    return "\n[PROGRESO Y MENTORÍA (estructurado)]:\n" + "\n".join(lineas) + "\n"
+
 
 def texto_perfil_mentor_para_prompt(workspace_path: str = "") -> str:
     """
@@ -339,7 +523,9 @@ def texto_perfil_mentor_para_prompt(workspace_path: str = "") -> str:
     )
     if texto_bitacora_ws:
         texto += f"\n{texto_bitacora_ws}"
-        
+
+    texto += _texto_progreso_para_prompt(p)
+
     return texto
 
 def extraer_y_procesar_sesion_mentor(ultimos_mensajes: list, workspace_path: str = "") -> None:
@@ -419,6 +605,11 @@ def extraer_y_procesar_sesion_mentor(ultimos_mensajes: list, workspace_path: str
             for k in ESQUEMA_MENTOR_DEFECTO.keys():
                 if k not in nuevo_perfil:
                     nuevo_perfil[k] = perfil_actual.get(k, ESQUEMA_MENTOR_DEFECTO[k])
+
+            # `progreso` es gestionado por modulos/progreso_mentoria.py (Fase 5):
+            # este reescritor completo NO debe reescribirlo. Se conserva tal cual
+            # estaba en el perfil anterior (evita que el LLM lo pise o lo invente).
+            nuevo_perfil["progreso"] = _progreso(perfil_actual)
 
             # Limitar historial a 5 entradas máx
             if "historial_sesiones" in nuevo_perfil and isinstance(nuevo_perfil["historial_sesiones"], list):

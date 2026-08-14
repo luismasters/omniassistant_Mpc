@@ -335,6 +335,81 @@ def _seccion_mentor(perfil_mentor: dict) -> dict:
                         texto=texto,
                     ))
 
+    # Progreso/Mentoría estructurado (Fase 5)
+    from modulos.perfil_mentor import _progreso as _progreso_mentor
+    prog = _progreso_mentor(perfil_mentor)
+
+    objetivos = prog.get("objetivos", [])
+    if isinstance(objetivos, list) and objetivos:
+        for o in objetivos:
+            if not isinstance(o, dict):
+                continue
+            titulo = _texto_seguro(o.get("titulo"))
+            if not titulo:
+                continue
+            estado = _texto_seguro(o.get("estado"))
+            prioridad = _texto_seguro(o.get("prioridad"))
+            proy_asoc = _texto_seguro(o.get("proyecto_asociado"))
+            ref = titulo
+            extras = [x for x in (estado, f"prioridad {prioridad}" if prioridad else "", proy_asoc) if x]
+            if extras:
+                ref += " · " + " · ".join(extras)
+            destino.append(_elemento(
+                id_=f"mentor:progreso_objetivo:{_slug(titulo)}",
+                etiqueta="Objetivo",
+                texto=ref,
+            ))
+
+    pasos = prog.get("proximos_pasos", [])
+    if isinstance(pasos, list) and pasos:
+        pasos_limpios = [_texto_seguro(p) for p in pasos if _texto_seguro(p)]
+        if pasos_limpios:
+            destino.append(_elemento(
+                id_="mentor:progreso_proximos_pasos",
+                etiqueta="Próximos pasos (Progreso)",
+                texto=" · ".join(pasos_limpios),
+            ))
+
+    dificultades = prog.get("dificultades_activas", [])
+    if isinstance(dificultades, list) and dificultades:
+        for d in dificultades:
+            tema = _texto_seguro(d.get("tema")) if isinstance(d, dict) else ""
+            if not tema:
+                continue
+            occ = (d.get("ocurrencias") or 1) if isinstance(d, dict) else 1
+            fecha = _texto_seguro(d.get("ultima_fecha")) if isinstance(d, dict) else ""
+            destino.append(_elemento(
+                id_=f"mentor:progreso_dificultad:{_slug(tema)}",
+                etiqueta="Dificultad activa",
+                texto=f"{tema} (×{occ})",
+                fecha=fecha,
+            ))
+
+    hitos = prog.get("hitos_completados", [])
+    if isinstance(hitos, list) and hitos:
+        for h in hitos:
+            if not isinstance(h, dict):
+                continue
+            htexto = _texto_seguro(h.get("texto"))
+            if not htexto:
+                continue
+            destino.append(_elemento(
+                id_=f"mentor:progreso_hito:{_slug(htexto)}",
+                etiqueta="Hito",
+                texto=htexto,
+                fecha=_texto_seguro(h.get("fecha")) or "",
+            ))
+
+    cont = prog.get("continuidad") or {}
+    quedamos = _texto_seguro(cont.get("donde_quedamos"))
+    if quedamos:
+        destino.append(_elemento(
+            id_="mentor:progreso_continuidad",
+            etiqueta="Continuidad",
+            texto=quedamos,
+            fecha=_texto_seguro(cont.get("ultima_fecha")) or "",
+        ))
+
     return secciones
 
 
