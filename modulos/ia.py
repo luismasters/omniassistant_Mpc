@@ -447,6 +447,62 @@ def _gemini_stream_con_retry(modelo, contents, config, intentos=2, backoff_base=
     raise ultimo_error
 
 
+# Modelos Gemini de reserva para el default global (Fase D): si el modelo
+# activo está saturado (503/429), se prueba el siguiente antes de caer a
+# DeepSeek. Solo aplica al modelo "Por Defecto"/Auto, NO a selecciones
+# explícitas del usuario.
+CADENA_FALLBACK_GEMINI = ("gemini-3.5-flash-lite", "gemini-3.6-flash")
+
+
+def _cadena_fallback_gemini(modelo_str: str):
+    """
+    Orden de modelos Gemini a probar ante saturación transitoria del modelo
+    activo: primero el modelo en uso, luego los de reserva (económicos/rápidos).
+    """
+    cadena = [modelo_str]
+    for m in CADENA_FALLBACK_GEMINI:
+        if m != modelo_str and m not in cadena:
+            cadena.append(m)
+    return cadena
+
+
+def _gemini_stream_con_cadena(modelo, contents, config, ui_callback=None, usar_cadena=True, intentos=2, backoff_base=0.5):
+    """
+    Consume el stream de Gemini probando la CADENA de modelos ante saturación
+    transitoria: el modelo activo con su retry/backoff, luego los de reserva.
+    Si ya se emitió contenido NO se cambia de modelo (evitaría duplicar la
+    respuesta a mitad). Al agotar toda la cadena re-lanza el último error para
+    que el turno caiga a _fallback_deepseek. Con usar_cadena=False se comporta
+    como _gemini_stream_con_retry puro.
+    """
+    if not usar_cadena:
+        yield from _gemini_stream_con_retry(modelo, contents, config, intentos=intentos, backoff_base=backoff_base, ui_callback=ui_callback)
+        return
+    cadena = _cadena_fallback_gemini(modelo)
+    ultimo_error = None
+    emitido_total = False
+    for i, m in enumerate(cadena):
+        try:
+            for chunk in _gemini_stream_con_retry(m, contents, config, intentos=intentos, backoff_base=backoff_base, ui_callback=ui_callback):
+                if chunk is not None:
+                    emitido_total = True
+                yield chunk
+            return  # stream completo sin error
+        except Exception as e:
+            ultimo_error = e
+            if emitido_total:
+                # Ya arrancó la respuesta: no cambiar de modelo.
+                raise
+            if not _es_error_transitorio_gemini(e):
+                raise
+            if i < len(cadena) - 1:
+                siguiente = cadena[i + 1]
+                logger.warning(f"⚠️ {m} saturado; probando modelo de reserva: {siguiente} ({str(e)[:80]})")
+                if ui_callback:
+                    ui_callback("⚙️ Sistema", f"⚠️ {m} saturado; probando {siguiente}...", "#FFA500")
+    raise ultimo_error
+
+
 def _fallback_deepseek(contexto_sistema, contexto_chat, texto_usuario, ocultador_stream, modo_voz, ui_callback, motivo="respuesta vacía"):
     """
     Reintenta el turno con DeepSeek (streaming) cuando Gemini falla de forma
@@ -916,6 +972,9 @@ def _procesar_mensaje(texto_usuario, modo_voz=False, ui_callback=None, turno_id=
             # Determinar modelo_activo según la selección del usuario o por defecto
             modelo_sel = getattr(config.estado, 'modelo_seleccionado', 'Por Defecto')
             gemini_model_str = "gemini-3.5-flash-lite"
+            # La cadena de reserva de modelos Gemini (ante saturación) solo
+            # aplica al default global (Fase D), no a selecciones explícitas.
+            gemini_usa_cadena = False
             if modelo_sel == "Gemini 3.5 Flash Lite":
                 modelo_activo = "gemini"
                 gemini_model_str = "gemini-3.5-flash-lite"
@@ -946,10 +1005,12 @@ def _procesar_mensaje(texto_usuario, modo_voz=False, ui_callback=None, turno_id=
                 if config.MODELO_DEFECTO_GLOBAL.startswith("Gemini"):
                     modelo_activo = "gemini"
                     gemini_model_str = _modelo_gemini_str(config.MODELO_DEFECTO_GLOBAL)
+                    gemini_usa_cadena = True
                 elif "DeepSeek" in config.MODELO_DEFECTO_GLOBAL:
                     modelo_activo = "deepseek-v4-flash"
                 else:
                     modelo_activo = "gemini"
+                    gemini_usa_cadena = True
 
             # ─── INYECCIÓN DE SKILLS ──────────────────────────────────────────
             skill_info = gestor_skills.obtener_skill_relevante(texto_usuario)
@@ -1035,18 +1096,20 @@ def _procesar_mensaje(texto_usuario, modo_voz=False, ui_callback=None, turno_id=
 
                 mensajes_para_gemini.append(types.Content(role='user', parts=partes_usuario))
 
-                # El stream se consume vía _gemini_stream_con_retry (retry con
+                # El stream se consume vía _gemini_stream_con_cadena: retry con
                 # backoff ante 503/429 transitorios ANTES de emitir el primer
-                # chunk). Los errores no-transitorios (auth/safety/blocked) se
-                # manejan en el except del bucle de abajo.
+                # chunk, y si el default global sigue saturado prueba el modelo
+                # de reserva de la cadena (3.5-flash-lite ↔ 3.6-flash) antes de
+                # caer a DeepSeek. Los errores no-transitorios (auth/safety/
+                # blocked) se manejan en el except del bucle de abajo.
                 buffer_voz = ""
                 if ui_callback:
                     ui_callback("🤖 Argus", "", "#A8C7FA", nueva_linea=False)
 
                 try:
-                    for chunk in _gemini_stream_con_retry(
+                    for chunk in _gemini_stream_con_cadena(
                         gemini_model_str, mensajes_para_gemini, gemini_config,
-                        ui_callback=ui_callback,
+                        ui_callback=ui_callback, usar_cadena=gemini_usa_cadena,
                     ):
                         try:
                             # DEBUG: Loggear finish_reason SIEMPRE (no solo cuando

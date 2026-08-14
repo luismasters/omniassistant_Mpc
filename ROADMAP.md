@@ -93,7 +93,7 @@ Objetivo: que Argus no se rompa y se pueda mantener.
   - [ ] `modulos/git_bot.py` (lógica de confirmaciones)
   - [ ] `modulos/controlador_acciones.py` (flujo `procesar_acciones_ia` con stubs)
 - [ ] **Type hints** en `sistema.py`, `audio_custom.py`, `controlador_acciones.py`
-- [ ] **Fijar versiones exactas** en `requirements.txt` (hoy hay varias con `>=`)
+- [x] **Fijar versiones exactas** en `requirements.txt` (todas fijadas a la versión instalada: `pywebview==6.2.1`, `google-genai==2.11.0`, `scipy==1.17.1`, `pytest==9.1.1`)
 - [ ] **Retry con backoff exponencial** en llamadas a APIs (`modulos/ia.py`)
 - [ ] **Fragmentar** `gui/app.js` y `gui/styles.css` (1200 / 1627 líneas) en módulos
 
@@ -362,14 +362,14 @@ Escritura (W1-4), lectura (R1-3), recuperación (REC1-4, incl. no auto-inyecció
 **Estado de puntos/ítems relacionados:**
 - **Mentores temáticos (mentoría parametrizada por tema): ⏳ APLAZADOS.** Se deja anotado como evolución futura: desacoplar `progreso_mentoria` de un solo `perfil_mentor.json` hacia un registro de mentores temáticos con avance propio (aprovecha el Punto 3 ya implementado).
 - **Refinamiento de activación por embeddings** (reemplazar keywords del Punto 3): pendiente, ligado a la skill "detección de skills por embeddings" (§5).
-- **Robustez de la API (Bloque 1, parcial): ✅ IMPLEMENTADO fallback por error transitorio.** `_es_error_transitorio_gemini()` (503/429/ResourceExhausted/high demand) + `_fallback_deepseek()` reutilizable: ante un 503 puntual de Gemini, el turno continúa con DeepSeek en vez de mostrar "❌ Error en el streaming". Pendiente: retry con backoff contra el MISMO Gemini (refinamiento).
+- **Robustez de la API (Bloque 1): ✅ IMPLEMENTADO.** `_es_error_transitorio_gemini()` (503/429/ResourceExhausted/high demand/timeouts) + `_fallback_deepseek()` reutilizable: ante saturación, el turno continúa con DeepSeek en vez de mostrar "❌ Error en el streaming". Retry con backoff contra el MISMO Gemini: `_gemini_stream_con_retry` (2 intentos, backoff exponencial 0.5/1s, solo si el 503 ocurre ANTES del primer chunk). **Cadena de modelos de reserva (14/08):** `_gemini_stream_con_cadena` + `CADENA_FALLBACK_GEMINI` (3.5-flash-lite ↔ 3.6-flash) — si el **default global** sigue saturado, prueba el modelo de reserva antes de caer a DeepSeek; NO aplica a selecciones explícitas del usuario; si ya se emitió contenido no cambia de modelo (no duplica). Tests: `test_cadena_fallback_*` (4, subprocesos).
 
 **Estado de fases cerradas (no tocar):**
 - **Fase P (persistencia durable): CERRADA en su núcleo** (ver §8.5.3).
 - **Fase 4 (Bóveda/recuperación automática) y Fase 5 (Progreso/Mentoría): CERRADAS.**
 - **C1/C2, H.1 (olvido no retroactivo), H.2 (modo serializado) y H.3 (MCP disponible): CERRADOS.**
 
-**Suite de tests:** 411 passed (76 warnings preexistentes).
+**Suite de tests:** 415 passed (76 warnings preexistentes).
 
 **Tanda de estabilidad/UX asentada (14/08/2026):**
 - **Modelo por defecto global → `Gemini 3.5 Flash Lite`** (medido: 1.2s vs 24.2s del `3.1-flash-lite` saturado). Fix `gemini-3.1-pro` → `gemini-3.1-pro-preview`; opción `Gemini 3.6 Flash (High)` en la UI (`_modelo_gemini_str` en `modulos/ia.py`).

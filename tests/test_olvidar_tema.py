@@ -469,3 +469,228 @@ print("LLAMADAS=" + str(llamadas["n"]))
     assert "LLAMADAS=1" in proc.stdout, proc.stdout
     assert "EMITIDO=['primero']" in proc.stdout, proc.stdout
 
+
+def test_cadena_fallback_cambia_a_modelo_reserva():
+    """Si el default está saturado, _gemini_stream_con_cadena prueba el modelo de reserva."""
+    codigo = r"""
+import os, sys, types, types as _t
+
+def _stub(nombre, attrs):
+    m = types.ModuleType(nombre)
+    for k, v in attrs.items():
+        setattr(m, k, v)
+    sys.modules[nombre] = m
+
+_stub("modulos.memoria", {
+    "guardar_snapshot": lambda *a, **k: None,
+    "cargar_snapshot": lambda *a, **k: "",
+    "guardar_recuerdo": lambda *a, **k: True,
+    "invalidar_por_origen": lambda *a, **k: True,
+    "buscar_contexto": lambda *a, **k: [],
+    "iniciar_busqueda_anticipada": lambda *a, **k: None,
+    "obtener_resultado_anticipado": lambda *a, **k: None,
+})
+_stub("modulos.archivos", {
+    "eliminar_elemento": lambda *a, **k: "",
+    "leer_contenido_archivo": lambda *a, **k: "",
+})
+
+import modulos.ia as ia
+
+class Error503(Exception):
+    def __init__(self):
+        self.code = 503
+        super().__init__("high demand")
+
+llamadas = []
+def fake_generate(model, contents, config):
+    llamadas.append(model)
+    if model == "gemini-3.5-flash-lite":
+        raise Error503()
+    return iter(["reserva-ok"])
+
+ia.cliente_genai = _t.SimpleNamespace(models=_t.SimpleNamespace(
+    generate_content_stream=fake_generate))
+
+resultado = list(ia._gemini_stream_con_cadena(
+    "gemini-3.5-flash-lite", [], None, usar_cadena=True, backoff_base=0.01))
+print("RESULTADO=" + str(resultado))
+print("MODELOS=" + str(llamadas))
+"""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    proc = subprocess.run([sys.executable, "-c", codigo], capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=60)
+    assert proc.returncode == 0, proc.stderr
+    assert "RESULTADO=['reserva-ok']" in proc.stdout, proc.stdout
+    assert "MODELOS=['gemini-3.5-flash-lite', 'gemini-3.5-flash-lite', 'gemini-3.6-flash']" in proc.stdout, proc.stdout
+
+
+def test_cadena_fallback_no_cambia_tras_emitir():
+    """Si ya se emitió contenido, la cadena NO cambia de modelo (evita duplicar)."""
+    codigo = r"""
+import os, sys, types, types as _t
+
+def _stub(nombre, attrs):
+    m = types.ModuleType(nombre)
+    for k, v in attrs.items():
+        setattr(m, k, v)
+    sys.modules[nombre] = m
+
+_stub("modulos.memoria", {
+    "guardar_snapshot": lambda *a, **k: None,
+    "cargar_snapshot": lambda *a, **k: "",
+    "guardar_recuerdo": lambda *a, **k: True,
+    "invalidar_por_origen": lambda *a, **k: True,
+    "buscar_contexto": lambda *a, **k: [],
+    "iniciar_busqueda_anticipada": lambda *a, **k: None,
+    "obtener_resultado_anticipado": lambda *a, **k: None,
+})
+_stub("modulos.archivos", {
+    "eliminar_elemento": lambda *a, **k: "",
+    "leer_contenido_archivo": lambda *a, **k: "",
+})
+
+import modulos.ia as ia
+
+class Error503(Exception):
+    def __init__(self):
+        self.code = 503
+        super().__init__("high demand")
+
+def _gen_que_falla():
+    yield "parcial"
+    raise Error503()
+
+llamadas = []
+def fake_generate(model, contents, config):
+    llamadas.append(model)
+    return _gen_que_falla()
+
+ia.cliente_genai = _t.SimpleNamespace(models=_t.SimpleNamespace(
+    generate_content_stream=fake_generate))
+
+emitido = []
+try:
+    for chunk in ia._gemini_stream_con_cadena(
+        "gemini-3.5-flash-lite", [], None, usar_cadena=True, backoff_base=0.01):
+        emitido.append(chunk)
+    fallo = False
+except Error503:
+    fallo = True
+print("FALLO=" + str(fallo))
+print("EMITIDO=" + str(emitido))
+print("MODELOS=" + str(llamadas))
+"""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    proc = subprocess.run([sys.executable, "-c", codigo], capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=60)
+    assert proc.returncode == 0, proc.stderr
+    assert "FALLO=True" in proc.stdout, proc.stdout
+    assert "EMITIDO=['parcial']" in proc.stdout, proc.stdout
+    assert "MODELOS=['gemini-3.5-flash-lite']" in proc.stdout, proc.stdout
+
+
+def test_cadena_fallback_usa_cadena_false_es_retry_puro():
+    """usar_cadena=False: solo el modelo activo (sin probar reservas)."""
+    codigo = r"""
+import os, sys, types, types as _t
+
+def _stub(nombre, attrs):
+    m = types.ModuleType(nombre)
+    for k, v in attrs.items():
+        setattr(m, k, v)
+    sys.modules[nombre] = m
+
+_stub("modulos.memoria", {
+    "guardar_snapshot": lambda *a, **k: None,
+    "cargar_snapshot": lambda *a, **k: "",
+    "guardar_recuerdo": lambda *a, **k: True,
+    "invalidar_por_origen": lambda *a, **k: True,
+    "buscar_contexto": lambda *a, **k: [],
+    "iniciar_busqueda_anticipada": lambda *a, **k: None,
+    "obtener_resultado_anticipado": lambda *a, **k: None,
+})
+_stub("modulos.archivos", {
+    "eliminar_elemento": lambda *a, **k: "",
+    "leer_contenido_archivo": lambda *a, **k: "",
+})
+
+import modulos.ia as ia
+
+llamadas = []
+def fake_generate(model, contents, config):
+    llamadas.append(model)
+    return iter(["ok"])
+
+ia.cliente_genai = _t.SimpleNamespace(models=_t.SimpleNamespace(
+    generate_content_stream=fake_generate))
+
+resultado = list(ia._gemini_stream_con_cadena(
+    "gemini-3.5-flash-lite", [], None, usar_cadena=False))
+print("RESULTADO=" + str(resultado))
+print("MODELOS=" + str(llamadas))
+"""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    proc = subprocess.run([sys.executable, "-c", codigo], capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=60)
+    assert proc.returncode == 0, proc.stderr
+    assert "RESULTADO=['ok']" in proc.stdout, proc.stdout
+    assert "MODELOS=['gemini-3.5-flash-lite']" in proc.stdout, proc.stdout
+
+
+def test_cadena_fallback_agota_y_relanza():
+    """Si toda la cadena está saturada, re-lanza el último error (cae a DeepSeek)."""
+    codigo = r"""
+import os, sys, types, types as _t
+
+def _stub(nombre, attrs):
+    m = types.ModuleType(nombre)
+    for k, v in attrs.items():
+        setattr(m, k, v)
+    sys.modules[nombre] = m
+
+_stub("modulos.memoria", {
+    "guardar_snapshot": lambda *a, **k: None,
+    "cargar_snapshot": lambda *a, **k: "",
+    "guardar_recuerdo": lambda *a, **k: True,
+    "invalidar_por_origen": lambda *a, **k: True,
+    "buscar_contexto": lambda *a, **k: [],
+    "iniciar_busqueda_anticipada": lambda *a, **k: None,
+    "obtener_resultado_anticipado": lambda *a, **k: None,
+})
+_stub("modulos.archivos", {
+    "eliminar_elemento": lambda *a, **k: "",
+    "leer_contenido_archivo": lambda *a, **k: "",
+})
+
+import modulos.ia as ia
+
+class Error503(Exception):
+    def __init__(self):
+        self.code = 503
+        super().__init__("high demand")
+
+llamadas = []
+def fake_generate(model, contents, config):
+    llamadas.append(model)
+    raise Error503()
+
+ia.cliente_genai = _t.SimpleNamespace(models=_t.SimpleNamespace(
+    generate_content_stream=fake_generate))
+
+try:
+    list(ia._gemini_stream_con_cadena(
+        "gemini-3.5-flash-lite", [], None, usar_cadena=True, backoff_base=0.01))
+    fallo = False
+except Error503:
+    fallo = True
+print("FALLO=" + str(fallo))
+print("MODELOS=" + str(llamadas))
+"""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    proc = subprocess.run([sys.executable, "-c", codigo], capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=60)
+    assert proc.returncode == 0, proc.stderr
+    assert "FALLO=True" in proc.stdout, proc.stdout
+    assert "MODELOS=['gemini-3.5-flash-lite', 'gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-3.6-flash']" in proc.stdout, proc.stdout
+

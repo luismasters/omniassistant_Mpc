@@ -1,11 +1,11 @@
 chromadb==1.5.9
 customtkinter==5.2.2
-pywebview>=6.2.1
+pywebview==6.2.1
 ddgs==9.14.4
 edge_tts==7.2.8
 faster_whisper==1.2.1
 GitPython==3.1.50
-google-genai>=2.0.0
+google-genai==2.11.0
 keyboard==0.13.5
 mcp==1.28.0
 numpy==2.4.6
@@ -17,12 +17,12 @@ pygame==2.6.1
 python-dotenv==1.2.2
 pywin32==311
 pypdf==5.8.0
-scipy>=1.13,<1.18
+scipy==1.17.1
 screeninfo==0.8.1
 sounddevice==0.5.5
 thefuzz==0.22.1
 watchdog==6.0.0
 # Dependencias opcionales
 # pycaw comtypes  # Para skill control_audio
-pytest>=8.0       # Para ejecutar tests
+pytest==9.1.1     # Para ejecutar tests
 vosk
