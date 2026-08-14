@@ -912,7 +912,18 @@ def _procesar_mensaje(texto_usuario, modo_voz=False, ui_callback=None, turno_id=
                 capacidad_activa = MODO_ACTUAL
             else:
                 from modulos.prompts import detectar_capacidad_por_tema
-                capacidad_activa = detectar_capacidad_por_tema(texto_usuario) or "general"
+                capacidad_activa = detectar_capacidad_por_tema(texto_usuario)
+                if not capacidad_activa and not _es_intencion_comando_directo(texto_usuario):
+                    # Refinamiento por embeddings (Fase D, Punto 3): SOLO cuando
+                    # las keywords no detectan señal y NO es un comando directo
+                    # (evita activaciones no deseadas y carga en frío del modelo).
+                    # Conservador: umbral + margen (ver modulos/detector_capacidad).
+                    try:
+                        from modulos.detector_capacidad import detectar_capacidad_por_embeddings
+                        capacidad_activa = detectar_capacidad_por_embeddings(texto_usuario)
+                    except Exception as e:
+                        logger.debug(f"Activación por embeddings degradada: {e}")
+                capacidad_activa = capacidad_activa or "general"
 
             # Señal a la UI: la capacidad activa del turno (para el chip).
             try:

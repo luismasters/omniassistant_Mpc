@@ -93,6 +93,11 @@ ALIASES_USUARIO = {"luis": ""}
 # Configurable por env: ARGUS_MODELO_DEFECTO.
 MODELO_DEFECTO_GLOBAL = os.getenv("ARGUS_MODELO_DEFECTO", "Gemini 3.5 Flash Lite")
 
+# Activación de capacidad por embeddings (Fase D, Punto 3, refinamiento):
+# similitud semántica contra prototipos cuando las keywords no detectan señal.
+# Kill-switch por env: ARGUS_ACTIVACION_CAPACIDAD_EMBEDDINGS=0 lo desactiva.
+ACTIVACION_CAPACIDAD_EMBEDDINGS = os.getenv("ARGUS_ACTIVACION_CAPACIDAD_EMBEDDINGS", "1") != "0"
+
 # Ciudad para el widget de clima (configurable desde .env)
 CIUDAD_CLIMA = os.getenv("CIUDAD_CLIMA", "San Martin, Buenos Aires, Argentina")
 

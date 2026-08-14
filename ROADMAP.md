@@ -361,7 +361,7 @@ Escritura (W1-4), lectura (R1-3), recuperación (REC1-4, incl. no auto-inyecció
 
 **Estado de puntos/ítems relacionados:**
 - **Mentores temáticos (mentoría parametrizada por tema): ⏳ APLAZADOS.** Se deja anotado como evolución futura: desacoplar `progreso_mentoria` de un solo `perfil_mentor.json` hacia un registro de mentores temáticos con avance propio (aprovecha el Punto 3 ya implementado).
-- **Refinamiento de activación por embeddings** (reemplazar keywords del Punto 3): pendiente, ligado a la skill "detección de skills por embeddings" (§5).
+- **Refinamiento de activación por embeddings: ✅ IMPLEMENTADO (14/08).** `modulos/detector_capacidad.py` refina cuando las keywords del Punto 3 no detectan señal **y** el mensaje no es un comando directo (`_es_intencion_comando_directo`), con diseño ANTIFALSOS POSITIVOS: umbral 0.62 + margen 0.05 calibrados con datos reales (all-MiniLM-L6-v2 cacheado, offline) — paráfrasis cercanas 0.60–1.00, neutrales (hora/clima/chistes/comandos) máx ~0.57; activa SOLO si supera el umbral Y le saca margen a la otra capacidad. Lazy-import del modelo (tests offline no lo cargan); caché `capacidad:<texto>` reutiliza `_cache_get/_cache_set` de la bóveda; kill-switch env `ARGUS_ACTIVACION_CAPACIDAD_EMBEDDINGS=0`; ante cualquier falla degrada a general. Verificación end-to-end con el modelo real: 18/18 correctos (cero falsos positivos; "explicame que es X" queda en general por diseño, 0.33). Tests: `tests/test_detector_capacidad.py` (12, lógica pura + stub de memoria + kill-switch).
 - **Robustez de la API (Bloque 1): ✅ IMPLEMENTADO.** `_es_error_transitorio_gemini()` (503/429/ResourceExhausted/high demand/timeouts) + `_fallback_deepseek()` reutilizable: ante saturación, el turno continúa con DeepSeek en vez de mostrar "❌ Error en el streaming". Retry con backoff contra el MISMO Gemini: `_gemini_stream_con_retry` (2 intentos, backoff exponencial 0.5/1s, solo si el 503 ocurre ANTES del primer chunk). **Cadena de modelos de reserva (14/08):** `_gemini_stream_con_cadena` + `CADENA_FALLBACK_GEMINI` (3.5-flash-lite ↔ 3.6-flash) — si el **default global** sigue saturado, prueba el modelo de reserva antes de caer a DeepSeek; NO aplica a selecciones explícitas del usuario; si ya se emitió contenido no cambia de modelo (no duplica). Tests: `test_cadena_fallback_*` (4, subprocesos).
 
 **Estado de fases cerradas (no tocar):**
@@ -369,7 +369,7 @@ Escritura (W1-4), lectura (R1-3), recuperación (REC1-4, incl. no auto-inyecció
 - **Fase 4 (Bóveda/recuperación automática) y Fase 5 (Progreso/Mentoría): CERRADAS.**
 - **C1/C2, H.1 (olvido no retroactivo), H.2 (modo serializado) y H.3 (MCP disponible): CERRADOS.**
 
-**Suite de tests:** 415 passed (76 warnings preexistentes).
+**Suite de tests:** 431 passed (76 warnings preexistentes).
 
 **Tanda de estabilidad/UX asentada (14/08/2026):**
 - **Modelo por defecto global → `Gemini 3.5 Flash Lite`** (medido: 1.2s vs 24.2s del `3.1-flash-lite` saturado). Fix `gemini-3.1-pro` → `gemini-3.1-pro-preview`; opción `Gemini 3.6 Flash (High)` en la UI (`_modelo_gemini_str` en `modulos/ia.py`).
