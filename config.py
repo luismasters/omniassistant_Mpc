@@ -68,6 +68,22 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 # =========================================================
+# MAQUINA (rutas por equipo) — personalizables vía .env
+# =========================================================
+# Rutas personales que antes estaban hardcodeadas en modulos/sistema.py.
+# Se configuran por equipo en el .env local (que NO se commitea).
+#
+# ARGUS_RUTA_JUEGOS: carpeta extra que el radar de juegos escanea para
+# lanzar juegos "portables" que no instalan acceso directo en el menú
+# Inicio. Vacío ("") = no se escanea nada extra.
+RUTA_JUEGOS = os.getenv("ARGUS_RUTA_JUEGOS", "")
+
+# ALIASES_USUARIO: {nombre_usuario_viejo: ruta_destino}. Con destino ""
+# se reemplaza por el home real (os.path.expanduser("~")). Sirve cuando el
+# LLM/usuario escribe una ruta con un nombre de usuario anterior al actual.
+ALIASES_USUARIO = {"luis": ""}
+
+# =========================================================
 # MODELO POR DEFECTO GLOBAL (Fase D, Punto 2)
 # =========================================================
 # "Por Defecto"/"Auto" ya NO depende del modo: es UNA preferencia global.

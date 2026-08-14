@@ -104,7 +104,7 @@ Objetivo: pasar de "demo impresionante" a "herramienta que no pierde el trabajo 
 - [x] **Persistencia del contexto de chat** (no perder conversación si la app crashea) — implementada como **Fase P** (ver §8.5.3): JSONL append-only por `context_id` + restauración de prefs/estado de proyecto al arrancar.
 - [ ] **Graceful shutdown** (guardar estado, cerrar ChromaDB, detener timers al salir) — parcial: hay flush + `marcar_sesiones_abiertas_como_aborted` al salir (§8.5.3); falta cerrar ChromaDB y detener timers explícitamente.
 - [x] **Validación amigable de API keys** (antes `config.py` crasheaba con `ValueError`; ahora degrada con `GEMINI_API_KEY=""` y la IA responde con aviso)
-- [ ] **Sacar rutas hardcodeadas** (`E:\Mis_Juegos_Yiri`, `c:\users\luis\` en `sistema.py`) → mapeo por máquina en `config.py`
+- [x] **Sacar rutas hardcodeadas** (`E:\Mis_Juegos_Yiri`, `c:\users\luis\` en `sistema.py`) → mapeo por máquina en `config.py` (14/08/2026: `config.RUTA_JUEGOS` + `config.ALIASES_USUARIO`, tests en `tests/test_rutas_por_maquina.py`)
 - [ ] **Versionado semántico** (`__version__` + `CHANGELOG.md`)
 - [ ] **Una sola entrada oficial** (aclarar `main_web.py` vs `main_gui.py` deprecado)
 
@@ -437,6 +437,8 @@ Traducción rápida de frases o fragmentos de código.
 |---|----------|---------|---------|
 | 1 | Cobertura de tests incompleta | `tests/` | Riesgo de regresión |
 | 2 | Rutas hardcodeadas de una máquina | `sistema.py` | No portable |
+
+> **Deuda #2 RESUELTA (14/08/2026):** `E:\Mis_Juegos_Yiri` → `config.RUTA_JUEGOS` (env `ARGUS_RUTA_JUEGOS`, ya seteado en el `.env` local) y el hack `c:\users\luis` → `config.ALIASES_USUARIO = {"luis": ""}` (alias genérico a `~` con barra final para no pisar usuarios más largos). Tests: `tests/test_rutas_por_maquina.py` (4).
 | 3 | Sin type hints en módulos clave | `sistema.py`, `audio_custom.py`, `controlador_acciones.py` | Mantenimiento difícil |
 | 5 | Contexto de chat en memoria (se pierde) | `config.py` | Pérdida de trabajo del usuario |
 | 6 | Versiones flotantes | `requirements.txt` | Puede romper |

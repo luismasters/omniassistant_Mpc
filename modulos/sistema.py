@@ -11,6 +11,7 @@ from screeninfo import get_monitors
 import win32process
 from thefuzz import process
 from modulos.logger import logger
+import config
 
 # =====================================================================
 # LISTA DE SITIOS WEB COMUNES
@@ -395,8 +396,14 @@ def explorar_directorio(ruta_base):
     print(f"[EXPLORADOR] Argus esta mirando dentro de: '{ruta_base}'")
     try:
         usuario_real = os.path.expanduser("~")
-        if "c:\\users\\luis\\" in ruta_base.lower() and "luism" not in ruta_base.lower():
-            ruta_base = ruta_base.lower().replace("c:\\users\\luis", usuario_real)
+        # Alias de usuario por máquina (config.ALIASES_USUARIO): reescribe
+        # prefijos tipo "c:\users\<usuario_viejo>\" hacia el home real. La
+        # barra final evita pisar nombres de usuario más largos (ej. "luism"
+        # contiene "luis" como prefijo).
+        for alias_viejo, destino in config.ALIASES_USUARIO.items():
+            prefijo = f"c:\\users\\{alias_viejo}\\"
+            if prefijo in ruta_base.lower():
+                ruta_base = ruta_base.lower().replace(prefijo, usuario_real if not destino else destino)
         usuario = os.path.expanduser("~")
         ruta_docs = obtener_ruta_dinamica([os.path.join(usuario, "Documents"), os.path.join(usuario, "OneDrive", "Documentos")])
         ruta_desk = obtener_ruta_dinamica([os.path.join(usuario, "Desktop"), os.path.join(usuario, "OneDrive", "Escritorio")])
@@ -443,8 +450,10 @@ def radar_inteligente(nombre_buscado):
         os.path.expanduser(r"~\Desktop"),
         r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs",
         os.path.join(usuario, r"AppData\Roaming\Microsoft\Windows\Start Menu\Programs"),
-        r"E:\Mis_Juegos_Yiri"
     ]
+    # Carpeta extra de juegos portables por equipo (config.RUTA_JUEGOS, .env).
+    if config.RUTA_JUEGOS:
+        rutas_a_escanear.append(config.RUTA_JUEGOS)
     archivos_encontrados = {}
     carpetas_ignoradas = ["venv", ".git", "node_modules", "__pycache__", "obj", "bin"]
     for ruta in rutas_a_escanear:
