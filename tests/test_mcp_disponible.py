@@ -52,6 +52,7 @@ def bridge_modulo():
         _stub("modulos.perfil_mentor", {
             "cargar_perfil_mentor": lambda *a, **k: {},
             "guardar_perfil_mentor": lambda *a, **k: None,
+            "listar_temas_mentoria": lambda *a, **k: {"tema_activo": "", "temas": []},
         })
         _stub("modulos.skills.wake_word.gestor_wake_word", {
             "gestor_wake_word": types.SimpleNamespace(

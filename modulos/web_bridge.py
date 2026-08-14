@@ -272,6 +272,13 @@ class ArgusWebBridge:
                     js_cmd = f"if (window.actualizarChipCapacidad) window.actualizarChipCapacidad({json.dumps(str(texto or 'general'))});"
                     win.evaluate_js(js_cmd)
                 return
+            if remitente_control == "__TEMA_ACTIVO__":
+                win = self._window or (webview.windows[0] if webview.windows else None)
+                if win:
+                    payload = texto if isinstance(texto, dict) else {"slug": "", "nombre": str(texto or "")}
+                    js_cmd = f"if (window.actualizarChipTema) window.actualizarChipTema({json.dumps(payload)});"
+                    win.evaluate_js(js_cmd)
+                return
 
             if not texto and nueva_linea:
                 return
@@ -286,6 +293,7 @@ class ArgusWebBridge:
     def obtener_estado_inicial(self) -> dict:
         """Devuelve el estado global inicial al frontend al cargar la aplicación."""
         try:
+            from modulos.perfil_mentor import listar_temas_mentoria
             perfil_actual = cargar_perfil_mentor()
             modelo_real = resolver_modelo_actual(estado.modelo_seleccionado, estado.modo_actual)
             return {
@@ -299,10 +307,38 @@ class ArgusWebBridge:
                 "mcp_disponible": modelo_soporta_mcp(estado.modelo_seleccionado, estado.modo_actual),
                 "workspace_actual": estado.workspace_actual,
                 "capacidad_fijada": estado.obtener_capacidad_fijada(),
+                "tema_mentoria": listar_temas_mentoria(),
             }
         except Exception as e:
             logger.exception(f"Error en obtener_estado_inicial: {e}")
             return {"error": str(e)}
+
+    def obtener_temas_mentoria(self) -> dict:
+        """Devuelve el registro de temas de mentoría (activo + lista) para la UI."""
+        try:
+            from modulos.perfil_mentor import listar_temas_mentoria
+            return listar_temas_mentoria()
+        except Exception as e:
+            logger.exception(f"Error obteniendo temas de mentoría: {e}")
+            return {"exito": False, "error": str(e), "tema_activo": "", "temas": []}
+
+    def cambiar_tema_mentoria(self, slug: str) -> dict:
+        """Cambia el tema de mentoría activo desde la GUI."""
+        try:
+            from modulos.perfil_mentor import cambiar_tema_activo
+            return cambiar_tema_activo(slug)
+        except Exception as e:
+            logger.exception(f"Error cambiando tema de mentoría '{slug}': {e}")
+            return {"exito": False, "mensaje": "Ocurrió un error al cambiar el tema."}
+
+    def crear_tema_mentoria(self, nombre: str, objetivo_general: str = "") -> dict:
+        """Crea un tema de mentoría nuevo desde la GUI y lo deja activo."""
+        try:
+            from modulos.perfil_mentor import crear_tema
+            return crear_tema(nombre, objetivo_general)
+        except Exception as e:
+            logger.exception(f"Error creando tema de mentoría '{nombre}': {e}")
+            return {"exito": False, "mensaje": "Ocurrió un error al crear el tema."}
 
     def obtener_panel_memoria(self) -> dict:
         """

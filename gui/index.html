@@ -94,6 +94,20 @@
             <span class="mode-active-dot"></span>
           </button>
         </div>
+        <!-- TEMA ACTIVO DE MENTORÍA (multitema, Fase 5) -->
+        <div class="tema-sidebar hidden" id="temaSidebar">
+          <label class="tema-sidebar-label" for="temaSelect">Tema activo</label>
+          <div class="tema-sidebar-row">
+            <div class="select-wrapper" style="flex: 1;">
+              <select id="temaSelect" class="hud-select" title="Tema de mentoría activo. Los avances de la sesión se guardan en este tema.">
+                <option value="">—</option>
+              </select>
+            </div>
+            <button class="action-btn" id="btnNuevoTema" title="Crear un tema de mentoría nuevo (queda activo)" style="flex: 0 0 auto; padding: 6px 8px;">
+              <span class="mode-btn-icon" style="font-size: 14px;">＋</span>
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- WORKSPACE -->
@@ -167,6 +181,11 @@
             <span class="cap-icon" id="capacidadChipIcon">💬</span>
             <span id="capacidadChipLabel">General</span>
             <span class="cap-pin" id="capacidadChipPin" title="Click para fijar (📌) o volver a automático">⚡</span>
+          </span>
+          <!-- CHIP TEMA ACTIVO DE MENTORÍA (multitema, Fase 5) -->
+          <span class="tema-chip hidden" id="temaChip" title="Tema de mentoría activo. Cambialo desde el selector de la barra lateral.">
+            <span class="tema-icon">🎯</span>
+            <span id="temaChipLabel">—</span>
           </span>
           <!-- CHIP ESTADO MCP (herramientas según modelo/skill) -->
           <span class="mcp-chip" id="mcpStatusChip" title="Herramientas MCP: solo se activan con modelo Gemini y sin skill activa en el turno.">🧩 MCP ✓</span>
@@ -442,6 +461,33 @@
         <div class="memoria-confirm-actions">
           <button class="hud-btn-secondary" id="btnCancelarNota">Cancelar</button>
           <button class="hud-btn-primary" id="btnConfirmarNota">💾 Guardar en bóveda</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MODAL CREAR TEMA DE MENTORÍA (Fase 5) ───────────────── -->
+  <div class="modal-overlay hidden" id="modalNuevoTema">
+    <div class="modal-card modal-card-memoria">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span class="modal-icon">🎯</span>
+          <div>
+            <h3>Nuevo tema de mentoría</h3>
+            <span class="modal-subtitle">Se crea y queda como tema activo. Los avances de las próximas sesiones se guardarán acá.</span>
+          </div>
+        </div>
+        <button class="modal-close-btn" id="btnCloseNuevoTema">✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="memoria-nota-label" for="nuevoTemaNombreInput">Nombre del tema:</label>
+        <input type="text" id="nuevoTemaNombreInput" class="memoria-nota-input" placeholder="p.ej. Inglés, Música, Finanzas, Arduino" />
+        <label class="memoria-nota-label" for="nuevoTemaObjetivoInput">Objetivo general (opcional):</label>
+        <textarea id="nuevoTemaObjetivoInput" class="memoria-nota-textarea" rows="3" placeholder="p.ej. Alcanzar nivel B2 en conversación"></textarea>
+        <div id="nuevoTemaFeedback" class="ingesta-feedback" style="display:none;"></div>
+        <div class="memoria-confirm-actions">
+          <button class="hud-btn-secondary" id="btnCancelarNuevoTema">Cancelar</button>
+          <button class="hud-btn-primary" id="btnConfirmarNuevoTema">🎯 Crear tema</button>
         </div>
       </div>
     </div>

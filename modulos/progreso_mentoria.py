@@ -183,9 +183,47 @@ def clasificar_evento(evento: dict) -> str:
 
 # ─── APLICACIÓN AL ESTADO ESTRUCTURADO ───────────────────────────────────────
 
-def _aplicar_estado(perfil: dict, evento: dict) -> bool:
-    """Actualiza perfil["progreso"] en memoria. Devuelve True si hubo cambio."""
-    prog = perfil.setdefault("progreso", {})
+def _resolver_contenedor_tema(perfil: dict, evento: dict):
+    """
+    Devuelve (contenedor, nombre_tema) para un evento.
+
+    El contenedor es el dict que posee la clave 'progreso' a actualizar:
+      - Tema activo → el PERFIL completo (espejo legacy de nivel superior);
+      - Otro tema (evento con campo `tema`) → el dict del tema en el registro.
+    Si el evento nombra un tema que aún no existe, se crea en el registro
+    (sin activarlo) para que "empezar un tema por conversación" funcione.
+    """
+    from modulos.perfil_mentor import _tema_activo_slug, obtener_tema
+
+    nombre_evento = str(evento.get("tema") or "").strip()
+    if nombre_evento:
+        temas = perfil.get("temas")
+        if isinstance(temas, dict):
+            slug = _slug_estable(nombre_evento)
+            for s, t in temas.items():
+                if s == slug or (t.get("nombre") or "").lower() == nombre_evento.lower():
+                    slug = s
+                    break
+            if slug in temas:
+                return temas[slug], temas[slug].get("nombre", slug)
+            nuevo = {
+                "nombre": nombre_evento,
+                "objetivo_general": "",
+                "contexto": {},
+                "progreso": _estado_progreso_vacio(),
+                "ultimo_avance_registrado": "Ninguno",
+                "historial_sesiones": [],
+            }
+            temas[slug] = nuevo
+            return nuevo, nombre_evento
+    slug = _tema_activo_slug(perfil)
+    tema = obtener_tema(perfil, slug)
+    return perfil, (tema.get("nombre", slug) if tema else slug)
+
+
+def _aplicar_estado(contenedor: dict, evento: dict) -> bool:
+    """Actualiza contenedor["progreso"] en memoria. Devuelve True si hubo cambio."""
+    prog = contenedor.setdefault("progreso", {})
     for clave, default in _estado_progreso_vacio().items():
         prog.setdefault(clave, default)
 
@@ -284,7 +322,7 @@ def _aplicar_estado(perfil: dict, evento: dict) -> bool:
 
 # ─── PERSISTENCIA SEMÁNTICA (Bóveda) ─────────────────────────────────────────
 
-def _persistir_boveda(perfil: dict, evento: dict) -> bool:
+def _persistir_boveda(contenedor: dict, evento: dict, tema_nombre: str = "") -> bool:
     """
     Convierte un evento semántico en recuerdo de la Bóveda SOLO si:
       - el tipo está en el allowlist semántico;
@@ -293,7 +331,8 @@ def _persistir_boveda(perfil: dict, evento: dict) -> bool:
       - NO se persistió antes (guard sha256 → Bóveda no es un diario).
     Reutiliza el API público guardar_recuerdo() (contrato boveda:*), sin
     tocar la arquitectura de la bóveda. origen_fuente es CONSTANTE para que
-    todos los recuerdos de mentoría sean identificables en conjunto.
+    todos los recuerdos de mentoría sean identificables en conjunto; el tema
+    viaja en metadatos para poder filtrar por tema si hace falta.
     """
     tipo = str(evento.get("tipo") or "").strip()
     if tipo not in TIPOS_SEMANTICOS:
@@ -309,7 +348,7 @@ def _persistir_boveda(perfil: dict, evento: dict) -> bool:
 
     # Guard anti-duplicación: el mismo (sha de texto) ya persistido → no repetir.
     sha = _sha_texto(texto)
-    prog = perfil.setdefault("progreso", {})
+    prog = contenedor.setdefault("progreso", {})
     for clave, default in _estado_progreso_vacio().items():
         prog.setdefault(clave, default)
     persistidos = prog["recuerdos_persistidos"]
@@ -319,10 +358,13 @@ def _persistir_boveda(perfil: dict, evento: dict) -> bool:
 
     try:
         from modulos.memoria import guardar_recuerdo
+        metadatos = {"tipo_relacionado": tipo}
+        if tema_nombre:
+            metadatos["tema_relacionado"] = tema_nombre
         exito = guardar_recuerdo(
             texto_a_guardar=texto,
             etiqueta_tema=ETIQUETA_BOVEDA,
-            metadatos_extra={"tipo_relacionado": tipo},
+            metadatos_extra=metadatos,
             origen_fuente=ORIGEN_FUENTE_MENTORIA,
         )
     except Exception as e:
@@ -387,12 +429,16 @@ def procesar_eventos(perfil: dict, eventos: list) -> dict:
         if clasif == "descartable":
             stats["descartados"] += 1
             continue
+        contenedor, tema_nombre = _resolver_contenedor_tema(perfil, evento)
+        if contenedor is None:
+            stats["descartados"] += 1
+            continue
         antes = _serializar(perfil)
         if clasif in ("estado", "ambos"):
             stats["estado"] += 1
-            _aplicar_estado(perfil, evento)
+            _aplicar_estado(contenedor, evento)
         if clasif in ("boveda", "ambos"):
-            if _persistir_boveda(perfil, evento):
+            if _persistir_boveda(contenedor, evento, tema_nombre):
                 stats["recuerdos_boveda"] += 1
         if _serializar(perfil) != antes:
             stats["cambios_perfil"] += 1
@@ -438,17 +484,21 @@ def extraer_eventos_progreso(ultimos_mensajes: list) -> list:
     tipos_semanticos = ", ".join(sorted(TIPOS_SEMANTICOS))
 
     prompt = (
-        "Analizá la conversación reciente entre Luis (estudiante) y Argus (su Mentor Tecnológico).\n"
+        "Analizá la conversación reciente entre Luis (estudiante) y Argus (su Mentor).\n"
         "Extraé SOLO eventos de progreso de mentoría. Cada evento es un objeto JSON:\n"
         '  {"tipo": "<tipo>", "texto": "descripción breve", "importancia": 0-100,\n'
-        '   "titulo": "...", "prioridad": "alta|media|baja", "proyecto_asociado": "..."}\n\n'
-        "TIPOS DE ESTADO (actualizan el progreso estructurado de Luis):\n"
+        '   "titulo": "...", "prioridad": "alta|media|baja", "proyecto_asociado": "...",\n'
+        '   "tema": "nombre del tema de mentoría, p.ej. Desarrollo y carrera tech, Música, Inglés"}\n\n'
+        "El campo 'tema' es OBLIGATORIO en cada evento: identifica el tema de mentoría al que "
+        "pertenece el avance (no inventes temas nuevos salvo que la conversación claramente se "
+        "mueva a otro ámbito; en ese caso usá ese nombre).\n\n"
+        "TIPOS DE ESTADO (actualizan el progreso estructurado del tema):\n"
         f"  {tipos_estado}\n"
         "  - objetivo_*: 'titulo' es el nombre del objetivo; prioridad/proyecto_asociado opcionales.\n"
         "  - proximo_paso / dificultad / hito_completado / continuidad: 'texto' con lo concreto.\n\n"
         "TIPOS SEMÁNTICOS (avances y decisiones con valor de continuidad futura):\n"
         f"  {tipos_semanticos}\n"
-        "  - avance_significativo: logro técnico concreto de la sesión.\n"
+        "  - avance_significativo: logro concreto de la sesión.\n"
         "  - decision_importante / aprendizaje_relevante / contexto_proyecto.\n\n"
         "REGLAS:\n"
         "1. Importancia 0-100: <40 trivial, 40-64 útil, >=65 muy relevante.\n"

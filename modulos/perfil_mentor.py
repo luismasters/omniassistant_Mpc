@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import re
@@ -10,60 +11,242 @@ RUTA_PERFIL_MENTOR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "p
 
 _lock_perfil_mentor = threading.Lock()
 
-ESQUEMA_MENTOR_DEFECTO = {
-    "stack_objetivo": {
-        "frontend": "Pendiente de definir",
-        "backend": "Pendiente de definir",
-        "bases_de_datos": "Pendiente de definir",
-        "otras_herramientas": []
-    },
-    "tecnologias_aprendidas": [],
-    "tecnologias_en_estudio": [],
-    "proyectos_de_portafolio": [],
-    "ultimo_avance_registrado": "Ninguno",
-    "historial_sesiones": [],
-    "claves_de_contexto_faltantes": [
-        "¿Prefieres enfocarte en desarrollo Frontend, Backend o Fullstack?",
-        "¿Qué lenguajes o tecnologías aprendiste en la UTN FRGP y con cuáles te sentiste más cómodo?",
-        "¿Tienes en mente alguna idea de proyecto para construir como parte de tu portafolio?"
-    ],
-    "progreso": {
-        "objetivos": [],
-        "proximos_pasos": [],
-        "dificultades_activas": [],
-        "hitos_completados": [],
-        "continuidad": {"ultimo_tema": "", "ultima_fecha": "", "donde_quedamos": ""},
-        "recuerdos_persistidos": []
-    }
+# ─── MODELO MULTITEMA (tema → sesión → avance) ─────────────────────────────
+# El archivo es v2: un registro de TEMAS con `tema_activo`. Los campos legacy
+# de nivel superior (stack_objetivo, tecnologias_*, proyectos_de_portafolio,
+# progreso, historial_sesiones, ultimo_avance_registrado, claves_*) son un
+# ESPEJO del tema activo, mantenido por _sincronizar_tema_activo() en cada
+# guardado. No son fuente de verdad: se conservan para no romper el contrato
+# histórico (ids `mentor:*`, panel, tests y lectores externos).
+
+SLUG_TEMA_DESARROLLO = "desarrollo_y_carrera"
+NOMBRE_TEMA_DESARROLLO = "Desarrollo y carrera tech"
+
+_STACK_OBJETIVO_DEFECTO = {
+    "frontend": "Pendiente de definir",
+    "backend": "Pendiente de definir",
+    "bases_de_datos": "Pendiente de definir",
+    "otras_herramientas": [],
 }
+
+_PROGRESO_DEFECTO = {
+    "objetivos": [],
+    "proximos_pasos": [],
+    "dificultades_activas": [],
+    "hitos_completados": [],
+    "continuidad": {"ultimo_tema": "", "ultima_fecha": "", "donde_quedamos": ""},
+    "recuerdos_persistidos": [],
+}
+
+_CLAVES_CONTEXTO_FALTANTES_DEFECTO = [
+    "¿Prefieres enfocarte en desarrollo Frontend, Backend o Fullstack?",
+    "¿Qué lenguajes o tecnologías aprendiste en la UTN FRGP y con cuáles te sentiste más cómodo?",
+    "¿Tienes en mente alguna idea de proyecto para construir como parte de tu portafolio?",
+]
+
+
+def _tema_default(slug: str) -> dict:
+    """Crea un tema de mentoría con su estructura mínima (no persiste)."""
+    if slug == SLUG_TEMA_DESARROLLO:
+        nombre = NOMBRE_TEMA_DESARROLLO
+    else:
+        nombre = slug.replace("_", " ").title()
+    return {
+        "nombre": nombre,
+        "objetivo_general": "",
+        "contexto": {
+            "stack_objetivo": copy.deepcopy(_STACK_OBJETIVO_DEFECTO),
+            "tecnologias_aprendidas": [],
+            "tecnologias_en_estudio": [],
+            "proyectos_de_portafolio": [],
+            "claves_de_contexto_faltantes": [],
+        },
+        "progreso": copy.deepcopy(_PROGRESO_DEFECTO),
+        "ultimo_avance_registrado": "Ninguno",
+        "historial_sesiones": [],
+    }
+
+
+def _perfil_default() -> dict:
+    """Estructura inicial del archivo v2 (copia fresca, sin refs compartidas)."""
+    return {
+        "meta": {"version": 2},
+        "tema_activo": SLUG_TEMA_DESARROLLO,
+        "temas": {SLUG_TEMA_DESARROLLO: _tema_default(SLUG_TEMA_DESARROLLO)},
+        # Espejo legacy del tema activo:
+        "stack_objetivo": copy.deepcopy(_STACK_OBJETIVO_DEFECTO),
+        "tecnologias_aprendidas": [],
+        "tecnologias_en_estudio": [],
+        "proyectos_de_portafolio": [],
+        "ultimo_avance_registrado": "Ninguno",
+        "historial_sesiones": [],
+        "claves_de_contexto_faltantes": list(_CLAVES_CONTEXTO_FALTANTES_DEFECTO),
+        "progreso": copy.deepcopy(_PROGRESO_DEFECTO),
+    }
+
+
+ESQUEMA_MENTOR_DEFECTO = _perfil_default()
+
+
+# ─── MIGRACIÓN v1 → v2 (idempotente) ───────────────────────────────────────
+
+def _migrar_a_v2(perfil: dict) -> dict:
+    """Convierte un perfil v1 (solo campos legacy) al modelo multitema v2."""
+    if isinstance(perfil.get("temas"), dict) and perfil.get("temas"):
+        return perfil
+    tema = {
+        "nombre": NOMBRE_TEMA_DESARROLLO,
+        "objetivo_general": "",
+        "contexto": {
+            "stack_objetivo": copy.deepcopy(perfil.get("stack_objetivo", _STACK_OBJETIVO_DEFECTO)),
+            "tecnologias_aprendidas": perfil.get("tecnologias_aprendidas", []),
+            "tecnologias_en_estudio": perfil.get("tecnologias_en_estudio", []),
+            "proyectos_de_portafolio": perfil.get("proyectos_de_portafolio", []),
+            "claves_de_contexto_faltantes": perfil.get("claves_de_contexto_faltantes", []),
+        },
+        "progreso": copy.deepcopy(perfil.get("progreso", _PROGRESO_DEFECTO)),
+        "ultimo_avance_registrado": perfil.get("ultimo_avance_registrado", "Ninguno"),
+        "historial_sesiones": perfil.get("historial_sesiones", []),
+    }
+    perfil["meta"] = {"version": 2}
+    perfil["tema_activo"] = SLUG_TEMA_DESARROLLO
+    perfil["temas"] = {SLUG_TEMA_DESARROLLO: tema}
+    return perfil
+
+
+def _asegurar_minimo(perfil: dict) -> dict:
+    """Completa claves faltantes (espejo legacy + registro de temas)."""
+    for k, v in _perfil_default().items():
+        if k not in perfil:
+            perfil[k] = copy.deepcopy(v)
+    temas = perfil.get("temas")
+    if not isinstance(temas, dict) or not temas:
+        perfil["temas"] = {SLUG_TEMA_DESARROLLO: _tema_default(SLUG_TEMA_DESARROLLO)}
+        perfil["tema_activo"] = SLUG_TEMA_DESARROLLO
+    if perfil.get("tema_activo") not in perfil["temas"]:
+        perfil["tema_activo"] = next(iter(perfil["temas"]))
+    tema = perfil["temas"][perfil["tema_activo"]]
+    for clave, default in (
+        ("nombre", "Sin nombre"),
+        ("objetivo_general", ""),
+        ("contexto", {}),
+        ("progreso", _PROGRESO_DEFECTO),
+        ("ultimo_avance_registrado", "Ninguno"),
+        ("historial_sesiones", []),
+    ):
+        if clave not in tema:
+            tema[clave] = copy.deepcopy(default)
+    if not isinstance(tema.get("contexto"), dict):
+        tema["contexto"] = {}
+    return perfil
+
+
+def _sincronizar_tema_activo(perfil: dict) -> None:
+    """
+    Vuelca el espejo legacy (nivel superior) dentro del tema activo del
+    registro. Se llama en CADA guardado: garantiza que `temas[tema_activo]`
+    refleje siempre la copia de trabajo de nivel superior.
+    """
+    temas = perfil.get("temas")
+    if not isinstance(temas, dict) or not temas:
+        perfil["temas"] = {SLUG_TEMA_DESARROLLO: _tema_default(SLUG_TEMA_DESARROLLO)}
+        temas = perfil["temas"]
+    slug = perfil.get("tema_activo", SLUG_TEMA_DESARROLLO)
+    if slug not in temas:
+        slug = SLUG_TEMA_DESARROLLO
+        perfil["tema_activo"] = slug
+        temas.setdefault(slug, _tema_default(slug))
+    tema = temas[slug]
+    ctx = tema.setdefault("contexto", {})
+    ctx["stack_objetivo"] = copy.deepcopy(perfil.get("stack_objetivo", _STACK_OBJETIVO_DEFECTO))
+    ctx["tecnologias_aprendidas"] = perfil.get("tecnologias_aprendidas", [])
+    ctx["tecnologias_en_estudio"] = perfil.get("tecnologias_en_estudio", [])
+    ctx["proyectos_de_portafolio"] = perfil.get("proyectos_de_portafolio", [])
+    ctx["claves_de_contexto_faltantes"] = perfil.get("claves_de_contexto_faltantes", [])
+    tema["progreso"] = copy.deepcopy(perfil.get("progreso", _PROGRESO_DEFECTO))
+    tema["ultimo_avance_registrado"] = perfil.get("ultimo_avance_registrado", "Ninguno")
+    tema["historial_sesiones"] = perfil.get("historial_sesiones", [])
+
+
+def _restaurar_mirror(perfil: dict) -> None:
+    """Copia el tema activo del registro al espejo legacy de nivel superior."""
+    temas = perfil.get("temas")
+    if not isinstance(temas, dict):
+        return
+    slug = perfil.get("tema_activo", SLUG_TEMA_DESARROLLO)
+    if slug not in temas:
+        return
+    tema = temas[slug]
+    ctx = tema.get("contexto", {}) or {}
+    perfil["stack_objetivo"] = copy.deepcopy(ctx.get("stack_objetivo", _STACK_OBJETIVO_DEFECTO))
+    perfil["tecnologias_aprendidas"] = ctx.get("tecnologias_aprendidas", [])
+    perfil["tecnologias_en_estudio"] = ctx.get("tecnologias_en_estudio", [])
+    perfil["proyectos_de_portafolio"] = ctx.get("proyectos_de_portafolio", [])
+    perfil["claves_de_contexto_faltantes"] = ctx.get("claves_de_contexto_faltantes", [])
+    perfil["progreso"] = copy.deepcopy(tema.get("progreso", _PROGRESO_DEFECTO))
+    perfil["ultimo_avance_registrado"] = tema.get("ultimo_avance_registrado", "Ninguno")
+    perfil["historial_sesiones"] = tema.get("historial_sesiones", [])
+
+
+def _tema_activo_slug(perfil: dict) -> str:
+    """Slug del tema activo, con fallback determinista al tema de desarrollo."""
+    temas = perfil.get("temas")
+    slug = perfil.get("tema_activo", SLUG_TEMA_DESARROLLO)
+    if not isinstance(temas, dict) or slug not in temas:
+        return SLUG_TEMA_DESARROLLO
+    return slug
+
+
+def obtener_tema(perfil: dict, slug: str = None) -> dict:
+    """Devuelve un tema del registro (sin tocar el espejo legacy)."""
+    temas = perfil.get("temas")
+    if not isinstance(temas, dict):
+        return None
+    slug = slug or _tema_activo_slug(perfil)
+    return temas.get(slug)
+
+
+def obtener_tema_por_nombre_o_slug(perfil: dict, texto) -> str:
+    """Encuentra el slug de un tema por nombre o slug (case-insensitive)."""
+    if not texto:
+        return None
+    low = str(texto).strip().lower()
+    temas = perfil.get("temas")
+    if not isinstance(temas, dict):
+        return None
+    for slug, t in temas.items():
+        if slug == low or (t.get("nombre") or "").lower() == low:
+            return slug
+    return None
+
 
 def cargar_perfil_mentor() -> dict:
     """
     Carga el perfil del mentor desde disco. Thread-safe.
-    Si no existe o está corrupto, crea la estructura inicial por defecto.
+    Migra v1 → v2 si corresponde. Si no existe o está corrupto, crea el default.
     """
     with _lock_perfil_mentor:
         if not os.path.exists(RUTA_PERFIL_MENTOR):
             logger.info("perfil_mentor.json no encontrado. Creando estructura por defecto.")
-            _guardar_perfil_mentor_sin_lock(ESQUEMA_MENTOR_DEFECTO)
-            return dict(ESQUEMA_MENTOR_DEFECTO)
+            _guardar_perfil_mentor_sin_lock(_perfil_default())
+            return _perfil_default()
         try:
             with open(RUTA_PERFIL_MENTOR, "r", encoding="utf-8") as f:
                 perfil = json.load(f)
-            # Asegurar claves mínimas
-            for k, v in ESQUEMA_MENTOR_DEFECTO.items():
-                if k not in perfil:
-                    perfil[k] = v
-            # Asegurar la estructura anidada del bloque progreso (Fase 5)
-            perfil["progreso"] = _progreso(perfil)
+            if not isinstance(perfil, dict):
+                return _perfil_default()
+            perfil = _migrar_a_v2(perfil)
+            perfil = _asegurar_minimo(perfil)
             return perfil
         except Exception as e:
             logger.exception(f"Error cargando perfil_mentor.json: {e}")
-            return dict(ESQUEMA_MENTOR_DEFECTO)
+            return _perfil_default()
 
 def guardar_perfil_mentor(perfil: dict) -> None:
     """Guarda el perfil del mentor en disco. Thread-safe."""
     with _lock_perfil_mentor:
+        perfil = _migrar_a_v2(perfil)
+        _sincronizar_tema_activo(perfil)
         _guardar_perfil_mentor_sin_lock(perfil)
 
 def _guardar_perfil_mentor_sin_lock(perfil: dict) -> None:
@@ -72,6 +255,149 @@ def _guardar_perfil_mentor_sin_lock(perfil: dict) -> None:
             json.dump(perfil, f, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.exception(f"Error escribiendo perfil_mentor.json: {e}")
+
+
+# ─── GESTIÓN DE TEMAS (API para GUI y activación) ───────────────────────────
+
+def listar_temas_mentoria() -> dict:
+    """Devuelve el registro de temas con su seguimiento (para la GUI)."""
+    perfil = cargar_perfil_mentor()
+    _sincronizar_tema_activo(perfil)
+    activo = _tema_activo_slug(perfil)
+    temas = perfil.get("temas")
+    if not isinstance(temas, dict):
+        temas = {}
+    lista = []
+    for slug, t in temas.items():
+        if not isinstance(t, dict):
+            continue
+        prog = t.get("progreso", {}) or {}
+        cont = prog.get("continuidad", {}) or {}
+        objetivos = prog.get("objetivos", [])
+        if not isinstance(objetivos, list):
+            objetivos = []
+        hitos = prog.get("hitos_completados", [])
+        if not isinstance(hitos, list):
+            hitos = []
+        lista.append({
+            "slug": slug,
+            "nombre": t.get("nombre", slug),
+            "objetivo_general": t.get("objetivo_general", ""),
+            "activo": slug == activo,
+            "ultima_fecha": cont.get("ultima_fecha", ""),
+            "donde_quedamos": cont.get("donde_quedamos", ""),
+            "objetivos_activos": sum(
+                1 for o in objetivos
+                if isinstance(o, dict) and o.get("estado") == "activo"
+            ),
+            "hitos": len(hitos),
+            "ultimo_avance": t.get("ultimo_avance_registrado", ""),
+            "n_sesiones": len(t.get("historial_sesiones", []) or []),
+        })
+    return {"tema_activo": activo, "temas": lista}
+
+
+def cambiar_tema_activo(slug: str) -> bool:
+    """Cambia el tema activo (persiste). Devuelve False si no existe."""
+    perfil = cargar_perfil_mentor()
+    temas = perfil.get("temas")
+    if not isinstance(temas, dict) or slug not in temas:
+        return False
+    if slug == _tema_activo_slug(perfil):
+        return True
+    _sincronizar_tema_activo(perfil)
+    perfil["tema_activo"] = slug
+    _restaurar_mirror(perfil)
+    guardar_perfil_mentor(perfil)
+    return True
+
+
+def crear_tema(nombre: str, objetivo_general: str = "") -> dict:
+    """
+    Crea un tema nuevo (o selecciona uno existente con el mismo slug) y lo
+    deja como tema activo. Persiste. Devuelve {exito, slug, nombre, creado}.
+    """
+    nombre = (nombre or "").strip()
+    if not nombre:
+        return {"exito": False, "error": "El nombre del tema está vacío."}
+    slug = _slug_estable(nombre)
+    perfil = cargar_perfil_mentor()
+    temas = perfil.setdefault("temas", {})
+    if not isinstance(temas, dict):
+        temas = {}
+        perfil["temas"] = temas
+    if slug in temas:
+        perfil["tema_activo"] = slug
+        _restaurar_mirror(perfil)
+        guardar_perfil_mentor(perfil)
+        return {"exito": True, "slug": slug, "nombre": temas[slug].get("nombre", nombre), "creado": False}
+    _sincronizar_tema_activo(perfil)
+    nuevo = _tema_default(slug)
+    nuevo["nombre"] = nombre
+    nuevo["objetivo_general"] = (objetivo_general or "").strip()
+    temas[slug] = nuevo
+    perfil["tema_activo"] = slug
+    _restaurar_mirror(perfil)
+    guardar_perfil_mentor(perfil)
+    return {"exito": True, "slug": slug, "nombre": nombre, "creado": True}
+
+
+# Patrones de lenguaje para crear/cambiar de tema desde la conversación.
+# El auto-creado queda restringido a señales EXPLÍCITAS ("tema:", "nuevo
+# tema", "crear tema", "empecemos") para evitar activaciones no deseadas;
+# mencionar un tema existente solo lo selecciona.
+_PATRON_CREAR_TEMA = re.compile(
+    r"(?:tema\s*:|nuevo tema|crear\s*(?:el\s+)?tema|cre[áa]\s+(?:el\s+)?tema|"
+    r"empecemos\s+(?:con|un)\s+|empezar\s+(?:el\s+)?tema|abr[íi]\s+un\s+tema)\s+"
+    r"([A-Za-zÁÉÍÓÚáéíóúñÑ][A-Za-z0-9ÁÉÍÓÚáéíóúñÑ\s\-]{2,})",
+    re.IGNORECASE,
+)
+
+
+def _nombre_tema(slug: str) -> str:
+    perfil = cargar_perfil_mentor()
+    t = obtener_tema(perfil, slug)
+    return t.get("nombre", slug) if t else slug
+
+
+def resolver_tema_mentoria(texto) -> dict:
+    """
+    Decide el tema de mentoría para un mensaje del usuario.
+
+    - Señal explícita de creación ("tema: X", "nuevo tema X", "crear tema X",
+      "empecemos con X") → crea y activa.
+    - Mención de un tema existente por su nombre → lo activa.
+    - Sin señal → mantiene el tema activo actual.
+
+    Persiste SOLO cuando hay un cambio (evita escrituras por turno).
+    Devuelve {"slug", "nombre", "cambio": bool, "creado": bool}.
+    """
+    if not texto or not str(texto).strip():
+        slug = _tema_activo_slug(cargar_perfil_mentor())
+        return {"slug": slug, "nombre": _nombre_tema(slug), "cambio": False, "creado": False}
+    perfil = cargar_perfil_mentor()
+    low = str(texto).lower()
+    m = _PATRON_CREAR_TEMA.search(low)
+    if m:
+        nombre = m.group(1).strip()
+        slug = _slug_estable(nombre)
+        temas = perfil.get("temas")
+        if not isinstance(temas, dict) or slug not in temas:
+            res = crear_tema(nombre)
+            return {"slug": slug, "nombre": res.get("nombre", nombre), "cambio": True, "creado": res.get("creado", False)}
+        if cambiar_tema_activo(slug):
+            return {"slug": slug, "nombre": _nombre_tema(slug), "cambio": True, "creado": False}
+    else:
+        temas = perfil.get("temas")
+        if isinstance(temas, dict):
+            for s, t in temas.items():
+                nombre_t = (t.get("nombre") or s).lower()
+                if nombre_t and len(nombre_t) >= 3 and nombre_t in low:
+                    if cambiar_tema_activo(s):
+                        return {"slug": s, "nombre": t.get("nombre", s), "cambio": True, "creado": False}
+                    break
+    slug = _tema_activo_slug(perfil)
+    return {"slug": slug, "nombre": _nombre_tema(slug), "cambio": False, "creado": False}
 
 
 # ─── EDICIÓN / OLVIDO POR ID LÓGICO (FASE 2) ─────────────────────────────────
@@ -177,6 +503,21 @@ def _olvidar_en_perfil(perfil: dict, id_elemento: str) -> bool:
     if not id_.startswith("mentor:"):
         return False
     resto = id_[len("mentor:"):]
+
+    if resto.startswith("tema:"):
+        slug = resto[len("tema:"):]
+        temas = perfil.get("temas")
+        if not isinstance(temas, dict) or slug not in temas:
+            return False
+        del temas[slug]
+        if _tema_activo_slug(perfil) == slug:
+            if temas:
+                perfil["tema_activo"] = next(iter(temas))
+            else:
+                perfil["tema_activo"] = SLUG_TEMA_DESARROLLO
+                temas[SLUG_TEMA_DESARROLLO] = _tema_default(SLUG_TEMA_DESARROLLO)
+            _restaurar_mirror(perfil)
+        return True
 
     if resto.startswith("proyecto:"):
         slug = resto[len("proyecto:"):]
@@ -505,9 +846,18 @@ def texto_perfil_mentor_para_prompt(workspace_path: str = "") -> str:
 
     texto_bitacora_ws = obtener_bitacora_workspace(workspace_path)
 
+    # Tema activo: el espejo legacy (nivel superior) ya refleja al tema activo;
+    # sumamos su nombre y objetivo general para el encabezado del prompt.
+    slug_tema = _tema_activo_slug(p)
+    tema = obtener_tema(p, slug_tema) or {}
+    nombre_tema = tema.get("nombre", slug_tema)
+    objetivo_tema = str(tema.get("objetivo_general", "") or "").strip()
+
     texto = (
-        "[PERFIL ESPECÍFICO DE MENTORÍA TECNOLÓGICA (LUIS)]:\n"
-        "Este es el estado del progreso técnico y la bitácora de sesiones de Luis. "
+        "[PERFIL DEL TEMA ACTIVO DE MENTORÍA]:\n"
+        f"- TEMA ACTIVO: {nombre_tema}\n"
+        + (f"- OBJETIVO GENERAL DEL TEMA: {objetivo_tema}\n" if objetivo_tema else "")
+        + "Este es el estado del tema y la bitácora de sesiones de Luis. "
         "YA TIENES ESTA INFORMACIÓN EN CONTEXTO, no necesitas realizar lecturas de archivos de bitácora al iniciar.\n"
         "- STACK OBJETIVO:\n"
         f"  * Frontend: {frontend}\n"
@@ -605,6 +955,13 @@ def extraer_y_procesar_sesion_mentor(ultimos_mensajes: list, workspace_path: str
             for k in ESQUEMA_MENTOR_DEFECTO.keys():
                 if k not in nuevo_perfil:
                     nuevo_perfil[k] = perfil_actual.get(k, ESQUEMA_MENTOR_DEFECTO[k])
+
+            # El registro de temas y la selección de tema activo NO los decide
+            # el LLM: se conservan del perfil previo (el LLM solo actualiza el
+            # espejo legacy del TEMA ACTIVO en el nivel superior).
+            nuevo_perfil["temas"] = perfil_actual.get("temas", {})
+            nuevo_perfil["meta"] = perfil_actual.get("meta", {"version": 2})
+            nuevo_perfil["tema_activo"] = perfil_actual.get("tema_activo", SLUG_TEMA_DESARROLLO)
 
             # `progreso` es gestionado por modulos/progreso_mentoria.py (Fase 5):
             # este reescritor completo NO debe reescribirlo. Se conserva tal cual

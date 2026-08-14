@@ -881,7 +881,10 @@ def _procesar_mensaje(texto_usuario, modo_voz=False, ui_callback=None, turno_id=
         logger.info(f"PENSANDO ({MODO_ACTUAL.upper()})...")
 
         MODO_ACTUAL = config.estado.modo_actual
-        if MODO_ACTUAL in ("general", "chat", "gamer") and not _es_intencion_comando_directo(texto_usuario):
+        # La mentoría también usa recuperación automática de memoria (Fase 4):
+        # con la activación por tema, el bloque PROGRESO necesita el contexto
+        # de avances previos recuperados de la Bóveda.
+        if MODO_ACTUAL in ("general", "chat", "gamer", "mentor") and not _es_intencion_comando_directo(texto_usuario):
             iniciar_busqueda_anticipada(texto_usuario)
 
         try:
@@ -931,6 +934,18 @@ def _procesar_mensaje(texto_usuario, modo_voz=False, ui_callback=None, turno_id=
                     ui_callback("__CAPACIDAD_ACTIVA__", capacidad_activa, "#A8C7FA")
             except Exception:
                 pass
+
+            # Señal a la UI: tema de mentoría activo (chip). Resuelve el tema
+            # para este turno (creación/switch explícito o por mención de un
+            # tema existente); si no hay señal, mantiene el activo.
+            if capacidad_activa == "mentor":
+                try:
+                    from modulos.perfil_mentor import resolver_tema_mentoria
+                    tema = resolver_tema_mentoria(texto_usuario)
+                    if tema and ui_callback:
+                        ui_callback("__TEMA_ACTIVO__", {"slug": tema["slug"], "nombre": tema["nombre"]}, "#A8C7FA")
+                except Exception as e:
+                    logger.debug(f"No se pudo resolver tema de mentoría: {e}")
 
             from modulos.perfil_usuario import texto_perfil_para_prompt
 

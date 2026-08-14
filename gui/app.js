@@ -219,6 +219,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (estado.modelo_real) actualizarModeloLabel(estado.modelo_real);
         if (estado.mcp_disponible !== undefined) actualizarIndicadorMcp(estado.mcp_disponible);
         if (estado.capacidad_fijada !== undefined) actualizarChipCapacidad(estado.capacidad_fijada || estado.modo_actual || 'general');
+        if (estado.tema_mentoria) cargarTemasMentoria(estado.tema_mentoria);
       }
     } catch (e) { console.error('Error init:', e); }
     // Iniciar reloj digital cada segundo
@@ -378,6 +379,117 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // ─── TEMA DE MENTORÍA ACTIVO (multitema, Fase 5) ──────────────────────────
+  const temaChip = document.getElementById('temaChip');
+  const temaChipLabel = document.getElementById('temaChipLabel');
+  const temaSidebar = document.getElementById('temaSidebar');
+  const temaSelect = document.getElementById('temaSelect');
+  const btnNuevoTema = document.getElementById('btnNuevoTema');
+  const modalNuevoTema = document.getElementById('modalNuevoTema');
+  const nuevoTemaNombreInput = document.getElementById('nuevoTemaNombreInput');
+  const nuevoTemaObjetivoInput = document.getElementById('nuevoTemaObjetivoInput');
+  const nuevoTemaFeedback = document.getElementById('nuevoTemaFeedback');
+
+  function _setTemaUIVisible(visible) {
+    if (temaChip) temaChip.classList.toggle('hidden', !visible);
+    if (temaSidebar) temaSidebar.classList.toggle('hidden', !visible);
+  }
+
+  function actualizarChipTema(payload) {
+    const tema = payload || {};
+    const nombre = tema.nombre || '';
+    if (!temaChip) return;
+    if (temaChipLabel) temaChipLabel.textContent = nombre || '—';
+    temaChip.title = `Tema de mentoría activo: ${nombre || '—'}. Cambialo desde la barra lateral.`;
+  }
+
+  function cargarTemasMentoria(datos) {
+    if (!temaSelect) return;
+    const data = datos || {};
+    const temas = Array.isArray(data.temas) ? data.temas : [];
+    const activo = data.tema_activo || '';
+    temaSelect.innerHTML = '';
+    if (!temas.length) {
+      const opt = document.createElement('option');
+      opt.value = ''; opt.innerText = '—';
+      temaSelect.appendChild(opt);
+    } else {
+      temas.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t.slug || '';
+        opt.innerText = t.nombre || t.slug || '—';
+        if (t.slug === activo) opt.selected = true;
+        temaSelect.appendChild(opt);
+      });
+    }
+    const activoObj = temas.find(t => t.slug === activo);
+    actualizarChipTema(activoObj || { slug: activo, nombre: activo || '' });
+    _setTemaUIVisible(true);
+  }
+
+  function initTemasMentoria() {
+    if (temaSelect) {
+      temaSelect.addEventListener('change', async e => {
+        if (!pyApi) return;
+        const slug = e.target.value;
+        if (!slug) return;
+        try {
+          const res = await pyApi.cambiar_tema_mentoria(slug);
+          if (res && res.exito) {
+            const nombre = (res.tema && res.tema.nombre) || slug;
+            actualizarChipTema({ slug, nombre });
+            agregarMensajeSistema(`🎯 Tema de mentoría activo: <strong>${escapeHtml(nombre)}</strong>.`);
+          } else if (res && res.mensaje) {
+            agregarMensajeSistema(`⚠️ ${escapeHtml(res.mensaje)}`);
+            cargarTemasMentoria(await pyApi.obtener_temas_mentoria());
+          }
+        } catch (err) { console.error('Error cambiando tema:', err); }
+      });
+    }
+    if (btnNuevoTema) {
+      btnNuevoTema.addEventListener('click', () => {
+        if (nuevoTemaNombreInput) nuevoTemaNombreInput.value = '';
+        if (nuevoTemaObjetivoInput) nuevoTemaObjetivoInput.value = '';
+        if (nuevoTemaFeedback) { nuevoTemaFeedback.style.display = 'none'; nuevoTemaFeedback.textContent = ''; }
+        if (modalNuevoTema) modalNuevoTema.classList.remove('hidden');
+        if (nuevoTemaNombreInput) nuevoTemaNombreInput.focus();
+      });
+    }
+    const closeNuevo = () => { if (modalNuevoTema) modalNuevoTema.classList.add('hidden'); };
+    const btnCloseNuevoTema = document.getElementById('btnCloseNuevoTema');
+    if (btnCloseNuevoTema) btnCloseNuevoTema.addEventListener('click', closeNuevo);
+    const btnCancelarNuevoTema = document.getElementById('btnCancelarNuevoTema');
+    if (btnCancelarNuevoTema) btnCancelarNuevoTema.addEventListener('click', closeNuevo);
+    if (modalNuevoTema) {
+      modalNuevoTema.addEventListener('click', e => { if (e.target === modalNuevoTema) closeNuevo(); });
+    }
+    const btnConfirmarNuevoTema = document.getElementById('btnConfirmarNuevoTema');
+    if (btnConfirmarNuevoTema) {
+      btnConfirmarNuevoTema.addEventListener('click', async () => {
+        if (!pyApi) return;
+        const nombre = (nuevoTemaNombreInput && nuevoTemaNombreInput.value || '').trim();
+        if (!nombre) {
+          if (nuevoTemaFeedback) { nuevoTemaFeedback.style.display = 'block'; nuevoTemaFeedback.textContent = 'Escribí un nombre para el tema.'; }
+          return;
+        }
+        const objetivo = (nuevoTemaObjetivoInput && nuevoTemaObjetivoInput.value || '').trim();
+        try {
+          const res = await pyApi.crear_tema_mentoria(nombre, objetivo);
+          if (res && res.exito) {
+            closeNuevo();
+            cargarTemasMentoria(await pyApi.obtener_temas_mentoria());
+            agregarMensajeSistema(`🎯 Tema de mentoría creado y activo: <strong>${escapeHtml(res.nombre || nombre)}</strong>.`);
+          } else {
+            if (nuevoTemaFeedback) {
+              nuevoTemaFeedback.style.display = 'block';
+              nuevoTemaFeedback.textContent = (res && res.mensaje) || 'No se pudo crear el tema.';
+            }
+          }
+        } catch (err) { console.error('Error creando tema:', err); }
+      });
+    }
+  }
+
   function cargarPerfilesMentor(perfiles) {
     if (!mentorProfileSelect) return;
     mentorProfileSelect.innerHTML = '';
@@ -438,6 +550,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (headerTitle) headerTitle.innerText = '🎓 Mentoría';
       if (headerSubtitle) headerSubtitle.innerText = 'Orientación técnica, roadmap y preparación de arquitectura';
       if (window.emoFace) { window.emoFace.setAccentColor('#00ff9d'); window.emoFace.setEstado('idle'); }
+      _setTemaUIVisible(true);
     } else if (modo === 'gamer') {
       body.classList.add('theme-gamer');
       if (btnGamer) btnGamer.classList.add('active');
@@ -445,6 +558,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (headerSubtitle) headerSubtitle.innerText = 'Capacidad gaming de alto rendimiento sin interrupciones';
       if (lblGamerMode) lblGamerMode.innerText = 'Gaming · ON';
       if (window.emoFace) { window.emoFace.setAccentColor('#ff0055'); window.emoFace.setEstado('idle'); }
+      _setTemaUIVisible(false);
     } else {
       body.classList.add('theme-chat');
       if (btnChat) btnChat.classList.add('active');
@@ -452,6 +566,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (headerSubtitle) headerSubtitle.innerText = 'Asistente IA con capacidades contextuales';
       if (lblGamerMode) lblGamerMode.innerText = 'Gaming';
       if (window.emoFace) { window.emoFace.setAccentColor('#00f3ff'); window.emoFace.setEstado('idle'); }
+      _setTemaUIVisible(false);
     }
 
     // Reflejar el modo en el chip de capacidad (si no hay pin fijado).
@@ -672,6 +787,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ─── CHIP DE CAPACIDAD (pin auto/fijado) ─────────────────────────────────
   initChipCapacidad();
+
+  // ─── TEMA DE MENTORÍA ACTIVO (multitema) ─────────────────────────────────
+  initTemasMentoria();
 
   // ─── RETOMAR HISTORIAL PERSISTIDO (Fase P) ───────────────────────────────
   const btnRetomarHistorial = document.getElementById('btnRetomarHistorial');

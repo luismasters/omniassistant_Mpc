@@ -40,7 +40,7 @@ def test_base_siempre_presente_en_cualquier_contexto():
 
 def test_mentor_anexa_bloque_mentoria():
     ctx = construir_contexto_sistema("mentor", **_ARG)
-    assert "CONTEXTO ACTIVO: MENTORÍA TECNOLÓGICA" in ctx
+    assert "CONTEXTO ACTIVO: MENTORÍA" in ctx
     assert "REGLAS DE MENTORÍA" in ctx
     assert "coaching" in ctx.lower() or "entrevista" in ctx.lower()
     # La base sigue presente junto al bloque (composición, no reemplazo).

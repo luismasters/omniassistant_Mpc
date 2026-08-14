@@ -534,6 +534,35 @@ body.theme-gamer  .emo-bezel-frame { border-color: rgba(232, 121, 249, 0.2); }
 .cap-chip.pinned   { color: var(--accent-light); border-color: var(--accent-border); background: var(--accent-soft); }
 .cap-chip:hover    { border-color: var(--border-md); color: var(--text-primary); background: var(--bg-card-hover); }
 
+/* Chip de tema de mentoría activo (multitema, Fase 5) */
+.tema-chip {
+  color: var(--success);
+  border-color: rgba(16,185,129,0.30);
+  background: rgba(16,185,129,0.07);
+}
+.tema-chip .tema-icon { font-size: 10px; opacity: 0.9; }
+body.theme-mentor .tema-chip {
+  color: var(--accent-light);
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+/* Selector de tema en la barra lateral */
+.tema-sidebar { margin-top: 10px; }
+.tema-sidebar-label {
+  display: block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+.tema-sidebar-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 /* Widget clima */
 .header-weather {
   display: flex;

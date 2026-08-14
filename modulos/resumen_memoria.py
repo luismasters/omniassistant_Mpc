@@ -77,6 +77,7 @@ ORDEN_SECCIONES = [
     "preferencias_y_rutina",
     "proyectos",
     "aprendizaje_y_carrera",
+    "temas",
     "gaming",
     "memoria",
 ]
@@ -86,6 +87,7 @@ TITULOS_SECCIONES = {
     "preferencias_y_rutina": "Preferencias y rutina",
     "proyectos": "Proyectos",
     "aprendizaje_y_carrera": "Aprendizaje y carrera",
+    "temas": "Temas de mentoría",
     "gaming": "Gaming",
     "memoria": "Memoria",
 }
@@ -260,6 +262,62 @@ def _seccion_funcional(funcional: dict) -> dict:
             id_="funcional:proyecto_actual",
             etiqueta="Proyecto actual",
             texto=proyecto_actual,
+        ))
+
+    return secciones
+
+
+def _seccion_temas(perfil_mentor: dict) -> dict:
+    """
+    Convierte el registro de temas de mentoría (v2) en la sección 'Temas de
+    mentoría': un elemento por tema (id `mentor:tema:<slug>`, que admite
+    olvidar el tema completo desde el panel). El tema activo se marca.
+    """
+    secciones = {k: [] for k in ORDEN_SECCIONES}
+    perfil_mentor = perfil_mentor or {}
+    destino = secciones["temas"]
+
+    temas = perfil_mentor.get("temas")
+    if not isinstance(temas, dict) or not temas:
+        return secciones
+
+    from modulos.perfil_mentor import _tema_activo_slug
+    activo = _tema_activo_slug(perfil_mentor)
+
+    for slug, tema in temas.items():
+        if not isinstance(tema, dict):
+            continue
+        nombre = _texto_seguro(tema.get("nombre")) or slug
+        marca_activo = " ⭐" if slug == activo else ""
+        resumen = nombre
+        objetivo = _texto_seguro(tema.get("objetivo_general"))
+        if objetivo:
+            resumen += f": {objetivo}"
+
+        prog = tema.get("progreso") if isinstance(tema.get("progreso"), dict) else {}
+        extras = []
+        objetivos = prog.get("objetivos", [])
+        activos = [o for o in objetivos if isinstance(o, dict) and _texto_seguro(o.get("estado")) == "activo"]
+        if activos:
+            extras.append(f"{len(activos)} objetivo(s) activo(s)")
+        hitos = prog.get("hitos_completados", [])
+        if isinstance(hitos, list) and hitos:
+            extras.append(f"{len(hitos)} hito(s)")
+        quedamos = _texto_seguro((prog.get("continuidad") or {}).get("donde_quedamos"))
+        if quedamos:
+            extras.append(f"Quedamos: {quedamos}")
+        n_sesiones = tema.get("historial_sesiones")
+        if isinstance(n_sesiones, list):
+            extras.append(f"{len(n_sesiones)} sesión(es)")
+        if extras:
+            resumen += " · " + " · ".join(extras)
+
+        destino.append(_elemento(
+            id_=f"mentor:tema:{slug}",
+            etiqueta="Tema" + marca_activo,
+            texto=resumen,
+            fecha=_texto_seguro(tema.get("ultima_fecha")) or "",
+            destacado=(slug == activo),
         ))
 
     return secciones
@@ -537,6 +595,8 @@ def preparar_secciones() -> dict:
 
     perfil_mentor = _cargar_perfil_mentor()
     for seccion, elementos in _seccion_mentor(perfil_mentor).items():
+        acoplador[seccion].extend(elementos)
+    for seccion, elementos in _seccion_temas(perfil_mentor).items():
         acoplador[seccion].extend(elementos)
 
     perfil_gamer = _cargar_perfil_gamer()
