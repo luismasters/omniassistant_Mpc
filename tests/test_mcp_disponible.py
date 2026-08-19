@@ -231,3 +231,29 @@ def test_leer_texto_con_voz_vacio_no_llama(bridge_modulo, monkeypatch):
 
     assert res["exito"] is False
     assert llamadas == []
+
+
+# ─── Enlaces externos (abrir en navegador, NO navegar el HUD) ───────────────
+
+def test_abrir_enlace_externo_abre_navegador(bridge_modulo, monkeypatch):
+    wb = bridge_modulo
+    abiertos = []
+    monkeypatch.setattr("webbrowser.open", lambda url, new=0: abiertos.append(url) or True)
+
+    res = wb.ArgusWebBridge().abrir_enlace_externo("https://example.com/noticias")
+
+    assert res["exito"] is True
+    assert abiertos == ["https://example.com/noticias"]
+
+
+def test_abrir_enlace_externo_rechaza_urls_no_http(bridge_modulo, monkeypatch):
+    wb = bridge_modulo
+    abiertos = []
+    monkeypatch.setattr("webbrowser.open", lambda url, new=0: abiertos.append(url) or True)
+
+    bridge = wb.ArgusWebBridge()
+
+    assert bridge.abrir_enlace_externo("javascript:alert(1)")["exito"] is False
+    assert bridge.abrir_enlace_externo("  ")["exito"] is False
+    assert bridge.abrir_enlace_externo(None)["exito"] is False
+    assert abiertos == []

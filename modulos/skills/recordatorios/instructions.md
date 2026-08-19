@@ -10,7 +10,7 @@ Debes emitir en tu respuesta una o varias líneas con el formato exacto:
 
 ### 1. Crear Recordatorio
 ```
-recordatorio: crear | <tiempo_o_fecha> | <mensaje> [| <opciones>]
+recordatorio: crear | <tiempo_o_fecha> | <mensaje> [| <opciones>] [| accion:<comando>]
 ```
 
 **Parámetros:**
@@ -22,12 +22,19 @@ recordatorio: crear | <tiempo_o_fecha> | <mensaje> [| <opciones>]
   - Cumpleaños o eventos con aviso previo: `<fecha> | cumpleaños` o `<fecha> | aviso_previo:1`.
 - `<mensaje>`: Texto que se mostrará en la nube animada de EMO (ej. "Tomar la medicina rosuvastatina").
 - `<opciones>` (Opcional): `diario`, `recurrente`, `sin_hora`, `cumpleaños`.
+- `accion:<comando>` (Opcional): acción a EJECUTAR automáticamente cuando el recordatorio dispara. Usa la misma sintaxis de órdenes de Argus:
+  - `accion:abrir: <programa_o_juego>` → abre un programa/juego instalado (ej. `accion:abrir: Minecraft`).
+  - `accion:navegar: <url>` → abre un sitio web o video (ej. `accion:navegar: https://www.youtube.com/watch?v=xxxx`).
+  - `accion:audio: subir_volumen` → controlar audio.
+  - Si el usuario dice "a las X abrí/acré el juego/el video", DEBES incluir `accion:` para que la acción se ejecute al disparar.
 
 #### Ejemplos de Salida de la IA:
 - `recordatorio: crear | en 30 minutos | Tomar agua`
 - `recordatorio: crear | a las 21:00 | Tomar medicina rosuvastatina | diario`
 - `recordatorio: crear | 2026-08-25 | Sale la nueva liga de PoE 2 | sin_hora`
 - `recordatorio: crear | 6 de diciembre | Cumpleaños de Yuskeli | cumpleaños`
+- `recordatorio: crear | a las 20:00 | Abrir Minecraft | accion:abrir: Minecraft`
+- `recordatorio: crear | a las 21:00 | Ver el video de hoy | accion:navegar: https://www.youtube.com/watch?v=xxxxx`
 
 Para secuencias múltiples (ej. "encender a las 10am y apagar a las 11am"):
 ```

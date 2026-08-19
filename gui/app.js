@@ -29,6 +29,26 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnUpdateMemoria    = document.getElementById('btnUpdateMemoria');
   const btnClearContext     = document.getElementById('btnClearContext');
 
+  // ─── ENLACES EXTERNOS: abrir en el navegador, NUNCA navegar el HUD ──
+  // Un click sobre un link dentro de un mensaje no debe "sacar" del
+  // programa (el WebView navegaría a la URL y no habría forma de volver).
+  // Se captura a nivel documento para cubrir chat, panel de memoria, etc.
+  document.addEventListener('click', (e) => {
+    const link = e.target.closest('a[href]');
+    if (!link) return;
+    const href = link.getAttribute('href') || '';
+    if (/^(https?|ftp|mailto):/i.test(href) || href.startsWith('//')) {
+      e.preventDefault();
+      e.stopPropagation();
+      const url = href.startsWith('//') ? 'https:' + href : href;
+      if (window.pywebview && window.pywebview.api && window.pywebview.api.abrir_enlace_externo) {
+        window.pywebview.api.abrir_enlace_externo(url);
+      } else {
+        try { window.open(url, '_blank'); } catch (_) {}
+      }
+    }
+  });
+
   // ─── DELEGATED COPY EVENT LISTENER (Code Blocks & Messages) ───────────
   if (chatMessages) {
     chatMessages.addEventListener('click', (e) => {
@@ -1057,6 +1077,48 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // ─── NAVBAR DROPDOWN MENU HANDLERS ───────────────────────────────────────
+  const btnNavMenu = document.getElementById('btnNavMenu');
+  const navDropdownMenu = document.getElementById('navDropdownMenu');
+
+  if (btnNavMenu && navDropdownMenu) {
+    btnNavMenu.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isHidden = navDropdownMenu.classList.contains('hidden');
+      if (isHidden) {
+        navDropdownMenu.classList.remove('hidden');
+        btnNavMenu.classList.add('active');
+      } else {
+        navDropdownMenu.classList.add('hidden');
+        btnNavMenu.classList.remove('active');
+      }
+    });
+
+    // Cerrar al hacer clic en cualquier opción dentro del dropdown
+    navDropdownMenu.addEventListener('click', (e) => {
+      if (e.target.closest('.nav-dropdown-item')) {
+        navDropdownMenu.classList.add('hidden');
+        btnNavMenu.classList.remove('active');
+      }
+    });
+
+    // Cerrar al hacer clic fuera del dropdown
+    document.addEventListener('click', (e) => {
+      if (!navDropdownMenu.contains(e.target) && !btnNavMenu.contains(e.target)) {
+        navDropdownMenu.classList.add('hidden');
+        btnNavMenu.classList.remove('active');
+      }
+    });
+
+    // Cerrar con Escape
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !navDropdownMenu.classList.contains('hidden')) {
+        navDropdownMenu.classList.add('hidden');
+        btnNavMenu.classList.remove('active');
+      }
+    });
+  }
+
   // ─── MINI EMO FACE AVATAR GENERATOR ────────────────────────────────────
   function normalizarEmocion(emo) {
     if (!emo) return 'idle';
@@ -1093,8 +1155,18 @@ document.addEventListener('DOMContentLoaded', () => {
       color = '#00ffcc';
       return `<svg width="32" height="26" viewBox="0 0 34 28" fill="none" xmlns="http://www.w3.org/2000/svg">
         <rect width="34" height="28" rx="7" fill="#090a10"/>
-        <path d="M 7 17 Q 12 9 16 17" stroke="${color}" stroke-width="2.6" stroke-linecap="round" fill="none"/>
-        <path d="M 18 17 Q 22 9 27 17" stroke="${color}" stroke-width="2.6" stroke-linecap="round" fill="none"/>
+        <path d="M 7 14 Q 11 8 15 14" stroke="${color}" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+        <path d="M 19 14 Q 23 8 27 14" stroke="${color}" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+        <path d="M 13.5 18 Q 17 18.5 20.5 18 Q 21 22.5 17 22.5 Q 13 22.5 13.5 18 Z" fill="${color}"/>
+      </svg>`;
+    }
+
+    if (emo === 'talking' || emo === 'speaking' || emo === 'hablando') {
+      return `<svg width="32" height="26" viewBox="0 0 34 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="34" height="28" rx="7" fill="#090a10"/>
+        <rect x="7" y="8" width="7.5" height="9.5" rx="2.5" fill="${color}"/>
+        <rect x="19.5" y="8" width="7.5" height="9.5" rx="2.5" fill="${color}"/>
+        <circle cx="17" cy="20.5" r="2.2" fill="${color}"/>
       </svg>`;
     }
 

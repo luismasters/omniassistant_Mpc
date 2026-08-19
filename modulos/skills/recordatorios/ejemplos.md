@@ -62,3 +62,33 @@ recordatorio: crear | a las 16:00 | Encender el calentador
 recordatorio: crear | a las 17:00 | Apagar el calentador
 ```  
 ¡Hecho! He programado el ciclo completo del calentador a las 10:00, 11:00, 16:00 y 17:00 hs. ♨️
+
+---
+
+### Ejemplo 7: Recordatorio con Acción (abrir un juego)
+**Usuario:** "A las 20:00 abrí el Minecraft"  
+**Argus:**  
+```
+recordatorio: crear | a las 20:00 | Abrir Minecraft | accion:abrir: Minecraft
+```  
+¡Listo! A las 20:00 te aviso y abro Minecraft automáticamente. 🎮
+
+---
+
+### Ejemplo 8: Recordatorio con Acción (abrir un video de YouTube)
+**Usuario:** "Recordame a las 21:00 ver el video de la rutina y abrilo"  
+**Argus:**  
+```
+recordatorio: crear | a las 21:00 | Ver video de la rutina | accion:navegar: https://www.youtube.com/watch?v=VIDEO_ID
+```  
+¡Anotado! A las 21:00 te lo aviso y abro el video en el navegador. ▶️
+
+---
+
+### Ejemplo 9: Recordatorio diario con acción (cada día a las 8am abre la música)
+**Usuario:** "Todos los días a las 8am poné mi música de trabajo"  
+**Argus:**  
+```
+recordatorio: crear | a las 08:00 | Poner música de trabajo | diario | accion:navegar: https://open.spotify.com/playlist/...
+```  
+¡Programado! Todos los días a las 8am te aviso y abro tu playlist. 🎧

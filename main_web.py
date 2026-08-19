@@ -76,7 +76,7 @@ def main():
         from modulos.persistencia import (
             cargar_preferencias, cargar_estado_proyecto,
             iniciar_radar_persistente, marcar_sesiones_abiertas_como_aborted,
-            sesion_abierta_en_disco,
+            sesion_abierta_en_disco, purgar_todos_los_contextos,
         )
         prefs = cargar_preferencias()
         if prefs.get("modelo_seleccionado"):
@@ -102,6 +102,13 @@ def main():
         aborted = marcar_sesiones_abiertas_como_aborted()
         if aborted:
             logger.info(f"[FASE P] Sesiones recuperadas de cierre anormal: {aborted}")
+        # Rotación global: purgar contextos que excedan MAX_SESIONES_POR_CONTEXTO.
+        try:
+            purgados = purgar_todos_los_contextos()
+            if purgados:
+                logger.info(f"[FASE P] Rotación aplicada a {purgados} contexto(s).")
+        except Exception as e:
+            logger.warning(f"[FASE P] No se pudo purgar historial: {e}")
         # Reabrir una sesión para el contexto activo si quedó historial en disco.
         sesion_abierta_en_disco()
     except Exception as e:
@@ -271,10 +278,13 @@ def main():
                 pass
         try:
             from config import estado
-            # Fase P — flush del historial: cerrar la sesión del contexto activo.
+            # Fase P — flush del historial: cerrar la sesión del contexto activo
+            # y purgar su historial (rotación a MAX_SESIONES_POR_CONTEXTO).
             try:
-                from modulos.persistencia import cerrar_sesion, armar_context_id
-                cerrar_sesion(armar_context_id(estado.modo_actual))
+                from modulos.persistencia import cerrar_sesion, armar_context_id, purgar_historial
+                context_id_saliente = armar_context_id(estado.modo_actual)
+                cerrar_sesion(context_id_saliente)
+                purgar_historial(context_id_saliente)
             except Exception:
                 pass
             mensajes = estado.obtener_contexto_copia()

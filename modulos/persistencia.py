@@ -411,6 +411,31 @@ def purgar_historial(context_id: str, conservar: int = None) -> int:
     return 0
 
 
+def purgar_todos_los_contextos(conservar: int = None) -> int:
+    """
+    Rotación global: purga el historial de TODOS los contextos en disco que
+    superen `conservar` sesiones (por defecto MAX_SESIONES_POR_CONTEXTO).
+    Devuelve cuántos contextos se purgaron. Best-effort: contextos que fallen
+    se ignoran. Se llama al arrancar Argus para mantener el disco acotado.
+    """
+    if _no_persistencia():
+        return 0
+    base = base_dir()
+    if not os.path.isdir(base):
+        return 0
+    purgados = 0
+    for nombre in sorted(os.listdir(base)):
+        if not nombre.endswith(".jsonl"):
+            continue
+        context_id = nombre[: -len(".jsonl")]
+        try:
+            if purgar_historial(context_id, conservar=conservar) > 0:
+                purgados += 1
+        except Exception:
+            continue
+    return purgados
+
+
 # =====================================================================
 # PREFERENCIAS
 # =====================================================================

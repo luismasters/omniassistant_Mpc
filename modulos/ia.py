@@ -1536,10 +1536,15 @@ def _procesar_mensaje(texto_usuario, modo_voz=False, ui_callback=None, turno_id=
                     texto_usuario,
                     f"{reglas_evidencia}\n{bloque_evidencia_anterior}\n{bloque_web}",
                 )
-                segunda_respuesta = cliente_genai.models.generate_content_stream(
-                    model="gemini-3.1-flash-lite",
-                    contents=mensajes_secundarios,
-                    config=config_web
+                # La 2ª generación también pasa por la cadena de retry/fallback:
+                # ante un error transitorio (503/429/504 DEADLINE_EXCEEDED)
+                # reintenta con backoff y prueba los modelos de reserva antes de
+                # rendirse, en vez de morir con el error crudo de Google.
+                segunda_respuesta = _gemini_stream_con_cadena(
+                    "gemini-3.1-flash-lite",
+                    mensajes_secundarios,
+                    config_web,
+                    ui_callback=ui_callback,
                 )
                 respuesta_final = ""
                 buffer_voz_web_raw = ""

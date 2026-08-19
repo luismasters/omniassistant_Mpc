@@ -1,4 +1,4 @@
-﻿/**
+/**
  * EMO Canvas Face — Web HUD (60 FPS)
  * Replica 1:1 del EmoBezelFace de main_gui.py + mejoras:
  *  - Sistema de deriva flotante: EMO se mueve organicamente dentro del recuadro
@@ -393,19 +393,47 @@ class EmoCanvasFace {
     if (this.estado==='idle'&&this._idle_action==='yawn') {
       ctx.beginPath(); ctx.ellipse(cx,cy,3,5,0,0,Math.PI*2); ctx.fill();
     } else if (this.estado==='happy'||this.estado==='confirm'||(this.estado==='idle'&&this._idle_action==='wink')) {
-      ctx.beginPath(); ctx.arc(cx,cy-3,10,0,Math.PI); ctx.fill();
-      ctx.strokeStyle='#ffffff'; ctx.lineWidth=1.5; ctx.lineCap='round';
-      ctx.beginPath(); ctx.moveTo(cx-10,cy-3); ctx.lineTo(cx+10,cy-3); ctx.stroke();
+      // Semióvalo / abanico sonriente relleno cian (Foto 1)
+      ctx.beginPath();
+      ctx.moveTo(cx - 9, cy - 3);
+      ctx.quadraticCurveTo(cx, cy - 2, cx + 9, cy - 3);
+      ctx.quadraticCurveTo(cx, cy + 9, cx - 9, cy - 3);
+      ctx.closePath();
+      ctx.fill();
     } else if (this.estado==='sad'||this.estado==='angry'||(this.estado==='idle'&&this._idle_action==='sigh')) {
       ctx.lineWidth=2.5; ctx.beginPath(); ctx.arc(cx,cy+5,8,0,Math.PI); ctx.stroke();
     } else if (this.estado==='listening') {
       const rd=2.5+1.0*Math.sin(t*3.5);
       ctx.beginPath(); ctx.arc(cx,cy,rd,0,Math.PI*2); ctx.fill();
     } else if (this.estado==='talking') {
-      ctx.lineWidth=3.0; ctx.lineCap='round';
-      for (let i=-2;i<=2;i++) {
-        const fase=Math.abs(i); const h=2.5+10.0*Math.abs(Math.sin(t*15-fase*0.7)); const x=cx+i*5;
-        ctx.beginPath(); ctx.moveTo(x,cy-h/2); ctx.lineTo(x,cy+h/2); ctx.stroke();
+      // Modulación fluida de boca tipo Eilik: alterna entre 'O' redonda (Foto 2) y semióvalo sonriente relleno (Foto 1)
+      const ciclo = (t * 7.0) % 3;
+      if (ciclo < 1.0) {
+        // Fase 1: Círculo / "O" redonda de asombro/habla (Foto 2)
+        const p = ciclo;
+        const ro = 3.5 + 2.5 * Math.sin(p * Math.PI);
+        ctx.beginPath();
+        ctx.arc(cx, cy, ro, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (ciclo < 2.0) {
+        // Fase 2: Semióvalo / abanico sonriente relleno (Foto 1)
+        const p = ciclo - 1.0;
+        const w = 7.5 + 2.5 * Math.sin(p * Math.PI);
+        const h = 4.5 + 3.5 * Math.sin(p * Math.PI);
+        ctx.beginPath();
+        ctx.moveTo(cx - w, cy - 2);
+        ctx.quadraticCurveTo(cx, cy - 1.5, cx + w, cy - 2);
+        ctx.quadraticCurveTo(cx, cy + h, cx - w, cy - 2);
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        // Fase 3: Apertura elíptica fonética intermedia
+        const p = ciclo - 2.0;
+        const rx = 5.0 + 2.0 * Math.sin(p * Math.PI);
+        const ry = 3.0 + 2.5 * Math.sin(p * Math.PI);
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+        ctx.fill();
       }
     } else if (this.estado==='error') {
       ctx.lineWidth=2.5; ctx.lineCap='round';

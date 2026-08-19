@@ -136,6 +136,21 @@ def test_purgar_historial_conserva_ultimas(store):
     assert [s["orden"] for s in sesiones] == [3, 4]
 
 
+def test_purgar_todos_los_contextos(store):
+    for ctx in ("general", "gamer"):
+        for i in range(5):
+            store.registrar_mensaje(ctx, "user", f"{ctx}-{i}")
+            store.cerrar_sesion(ctx)
+    purgados = store.purgar_todos_los_contextos(conservar=2)
+    assert purgados == 2
+    assert len(store.listar_sesiones("general")) == 2
+    assert len(store.listar_sesiones("gamer")) == 2
+    # Un contexto por debajo del límite no se toca.
+    store.registrar_mensaje("mentor", "user", "a")
+    assert store.purgar_todos_los_contextos(conservar=2) == 0
+    assert len(store.listar_sesiones("mentor")) == 1
+
+
 # ─── Concurrencia (CON) ──────────────────────────────────────────────────────
 
 def test_concurrencia_escritura_no_corrompe(store):

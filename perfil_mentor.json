@@ -126,5 +126,175 @@
       "donde_quedamos": ""
     },
     "recuerdos_persistidos": []
+  },
+  "meta": {
+    "version": 2
+  },
+  "tema_activo": "desarrollo_y_carrera",
+  "temas": {
+    "desarrollo_y_carrera": {
+      "nombre": "Desarrollo y carrera tech",
+      "objetivo_general": "",
+      "contexto": {
+        "stack_objetivo": {
+          "frontend": "React (nociones)",
+          "backend": "Pendiente de definir",
+          "bases_de_datos": "PostgreSQL + SQLModel",
+          "otras_herramientas": [
+            "ChromaDB",
+            "LangChain",
+            "Docker",
+            "GitHub Actions",
+            "Pytest",
+            "CrewAI",
+            "Groq API",
+            "Aider",
+            "Claude Code"
+          ]
+        },
+        "tecnologias_aprendidas": [
+          "Python",
+          "C++",
+          "C#",
+          "SQL",
+          "Java",
+          ".NET",
+          "ChromaDB",
+          "Whisper",
+          "Edge TTS",
+          "PyWebView",
+          "DeepSeek API",
+          "Gemini API",
+          "Groq API",
+          "Cline (VSC)",
+          "SentenceTransformers",
+          "PyPDF",
+          "Pytest",
+          "Unittest",
+          "Middleware",
+          "Antigravity CLI"
+        ],
+        "tecnologias_en_estudio": [
+          "React",
+          "FastAPI",
+          "PostgreSQL",
+          "SQLModel",
+          "LangChain",
+          "CrewAI",
+          "RAG (Retrieval-Augmented Generation)",
+          "Orquestación de Agentes",
+          "Arquitectura Conversacional",
+          "Aider",
+          "Claude Code"
+        ],
+        "proyectos_de_portafolio": [
+          {
+            "nombre": "OmniAssistant",
+            "descripcion": "Asistente de IA multimodal para Windows con integración de modelos (Gemini, DeepSeek, Groq), memoria vectorial (ChromaDB), visión y control de sistema. Utilizado como base de conocimiento para el aprendizaje de arquitectura de agentes."
+          },
+          {
+            "nombre": "Sistema RAG con Umbral Estricto",
+            "descripcion": "Pipeline RAG profesional en Python utilizando Groq (Llama 3.3), ChromaDB y embeddings multilingües. Implementa un sistema de guardarraíles con umbral de similitud (0.5) para evitar alucinaciones, con soporte para TXT, MD y PDF. Incluye suite de pruebas unitarias con Pytest y Unittest."
+          }
+        ],
+        "claves_de_contexto_faltantes": []
+      },
+      "progreso": {
+        "objetivos": [],
+        "proximos_pasos": [],
+        "dificultades_activas": [],
+        "hitos_completados": [],
+        "continuidad": {
+          "ultimo_tema": "",
+          "ultima_fecha": "",
+          "donde_quedamos": ""
+        },
+        "recuerdos_persistidos": []
+      },
+      "ultimo_avance_registrado": "Reconocimiento de identidad y establecimiento de objetivos para la sesión de mentoría.",
+      "historial_sesiones": [
+        {
+          "fecha": "2026-08-02 12:09",
+          "resumen": "Sesión de consulta técnica sobre middlewares en FastAPI y evaluación de agentes de codificación (Aider vs Claude Code).",
+          "temas": [
+            "Middleware",
+            "FastAPI",
+            "AI Coding Agents",
+            "Productividad"
+          ],
+          "proximos_pasos": [
+            "Implementar middleware de autenticación en el proyecto de API",
+            "Seleccionar herramienta de asistencia de IA para el flujo de trabajo"
+          ]
+        },
+        {
+          "fecha": "2026-08-02 15:53",
+          "resumen": "Investigación sobre herramientas de agentes de codificación y aclaración de límites de interacción con el sistema operativo.",
+          "temas": [
+            "AI Coding Agents",
+            "Antigravity CLI",
+            "Productividad",
+            "Soporte Técnico"
+          ],
+          "proximos_pasos": [
+            "Evaluar integración de Antigravity CLI en el flujo de trabajo",
+            "Definir estructura de directorios para el proyecto de API"
+          ]
+        },
+        {
+          "fecha": "2026-08-10 21:28",
+          "resumen": "Consulta sobre búsqueda de información en tiempo real y aclaración de las capacidades del mentor.",
+          "temas": [
+            "Soporte Técnico",
+            "Limitaciones del Modelo"
+          ],
+          "proximos_pasos": [
+            "Consultar fuentes oficiales externas para información en tiempo real"
+          ]
+        },
+        {
+          "fecha": "2026-08-13 17:29",
+          "resumen": "Reinicio de sesión de mentoría y confirmación de roles.",
+          "temas": [
+            "Soporte Técnico",
+            "Mentoría"
+          ],
+          "proximos_pasos": [
+            "Continuar con el desarrollo del proyecto RAG",
+            "Repasar conceptos técnicos pendientes"
+          ]
+        }
+      ]
+    },
+    "futuro_de_la_programacion": {
+      "nombre": "Futuro de la programacion",
+      "objetivo_general": "",
+      "contexto": {
+        "stack_objetivo": {
+          "frontend": "Pendiente de definir",
+          "backend": "Pendiente de definir",
+          "bases_de_datos": "Pendiente de definir",
+          "otras_herramientas": []
+        },
+        "tecnologias_aprendidas": [],
+        "tecnologias_en_estudio": [],
+        "proyectos_de_portafolio": [],
+        "claves_de_contexto_faltantes": []
+      },
+      "progreso": {
+        "objetivos": [],
+        "proximos_pasos": [],
+        "dificultades_activas": [],
+        "hitos_completados": [],
+        "continuidad": {
+          "ultimo_tema": "",
+          "ultima_fecha": "",
+          "donde_quedamos": ""
+        },
+        "recuerdos_persistidos": []
+      },
+      "ultimo_avance_registrado": "Ninguno",
+      "historial_sesiones": []
+    }
   }
 }

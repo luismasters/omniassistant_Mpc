@@ -113,8 +113,50 @@
           <path class="ear-wave right-ear-wave" d="M 214,65 Q 228,95 214,125" fill="none" stroke="var(--theme-color)" stroke-width="2" stroke-linecap="round" opacity="0" filter="url(#emo-glow)" />
         </g>
 
-        <!-- Ring giratorio de procesamiento -->
-        <circle id="processing-spinner" cx="120" cy="95" r="36" fill="none" stroke="var(--theme-color)" stroke-width="3" stroke-dasharray="24 16" transform-origin="120 95" opacity="0" filter="url(#emo-glow)" />
+        <!-- HUD Pantalla: Aviso animado PROCESANDO (reemplaza ojos al procesar) -->
+        <g id="processing-hud" opacity="0" transform-origin="120 100">
+          <!-- Tarjeta de fondo estilo terminal cibernética -->
+          <rect class="proc-bg-card" x="25" y="52" width="190" height="96" rx="14" fill="#040b17" fill-opacity="0.92" stroke="var(--theme-color)" stroke-width="1.8" filter="url(#emo-glow)" />
+          
+          <!-- Líneas sutiles de escaneo / cuadrícula HUD -->
+          <line x1="30" y1="67" x2="210" y2="67" stroke="var(--theme-color)" stroke-width="0.8" stroke-opacity="0.3" stroke-dasharray="3 3" />
+          <line x1="30" y1="133" x2="210" y2="133" stroke="var(--theme-color)" stroke-width="0.8" stroke-opacity="0.3" stroke-dasharray="3 3" />
+
+          <!-- Tech brackets / Esquineros -->
+          <path class="proc-corner" d="M 32,60 L 32,55 L 40,55 M 208,60 L 208,55 L 200,55 M 32,140 L 32,145 L 40,145 M 208,140 L 208,145 L 200,145" fill="none" stroke="var(--theme-color)" stroke-width="2" stroke-linecap="round" />
+
+          <!-- Cabecera Tech con indicador LIVE -->
+          <g class="proc-header" transform="translate(36, 61)">
+            <circle class="proc-live-dot" cx="4" cy="0" r="2.8" fill="var(--theme-color)" filter="url(#emo-glow)" />
+            <text x="13" y="2.5" fill="var(--theme-color)" font-family="monospace" font-size="7.5" font-weight="bold" letter-spacing="1.2" opacity="0.85">NEURAL CORE // BUSY</text>
+            <text x="166" y="2.5" fill="var(--theme-color)" font-family="monospace" font-size="7" font-weight="bold" text-anchor="end" opacity="0.7">ARGUS_AI</text>
+          </g>
+
+          <!-- Icono tecnológico central o radar con rotación -->
+          <g id="proc-icon-center" transform="translate(120, 88)" transform-origin="120 88">
+            <circle class="proc-icon-ring" cx="0" cy="0" r="8" fill="none" stroke="var(--theme-color)" stroke-width="1.2" stroke-dasharray="5 3" opacity="0.8" filter="url(#emo-glow)" />
+            <circle class="proc-icon-core" cx="0" cy="0" r="3.5" fill="var(--theme-color)" opacity="0.9" filter="url(#emo-glow)" />
+            <path d="M -11,0 L -8,0 M 11,0 L 8,0 M 0,-11 L 0,-8 M 0,11 L 0,8" stroke="var(--theme-color)" stroke-width="1.4" stroke-linecap="round" />
+          </g>
+
+          <!-- Texto principal animado PROCESANDO -->
+          <text id="proc-main-text" x="120" y="110" fill="var(--theme-color)" font-family="system-ui, -apple-system, sans-serif" font-size="14.5" font-weight="900" text-anchor="middle" letter-spacing="2.8" filter="url(#emo-glow)">PROCESANDO</text>
+
+          <!-- Indicador de actividad con puntos dinámicos en onda -->
+          <g id="proc-dots-group" transform="translate(120, 121)">
+            <circle class="proc-dot proc-dot-1" cx="-20" cy="0" r="2" fill="var(--theme-color)" filter="url(#emo-glow)" />
+            <circle class="proc-dot proc-dot-2" cx="-10" cy="0" r="2" fill="var(--theme-color)" filter="url(#emo-glow)" />
+            <circle class="proc-dot proc-dot-3" cx="0" cy="0" r="2.2" fill="var(--theme-color)" filter="url(#emo-glow)" />
+            <circle class="proc-dot proc-dot-4" cx="10" cy="0" r="2" fill="var(--theme-color)" filter="url(#emo-glow)" />
+            <circle class="proc-dot proc-dot-5" cx="20" cy="0" r="2" fill="var(--theme-color)" filter="url(#emo-glow)" />
+          </g>
+
+          <!-- Barra de carga / flujo de datos inferior -->
+          <g transform="translate(40, 131)">
+            <rect x="0" y="0" width="160" height="4" rx="2" fill="#081326" stroke="var(--theme-color)" stroke-width="0.7" stroke-opacity="0.35" />
+            <rect id="proc-progress-fill" x="0" y="0" width="36" height="4" rx="2" fill="var(--theme-color)" filter="url(#emo-glow)" />
+          </g>
+        </g>
 
         <!-- Línea láser de escaneo en ejecución -->
         <line id="laser-scan-line" x1="20" y1="95" x2="220" y2="95" stroke="var(--theme-color)" stroke-width="2" filter="url(#emo-glow)" opacity="0" />
@@ -148,10 +190,46 @@
           </g>
         </g>
 
-        <!-- Triángulo de alerta warning -->
-        <g id="warning-hud" opacity="0">
-          <polygon points="120,38 102,68 138,68" fill="none" stroke="#ff6b00" stroke-width="2.5" />
-          <text x="120" y="63" fill="#ff6b00" font-family="sans-serif" font-weight="bold" font-size="12" text-anchor="middle">!</text>
+        <!-- HUD Pantalla: Aviso animado ATENCIÓN / AVISO (reemplaza ojos en advertencia) -->
+        <g id="warning-hud" opacity="0" transform-origin="120 100">
+          <!-- Tarjeta de fondo estilo alerta cibernética -->
+          <rect class="warn-bg-card" x="25" y="52" width="190" height="96" rx="14" fill="#140802" fill-opacity="0.94" stroke="#ff6b00" stroke-width="1.8" filter="url(#emo-glow)" />
+          
+          <!-- Líneas de peligro / scanline HUD -->
+          <line x1="30" y1="67" x2="210" y2="67" stroke="#ff6b00" stroke-width="0.8" stroke-opacity="0.3" stroke-dasharray="3 3" />
+          <line x1="30" y1="133" x2="210" y2="133" stroke="#ff6b00" stroke-width="0.8" stroke-opacity="0.3" stroke-dasharray="3 3" />
+
+          <!-- Tech brackets / Esquineros de alerta -->
+          <path class="warn-corner" d="M 32,60 L 32,55 L 40,55 M 208,60 L 208,55 L 200,55 M 32,140 L 32,145 L 40,145 M 208,140 L 208,145 L 200,145" fill="none" stroke="#ff6b00" stroke-width="2" stroke-linecap="round" />
+
+          <!-- Cabecera Tech con indicador de peligro -->
+          <g class="warn-header" transform="translate(36, 61)">
+            <circle class="warn-live-dot" cx="4" cy="0" r="2.8" fill="#ff6b00" filter="url(#emo-glow)" />
+            <text x="13" y="2.5" fill="#ff6b00" font-family="monospace" font-size="7.5" font-weight="bold" letter-spacing="1.2" opacity="0.9">SYSTEM ALERT // AVISO</text>
+            <text x="166" y="2.5" fill="#ff6b00" font-family="monospace" font-size="7" font-weight="bold" text-anchor="end" opacity="0.75">PRIORITY_1</text>
+          </g>
+
+          <!-- Triángulo de advertencia central animado -->
+          <g id="warn-triangle-group" transform="translate(120, 85)" transform-origin="120 85">
+            <polygon class="warn-triangle" points="0,-12 -13,10 13,10" fill="#ff6b00" fill-opacity="0.18" stroke="#ff6b00" stroke-width="2" stroke-linejoin="round" filter="url(#emo-glow)" />
+            <text x="0" y="7.5" fill="#ff6b00" font-family="sans-serif" font-weight="900" font-size="13" text-anchor="middle" filter="url(#emo-glow)">!</text>
+          </g>
+
+          <!-- Texto principal animado ATENCIÓN -->
+          <text id="warn-main-text" x="120" y="110" fill="#ff6b00" font-family="system-ui, -apple-system, sans-serif" font-size="14.5" font-weight="900" text-anchor="middle" letter-spacing="2.8" filter="url(#emo-glow)">ATENCIÓN</text>
+
+          <!-- Indicador de pulsos de alerta laterales -->
+          <g id="warn-chevrons-group" transform="translate(120, 121)">
+            <path class="warn-chev warn-chev-left" d="M -26,-3 L -32,0 L -26,3 M -18,-3 L -24,0 L -18,3" fill="none" stroke="#ff6b00" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" filter="url(#emo-glow)" />
+            <circle class="warn-center-dot" cx="0" cy="0" r="2.2" fill="#ff6b00" filter="url(#emo-glow)" />
+            <path class="warn-chev warn-chev-right" d="M 26,-3 L 32,0 L 26,3 M 18,-3 L 24,0 L 18,3" fill="none" stroke="#ff6b00" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" filter="url(#emo-glow)" />
+          </g>
+
+          <!-- Barra de alerta / hazard bar inferior -->
+          <g transform="translate(40, 131)">
+            <rect x="0" y="0" width="160" height="4" rx="2" fill="#260f04" stroke="#ff6b00" stroke-width="0.7" stroke-opacity="0.35" />
+            <rect id="warn-progress-fill" x="0" y="0" width="36" height="4" rx="2" fill="#ff6b00" filter="url(#emo-glow)" />
+          </g>
         </g>
 
         <!-- Barra superior de estado -->
@@ -180,17 +258,9 @@
 
           <circle id="emo-sad-tear" cx="185" cy="115" r="4" fill="#00f0ff" filter="url(#emo-glow)" opacity="0" />
 
-          <!-- Mejillas con barras ecualizadoras al hablar -->
-          <g id="speaking-cheek-bars" opacity="0">
-            <line class="speaking-bar" x1="16" y1="135" x2="16" y2="155" stroke="var(--theme-color)" stroke-width="3" stroke-linecap="round" transform-origin="16 145" />
-            <line class="speaking-bar" x1="23" y1="130" x2="23" y2="160" stroke="var(--theme-color)" stroke-width="3" stroke-linecap="round" transform-origin="23 145" />
-            <line class="speaking-bar" x1="30" y1="136" x2="30" y2="154" stroke="var(--theme-color)" stroke-width="3" stroke-linecap="round" transform-origin="30 145" />
-            <line class="speaking-bar" x1="210" y1="136" x2="210" y2="154" stroke="var(--theme-color)" stroke-width="3" stroke-linecap="round" transform-origin="210 145" />
-            <line class="speaking-bar" x1="217" y1="130" x2="217" y2="160" stroke="var(--theme-color)" stroke-width="3" stroke-linecap="round" transform-origin="217 145" />
-            <line class="speaking-bar" x1="224" y1="135" x2="224" y2="155" stroke="var(--theme-color)" stroke-width="3" stroke-linecap="round" transform-origin="224 145" />
-          </g>
 
-          <path id="emo-mouth" d="M 102,142 Q 120,154 138,142" fill="none" stroke="var(--theme-color)" stroke-width="4" stroke-linecap="round" filter="url(#emo-glow)" transform-origin="120 145" />
+
+          <path id="emo-mouth" d="M 112,143 C 114,146 126,146 128,143 C 126,147 114,147 112,143 Z" fill="var(--theme-color)" stroke="var(--theme-color)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" filter="url(#emo-glow)" transform-origin="120 143" />
 
           <path id="understood-sparkle" d="M 120,135 Q 120,145 130,145 Q 120,145 120,155 Q 120,145 110,145 Q 120,145 120,135" fill="var(--theme-color)" filter="url(#emo-glow)" opacity="0" />
 
@@ -252,23 +322,22 @@
     anime.set('#angry-brow-left, #angry-brow-right', { opacity: 0 });
     anime.set('.eq-bar', { opacity: 0, scaleY: 0 });
     anime.set('.matrix-pixel', { opacity: 0 });
-    anime.set('.zzz-letter', { opacity: 0 });
+    anime.set('.zzz-letter', { opacity: 0, translateY: 0, translateX: 0, scale: 1 });
     anime.set('.ear-wave', { opacity: 0, translateX: 0 });
-    anime.set('#processing-spinner', { opacity: 0, rotate: 0 });
+    anime.set('#processing-hud', { opacity: 0, scale: 0.95 });
     anime.set('#laser-scan-line', { opacity: 0, translateY: 0 });
     anime.set('#error-x-group', { opacity: 0 });
     anime.set('#mentor-hud', { opacity: 0 });
     anime.set('#gaming-hud', { opacity: 0 });
-    anime.set('#speaking-cheek-bars', { opacity: 0 });
-    anime.set('.speaking-bar', { scaleY: 1 });
-    anime.set('#warning-hud', { opacity: 0 });
+
+    anime.set('#warning-hud', { opacity: 0, scale: 0.95 });
     anime.set('#success-stars', { opacity: 0, scale: 1 });
     anime.set('#understood-sparkle', { opacity: 0, scale: 1 });
     anime.set('#emo-sad-tear', { opacity: 0, translateY: 0 });
     anime.set('#emo-left-eye, #emo-right-eye', { rx: 18, ry: 18, width: 60, height: 60, scaleY: 1, scaleX: 1, scale: 1, opacity: 1, fill: 'var(--theme-color)' });
-    anime.set('#emo-eyes-group', { rotate: 0, translateX: 0, translateY: 0, scale: 1 });
+    anime.set('#emo-eyes-group', { rotate: 0, translateX: 0, translateY: 0, scale: 1, opacity: 1 });
     anime.set('.emo-head-casing', { rotate: 0, translateY: 0, rotateX: 0 });
-    anime.set('#emo-mouth', { d: 'M 102,142 Q 120,154 138,142', opacity: 1 });
+    anime.set('#emo-mouth', { d: 'M 112,143 C 114,146 126,146 128,143 C 126,147 114,147 112,143 Z', opacity: 1, scale: 1 });
 
     switch (stateName) {
       case 'idle':
@@ -381,21 +450,109 @@
       case 'processing':
       case 'procesando':
         setTheme('cyan');
-        anime.set('#processing-spinner', { opacity: 0.9 });
+        // Ocultar completamente ojos, boca y elementos faciales
+        anime.set('#emo-eyes-group', { opacity: 0 });
+        anime.set('#emo-left-eye, #emo-right-eye', { opacity: 0 });
+        anime.set('#emo-mouth', { opacity: 0 });
+
+        // Mostrar HUD de aviso en pantalla PROCESANDO
+        anime.set('#processing-hud', { opacity: 1, scale: 1 });
+        document.querySelectorAll('.emo-headphone-cup').forEach(cup => cup.classList.add('glowing'));
+
+        // Entrada suave del HUD de Procesamiento
         activeAnimations.push(
           anime({
-            targets: '#processing-spinner',
-            rotate: '1turn',
+            targets: '#processing-hud',
+            scale: [0.93, 1],
+            opacity: [0, 1],
+            duration: 260 * speed,
+            easing: 'easeOutCubic'
+          })
+        );
+
+        // Pulso sutil de los bordes de la tarjeta
+        activeAnimations.push(
+          anime({
+            targets: '.proc-bg-card',
+            strokeOpacity: [0.5, 1, 0.5],
             duration: 1200 * speed,
+            direction: 'alternate',
+            loop: true,
+            easing: 'easeInOutSine'
+          })
+        );
+
+        // Rotación del icono/radar tecnológico central
+        activeAnimations.push(
+          anime({
+            targets: '#proc-icon-center',
+            rotate: '1turn',
+            duration: 2200 * speed,
             loop: true,
             easing: 'linear'
           })
         );
+
+        // Texto principal PROCESANDO: respiración y brillo rítmico
         activeAnimations.push(
           anime({
-            targets: '#emo-left-eye, #emo-right-eye',
-            rx: [18, 30, 18],
+            targets: '#proc-main-text',
+            opacity: [0.75, 1, 0.75],
+            scale: [0.98, 1.02, 0.98],
+            transformOrigin: '120px 110px',
             duration: 900 * speed,
+            loop: true,
+            easing: 'easeInOutSine'
+          })
+        );
+
+        // Puntos de actividad en ola sincronizada
+        activeAnimations.push(
+          anime({
+            targets: '.proc-dot',
+            scale: [0.6, 1.35, 0.6],
+            opacity: [0.3, 1, 0.3],
+            delay: anime.stagger(120 * speed),
+            duration: 750 * speed,
+            loop: true,
+            easing: 'easeInOutSine'
+          })
+        );
+
+        // Barra de progreso escaneando/recorriendo fluidamente
+        activeAnimations.push(
+          anime({
+            targets: '#proc-progress-fill',
+            translateX: [0, 124],
+            width: [24, 48, 24],
+            duration: 1100 * speed,
+            direction: 'alternate',
+            loop: true,
+            easing: 'easeInOutQuad'
+          })
+        );
+
+        // Punto de estado LIVE parpadeando
+        activeAnimations.push(
+          anime({
+            targets: '.proc-live-dot',
+            opacity: [0.2, 1],
+            scale: [0.8, 1.25],
+            duration: 450 * speed,
+            direction: 'alternate',
+            loop: true,
+            easing: 'easeInOutQuad'
+          })
+        );
+
+        // Leve balanceo/flotación pensante de la cabeza
+        activeAnimations.push(
+          anime({
+            targets: '.emo-head-casing',
+            translateY: [-3, 3],
+            rotate: [-1.2, 1.2],
+            duration: 1800 * speed,
+            direction: 'alternate',
             loop: true,
             easing: 'easeInOutSine'
           })
@@ -406,33 +563,22 @@
       case 'talking':
       case 'hablando':
         setTheme('cyan');
-        anime.set('#speaking-cheek-bars', { opacity: 0.85 });
-        activeAnimations.push(
-          anime({
-            targets: '.speaking-bar',
-            scaleY: () => anime.random(0.4, 1.45),
-            delay: anime.stagger(60 * speed, { from: 'center' }),
-            duration: 240 * speed,
-            loop: true,
-            direction: 'alternate',
-            easing: 'easeInOutSine'
-          })
-        );
+
+        // Animación dinámica de la boca al hablar inspirada en Eilik:
+        // Alterna fluidamente entre boca 'O' redonda (Foto 2), semióvalo sonriente relleno (Foto 1), y aperturas silábicas
         activeAnimations.push(
           anime({
             targets: '#emo-mouth',
             d: [
-              { value: 'M 98,140 Q 120,162 142,140' },
-              { value: 'M 95,142 Q 120,152 145,142' },
-              { value: 'M 102,142 Q 120,148 138,142' },
-              { value: 'M 104,140 Q 120,158 136,140' },
-              { value: 'M 96,139 Q 120,160 144,139' },
-              { value: 'M 100,142 Q 120,149 140,142' }
+              { value: 'M 114,143 C 114,136 126,136 126,143 C 126,150 114,150 114,143 Z', duration: 150 * speed }, // 'O' redonda de asombro/habla (Foto 2)
+              { value: 'M 104,137 C 112,138 128,138 136,137 C 138,154 102,154 104,137 Z', duration: 180 * speed }, // Semióvalo amplio sonrisa abierta (Foto 1)
+              { value: 'M 109,140 C 113,138 127,138 131,140 C 133,149 107,149 109,140 Z', duration: 140 * speed }, // Óvalo intermedio
+              { value: 'M 116,143 C 116,138 124,138 124,143 C 124,148 116,148 116,143 Z', duration: 130 * speed }, // Círculo pequeño
+              { value: 'M 106,138 C 112,139 128,139 134,138 C 136,151 104,151 106,138 Z', duration: 170 * speed }, // Semióvalo medio sonriente (Foto 1)
+              { value: 'M 112,143 C 115,144 125,144 128,143 C 125,145 115,145 112,143 Z', duration: 120 * speed }  // Pausa fonética suave
             ],
-            duration: 180 * speed,
-            delay: (el, i) => i * 40 * speed,
             loop: true,
-            easing: 'easeInOutQuad'
+            easing: 'easeInOutSine'
           })
         );
         activeAnimations.push(
@@ -576,16 +722,127 @@
         break;
 
       case 'warning':
+      case 'atencion':
+      case 'atención':
+      case 'aviso':
+      case 'alerta':
+      case 'alert':
       case 'confirm':
         setTheme('orange');
-        anime.set('#warning-hud', { opacity: 1 });
-        anime.set('#angry-brow-left, #angry-brow-right', { opacity: 1 });
+        // Ocultar completamente ojos, boca y elementos faciales
+        anime.set('#emo-eyes-group', { opacity: 0 });
+        anime.set('#emo-left-eye, #emo-right-eye', { opacity: 0 });
+        anime.set('#emo-mouth', { opacity: 0 });
+
+        // Mostrar HUD de aviso en pantalla ATENCIÓN
+        anime.set('#warning-hud', { opacity: 1, scale: 1 });
+        document.querySelectorAll('.emo-headphone-cup').forEach(cup => cup.classList.add('glowing'));
+
+        // Entrada suave del HUD de Advertencia
         activeAnimations.push(
           anime({
-            targets: '#emo-left-eye, #emo-right-eye',
-            scaleY: 0.65,
-            ry: 10,
-            duration: 400 * speed
+            targets: '#warning-hud',
+            scale: [0.93, 1],
+            opacity: [0, 1],
+            duration: 260 * speed,
+            easing: 'easeOutCubic'
+          })
+        );
+
+        // Pulso sutil de los bordes de la tarjeta
+        activeAnimations.push(
+          anime({
+            targets: '.warn-bg-card',
+            strokeOpacity: [0.5, 1, 0.5],
+            duration: 900 * speed,
+            direction: 'alternate',
+            loop: true,
+            easing: 'easeInOutSine'
+          })
+        );
+
+        // Pulso rítmico del triángulo de advertencia
+        activeAnimations.push(
+          anime({
+            targets: '#warn-triangle-group',
+            scale: [0.92, 1.12, 0.92],
+            duration: 750 * speed,
+            loop: true,
+            easing: 'easeInOutSine'
+          })
+        );
+
+        // Texto principal ATENCIÓN: respiración y brillo rítmico
+        activeAnimations.push(
+          anime({
+            targets: '#warn-main-text',
+            opacity: [0.75, 1, 0.75],
+            scale: [0.98, 1.02, 0.98],
+            transformOrigin: '120px 110px',
+            duration: 750 * speed,
+            loop: true,
+            easing: 'easeInOutSine'
+          })
+        );
+
+        // Chevrons laterales de alerta en pulso
+        activeAnimations.push(
+          anime({
+            targets: '.warn-chev-left',
+            translateX: [2, -3, 2],
+            opacity: [0.35, 1, 0.35],
+            duration: 650 * speed,
+            loop: true,
+            easing: 'easeInOutSine'
+          })
+        );
+        activeAnimations.push(
+          anime({
+            targets: '.warn-chev-right',
+            translateX: [-2, 3, -2],
+            opacity: [0.35, 1, 0.35],
+            duration: 650 * speed,
+            loop: true,
+            easing: 'easeInOutSine'
+          })
+        );
+
+        // Barra de progreso de alerta escaneando
+        activeAnimations.push(
+          anime({
+            targets: '#warn-progress-fill',
+            translateX: [0, 124],
+            width: [24, 48, 24],
+            duration: 950 * speed,
+            direction: 'alternate',
+            loop: true,
+            easing: 'easeInOutQuad'
+          })
+        );
+
+        // Punto de estado LIVE parpadeando rápido
+        activeAnimations.push(
+          anime({
+            targets: '.warn-live-dot',
+            opacity: [0.2, 1],
+            scale: [0.8, 1.3],
+            duration: 380 * speed,
+            direction: 'alternate',
+            loop: true,
+            easing: 'easeInOutQuad'
+          })
+        );
+
+        // Leve movimiento de alerta de la cabeza
+        activeAnimations.push(
+          anime({
+            targets: '.emo-head-casing',
+            translateY: [-2.5, 2.5],
+            rotate: [-1.2, 1.2],
+            duration: 1400 * speed,
+            direction: 'alternate',
+            loop: true,
+            easing: 'easeInOutSine'
           })
         );
         break;
@@ -614,7 +871,7 @@
         activeTimeline = anime.timeline({ loop: true, direction: 'alternate' });
         activeTimeline.add({
           targets: '#emo-mouth',
-          d: [{ value: 'M 95,138 Q 120,165 145,138' }],
+          d: [{ value: 'M 104,137 C 112,138 128,138 136,137 C 138,154 102,154 104,137 Z' }],
           duration: 400 * speed,
           easing: 'easeInOutSine'
         });
@@ -635,7 +892,7 @@
         activeAnimations.push(
           anime({
             targets: '#emo-mouth',
-            d: [{ value: 'M 102,152 Q 120,138 138,152' }],
+            d: [{ value: 'M 108,148 C 114,142 126,142 132,148 C 126,146 114,146 108,148 Z' }],
             duration: 800 * speed
           })
         );
@@ -647,6 +904,114 @@
             duration: 1500 * speed,
             loop: true,
             easing: 'easeInQuad'
+          })
+        );
+        break;
+
+      case 'sleep':
+      case 'sleeping':
+      case 'dormir':
+        setTheme('cyan');
+        anime.set('#emo-sad-tear', { opacity: 0 });
+        anime.set('#emo-left-eye, #emo-right-eye', { rx: 18, ry: 4, width: 60, height: 60, scaleY: 0.12, opacity: 0.85 });
+        anime.set('#emo-mouth', { d: 'M 114,144 C 116,146 124,146 126,144 C 124,146 116,146 114,144 Z', opacity: 0.8 });
+
+        // Letras Zzz subiendo escalonadas y desvaneciéndose
+        activeAnimations.push(
+          anime({
+            targets: '.zzz-letter',
+            translateY: [12, -26],
+            translateX: [-4, 14],
+            scale: [0.65, 1.25],
+            opacity: [0, 0.95, 0],
+            delay: anime.stagger(650 * speed),
+            duration: 2100 * speed,
+            loop: true,
+            easing: 'easeOutSine'
+          })
+        );
+
+        // Respiración suave y profunda de la cabeza
+        activeAnimations.push(
+          anime({
+            targets: '.emo-head-casing',
+            translateY: [0, 4.5, 0],
+            rotate: [-0.6, 0.6, -0.6],
+            duration: 3400 * speed,
+            loop: true,
+            easing: 'easeInOutSine'
+          })
+        );
+
+        // Leve respiración de los ojos cerrados
+        activeTimeline = anime.timeline({ loop: true, direction: 'alternate' });
+        activeTimeline.add({
+          targets: '#emo-left-eye, #emo-right-eye',
+          scaleY: [0.12, 0.05, 0.12],
+          duration: 3400 * speed,
+          easing: 'easeInOutSine'
+        });
+        break;
+
+      case 'cool':
+      case 'sunglasses':
+      case 'lentes':
+        setTheme('cyan');
+        anime.set('#emo-left-eye, #emo-right-eye', { scaleY: 0.8, opacity: 0.9 });
+        anime.set('#emo-mouth', { d: 'M 110,143 C 114,141 127,143 131,140 C 127,147 114,147 110,143 Z', opacity: 1 });
+
+        // Gafas de sol bajando deslizándose con rebote elástico
+        activeAnimations.push(
+          anime({
+            targets: '#emo-sunglasses',
+            translateY: [-70, 0],
+            opacity: [0, 1],
+            duration: 750 * speed,
+            easing: 'easeOutBack'
+          })
+        );
+
+        // Movimiento canchero / cabeceo confiado
+        activeAnimations.push(
+          anime({
+            targets: '.emo-head-casing',
+            rotate: [-3.5, 3.5, -2, 2, 0],
+            translateY: [0, -3, 0, -1.5, 0],
+            duration: 2200 * speed,
+            loop: true,
+            direction: 'alternate',
+            easing: 'easeInOutSine'
+          })
+        );
+        break;
+
+      case 'curious':
+      case 'curious_look':
+        setTheme('cyan');
+        anime.set('#emo-mouth', { d: 'M 115,143 C 115,140 125,140 125,143 C 125,146 115,146 115,143 Z', opacity: 0.9 });
+
+        // Mirada curiosa a los costados
+        activeAnimations.push(
+          anime({
+            targets: '#emo-eyes-group',
+            translateX: [0, -14, 0, 14, 0],
+            translateY: [0, -3, 0, -3, 0],
+            duration: 2800 * speed,
+            loop: true,
+            easing: 'easeInOutSine'
+          })
+        );
+
+        // Inclinación de cabeza inquisitiva
+        activeAnimations.push(
+          anime({
+            targets: '.emo-head-casing',
+            rotate: [-4.5, 4.5, 0],
+            translateY: [-2, 2, 0],
+            duration: 2800 * speed,
+            loop: true,
+            direction: 'alternate',
+            easing: 'easeInOutSine'
           })
         );
         break;
@@ -674,6 +1039,10 @@
       this.currentState = 'idle';
       this.container = null;
       this.chassis = null;
+      this.idleHeartbeat = null;
+      this.idleActionTimer = null;
+      this.isPerformingIdleAction = false;
+      this.idleSeconds = 0;
     }
 
     init(containerEl) {
@@ -745,7 +1114,92 @@
       }
     }
 
+    clearIdleTimers() {
+      if (this.idleHeartbeat) {
+        clearInterval(this.idleHeartbeat);
+        this.idleHeartbeat = null;
+      }
+      if (this.idleActionTimer) {
+        clearTimeout(this.idleActionTimer);
+        this.idleActionTimer = null;
+      }
+      this.isPerformingIdleAction = false;
+      this.idleSeconds = 0;
+    }
+
+    startIdleTracker() {
+      this.clearIdleTimers();
+      this.idleSeconds = 0;
+
+      // Monitoreo de inactividad cada segundo en estado de reposo
+      this.idleHeartbeat = setInterval(() => {
+        if (this.currentState !== 'idle' && this.currentState !== 'reposo') {
+          this.clearIdleTimers();
+          return;
+        }
+
+        if (this.isPerformingIdleAction) return;
+
+        this.idleSeconds += 1;
+
+        // A los 16 segundos de inactividad: acción ociosa espontánea (cool con gafas o mirada curiosa)
+        if (this.idleSeconds === 16) {
+          const action = Math.random() < 0.65 ? 'cool' : 'curious';
+          this.triggerTemporaryIdleAction(action, action === 'cool' ? 6500 : 4000);
+        }
+        // A los 40 segundos de inactividad: entra en modo sueño profundo Zzz
+        else if (this.idleSeconds >= 40 && !this.isPerformingIdleAction) {
+          this.triggerSleepAction();
+        }
+      }, 1000);
+    }
+
+    triggerTemporaryIdleAction(actionName, durationMs = 6000) {
+      if (this.currentState !== 'idle' && this.currentState !== 'reposo') return;
+      this.isPerformingIdleAction = true;
+
+      applyStateAnimation(actionName);
+
+      const labelEl = document.getElementById('status-label');
+      const sublabelEl = document.getElementById('status-sublabel');
+
+      if (actionName === 'cool') {
+        playRobotBeep(850, 0.12);
+        setTimeout(() => playRobotBeep(1100, 0.15), 120);
+        if (labelEl) { labelEl.textContent = 'MODO COOL'; labelEl.style.color = '#38bdf8'; }
+        if (sublabelEl) { sublabelEl.textContent = 'Gafas de sol equipadas 😎'; }
+      } else if (actionName === 'curious') {
+        playRobotBeep(920, 0.08);
+        if (labelEl) { labelEl.textContent = 'OBSERVANDO'; labelEl.style.color = '#00f0ff'; }
+        if (sublabelEl) { sublabelEl.textContent = 'Inspeccionando entorno...'; }
+      }
+
+      this.idleActionTimer = setTimeout(() => {
+        if (this.currentState === 'idle' || this.currentState === 'reposo') {
+          this.isPerformingIdleAction = false;
+          applyStateAnimation('idle');
+          const lbl = document.getElementById('status-label');
+          const sub = document.getElementById('status-sublabel');
+          if (lbl) { lbl.textContent = 'REPOSO'; lbl.style.color = 'var(--theme-color)'; }
+          if (sub) { sub.textContent = 'Vigilancia Pasiva'; }
+        }
+      }, durationMs);
+    }
+
+    triggerSleepAction() {
+      if (this.currentState !== 'idle' && this.currentState !== 'reposo') return;
+      this.isPerformingIdleAction = true;
+
+      applyStateAnimation('sleep');
+
+      const labelEl = document.getElementById('status-label');
+      const sublabelEl = document.getElementById('status-sublabel');
+      if (labelEl) { labelEl.textContent = 'EN REPOSO'; labelEl.style.color = '#38bdf8'; }
+      if (sublabelEl) { sublabelEl.textContent = 'Zzz... Modo Ahorro'; }
+    }
+
     petRobot() {
+      this.clearIdleTimers();
       playRobotBeep(800, 0.15);
       setTimeout(() => playRobotBeep(1200, 0.2), 150);
       applyStateAnimation('happy');
@@ -767,6 +1221,7 @@
 
     activateState(stateId, customMsg = '') {
       this.currentState = stateId;
+      this.clearIdleTimers();
 
       if (stateId === 'happy' || stateId === 'success') {
         playRobotBeep(800, 0.15);
@@ -779,6 +1234,11 @@
       }
 
       applyStateAnimation(stateId);
+
+      // Iniciar temporizador de reposo para acciones espontáneas
+      if (stateId === 'idle' || stateId === 'reposo') {
+        this.startIdleTracker();
+      }
     }
   }
 

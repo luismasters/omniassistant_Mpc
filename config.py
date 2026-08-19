@@ -309,12 +309,15 @@ class EstadoGlobal:
                 # La evidencia web queda asociada a la conversación del modo anterior
                 self.evidencia_web = []
 
-            # Fase P: cerrar la sesión persistida del contexto saliente.
+            # Fase P: cerrar la sesión persistida del contexto saliente y
+            # purgar su historial (rotación a MAX_SESIONES_POR_CONTEXTO).
             # (Fuera del lock anidado pero dentro de RLOCK_CONTEXTO: no
             # interfiere con turnos en curso ni con el cambio de contexto.)
             try:
-                from modulos.persistencia import cerrar_sesion, armar_context_id
-                cerrar_sesion(armar_context_id(modo_anterior))
+                from modulos.persistencia import cerrar_sesion, armar_context_id, purgar_historial
+                context_id_saliente = armar_context_id(modo_anterior)
+                cerrar_sesion(context_id_saliente)
+                purgar_historial(context_id_saliente)
             except Exception:
                 pass
 

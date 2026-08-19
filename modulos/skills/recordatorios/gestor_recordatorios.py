@@ -31,7 +31,8 @@ class Recordatorio:
         sin_hora_especifica: bool = False,
         aviso_previo_dias: int = 0,
         notificado_previo: bool = False,
-        origen: str = "ia"
+        origen: str = "ia",
+        accion: Optional[str] = None
     ):
         self.id = id_rec or f"rec_{uuid.uuid4().hex[:8]}"
         self.mensaje = mensaje
@@ -44,6 +45,10 @@ class Recordatorio:
         self.aviso_previo_dias = int(aviso_previo_dias)
         self.notificado_previo = bool(notificado_previo)
         self.origen = origen
+        # Acción opcional a ejecutar cuando el recordatorio dispara, en la
+        # sintaxis de comandos de Argus (ej. "abrir: Minecraft",
+        # "navegar: https://youtube.com/...").
+        self.accion = accion or ""
 
     def to_dict(self) -> dict:
         dt_exp = datetime.fromtimestamp(self.timestamp_expiracion)
@@ -81,6 +86,7 @@ class Recordatorio:
             "aviso_previo_dias": self.aviso_previo_dias,
             "notificado_previo": self.notificado_previo,
             "origen": self.origen,
+            "accion": self.accion,
             "tiempo_restante_str": restante_str
         }
 
@@ -97,7 +103,8 @@ class Recordatorio:
             sin_hora_especifica=data.get("sin_hora_especifica", False),
             aviso_previo_dias=data.get("aviso_previo_dias", 0),
             notificado_previo=data.get("notificado_previo", False),
-            origen=data.get("origen", "ia")
+            origen=data.get("origen", "ia"),
+            accion=data.get("accion", "")
         )
 
 
@@ -329,7 +336,8 @@ class GestorRecordatorios:
         mensaje: str,
         tiempo_str: str,
         opciones: str = "",
-        origen: str = "ia"
+        origen: str = "ia",
+        accion: str = ""
     ) -> dict:
         """Crea y programa un nuevo recordatorio."""
         ts_exp, sin_hora, es_cumple, aviso_dias = self.parsear_tiempo(tiempo_str)
@@ -356,7 +364,8 @@ class GestorRecordatorios:
             patron_recurrencia=patron,
             sin_hora_especifica=sin_hora,
             aviso_previo_dias=aviso_dias,
-            origen=origen
+            origen=origen,
+            accion=accion
         )
 
         with self._lock:
@@ -371,7 +380,8 @@ class GestorRecordatorios:
         id_rec: str,
         mensaje: Optional[str] = None,
         tiempo_str: Optional[str] = None,
-        opciones: Optional[str] = None
+        opciones: Optional[str] = None,
+        accion: Optional[str] = None
     ) -> Optional[dict]:
         """Edita un recordatorio existente."""
         with self._lock:
@@ -380,6 +390,8 @@ class GestorRecordatorios:
             rec = self.recordatorios[id_rec]
             if mensaje:
                 rec.mensaje = mensaje.strip()
+            if accion is not None:
+                rec.accion = accion.strip()
             if tiempo_str and tiempo_str.strip():
                 ts_exp, sin_hora, es_cumple, aviso_dias = self.parsear_tiempo(tiempo_str)
                 rec.timestamp_expiracion = ts_exp

@@ -198,8 +198,30 @@ class ArgusWebBridge:
                 args=(f"{prefix}{msg}",),
                 daemon=True
             ).start()
+
+            # ACCIÓN ASOCIADA: si el recordatorio lleva una acción (ej.
+            # "abrir: Minecraft", "navegar: https://..."), se ejecuta al
+            # disparar, en un hilo separado para no bloquear el scheduler.
+            accion = str(data.get("accion") or "").strip()
+            if accion:
+                threading.Thread(
+                    target=self._ejecutar_accion_recordatorio,
+                    args=(accion, data.get("mensaje", "")),
+                    daemon=True
+                ).start()
         except Exception as e:
             logger.exception(f"Error procesando disparo de recordatorio en bridge: {e}")
+
+    def _ejecutar_accion_recordatorio(self, accion: str, mensaje: str):
+        """Ejecuta la acción asociada a un recordatorio cuando dispara."""
+        try:
+            from modulos.controlador_acciones import procesar_acciones_ia
+            logger.info(f"[RECORDATORIOS] Ejecutando acción del recordatorio: '{accion}'")
+            self._ui_callback("⚙️ Sistema", f"⚡ Recordatorio '{mensaje}' → ejecutando: {accion}", "#39ff14")
+            procesar_acciones_ia(accion, "", self._ui_callback, False)
+        except Exception as e:
+            logger.exception(f"[RECORDATORIOS] Error ejecutando acción del recordatorio: {e}")
+            self._ui_callback("⚙️ Sistema", f"❌ No pude ejecutar la acción '{accion}' del recordatorio: {str(e)[:80]}", "#FF4500")
 
     def _reenviar_recordatorios_encolados(self):
         """Reenvía al frontend todas las notificaciones que llegaron
@@ -693,6 +715,23 @@ class ArgusWebBridge:
             return {"exito": True}
         except Exception as e:
             logger.exception(f"Error limpiando contexto: {e}")
+            return {"exito": False, "error": str(e)}
+
+    def abrir_enlace_externo(self, url: str) -> dict:
+        """
+        Abre un enlace en el navegador predeterminado del sistema, FUERA del
+        HUD. Evita que un click sobre un link dentro de un mensaje navegue el
+        WebView y "saque" al usuario de Argus sin forma de volver.
+        """
+        import webbrowser
+        try:
+            url = str(url or "").strip()
+            if not url.startswith(("http://", "https://", "mailto:")):
+                return {"exito": False, "error": "url_invalida"}
+            webbrowser.open(url, new=2)
+            return {"exito": True}
+        except Exception as e:
+            logger.exception(f"Error abriendo enlace externo: {e}")
             return {"exito": False, "error": str(e)}
 
     # ─── FASE P: HISTORIAL PERSISTIDO ────────────────────────────────

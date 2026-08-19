@@ -725,6 +725,19 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                     # Dividir por pipes respetando pipes literales o espacios
                     partes = [p.strip() for p in resto.split("|") if p.strip()]
                     logger.debug(f"[RECORDATORIOS] Partes parseadas: {partes}")
+
+                    # Acción opcional: una parte que empieza con "accion:" (ej.
+                    # "accion:abrir: Minecraft" → "abrir: Minecraft"). Se extrae
+                    # y remueve; el resto se procesa como tiempo/mensaje/opciones.
+                    accion = ""
+                    resto_partes = []
+                    for p in partes:
+                        if p.lower().startswith("accion:"):
+                            accion = p[len("accion:"):].strip()
+                        else:
+                            resto_partes.append(p)
+                    partes = resto_partes
+
                     p1 = partes[0] if len(partes) > 0 else "en 10 minutos"
                     p2 = partes[1] if len(partes) > 1 else "Recordatorio sin título"
                     opciones = partes[2] if len(partes) > 2 else ""
@@ -744,19 +757,26 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                         tiempo = p1
                         mensaje = p2
 
-                    logger.info(f"[RECORDATORIOS] Creando: mensaje='{mensaje}', tiempo='{tiempo}', opciones='{opciones}'")
+                    logger.info(f"[RECORDATORIOS] Creando: mensaje='{mensaje}', tiempo='{tiempo}', opciones='{opciones}', accion='{accion}'")
                     try:
-                        rec = gestor_recordatorios.crear_recordatorio(mensaje, tiempo, opciones)
+                        rec = gestor_recordatorios.crear_recordatorio(mensaje, tiempo, opciones, accion=accion)
                         logger.info(f"[RECORDATORIOS] CREADO OK: ID={rec.get('id')} exp={rec.get('expiracion_iso')}")
                         if ui_callback:
-                            ui_callback("⚙️ Sistema", f"⏰ Recordatorio programado: '{mensaje}' ({rec['expiracion_iso']})", "#39ff14")
+                            texto_conf = f"⏰ Recordatorio programado: '{mensaje}' ({rec['expiracion_iso']})"
+                            if accion:
+                                texto_conf += f" — al disparar ejecutaré: {accion}"
+                            ui_callback("⚙️ Sistema", texto_conf, "#39ff14")
                     except Exception as e:
                         logger.exception(f"[RECORDATORIOS] Error creando recordatorio: {e}")
                         if ui_callback:
                             ui_callback("⚙️ Sistema", f"❌ Error al crear recordatorio: {str(e)[:80]}", "#ff4500")
                 elif subcmd.startswith("listar"):
                     recs = gestor_recordatorios.listar_recordatorios()
-                    txt = "\n".join([f"- [{r['id']}] {r['mensaje']} ({r['expiracion_iso']})" for r in recs]) or "No hay recordatorios pendientes."
+                    txt = "\n".join([
+                        f"- [{r['id']}] {r['mensaje']} ({r['expiracion_iso']})"
+                        + (f" ⚡ {r.get('accion') or ''}" if r.get('accion') else "")
+                        for r in recs
+                    ]) or "No hay recordatorios pendientes."
                     if ui_callback:
                         ui_callback("⚙️ Sistema", f"📋 Recordatorios pendientes:\n{txt}", "#80868B")
                 elif subcmd.startswith("cancelar"):
@@ -772,7 +792,8 @@ def procesar_acciones_ia(respuesta_ia, texto_usuario, ui_callback, modo_voz):
                     nuevo_msg = partes[1] if len(partes) > 1 else None
                     nuevo_tiempo = partes[2] if len(partes) > 2 else None
                     nuevas_opc = partes[3] if len(partes) > 3 else None
-                    rec = gestor_recordatorios.editar_recordatorio(id_target, nuevo_msg, nuevo_tiempo, nuevas_opc)
+                    nueva_accion = partes[4] if len(partes) > 4 else None
+                    rec = gestor_recordatorios.editar_recordatorio(id_target, nuevo_msg, nuevo_tiempo, nuevas_opc, accion=nueva_accion)
                     if ui_callback:
                         msg_e = f"✅ Recordatorio [{id_target}] actualizado: '{rec['mensaje']}' ({rec['expiracion_iso']})" if rec else f"❌ No se encontró recordatorio: {id_target}"
                         ui_callback("⚙️ Sistema", msg_e, "#39ff14" if rec else "#ff4500")
